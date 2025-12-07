@@ -11,7 +11,6 @@ INDEX_CACHE = {}
 # --- STEP 1: Command Aaya ---
 @Client.on_message(filters.command("index") & filters.user(ADMINS))
 async def step_one_index(bot, message):
-    # User ka session shuru karo
     INDEX_CACHE[message.from_user.id] = {
         'state': 'waiting_forward',
         'chat_id': None,
@@ -25,7 +24,7 @@ async def step_one_index(bot, message):
     )
 
 # --- STEP 2: Forward Message Receive Hua ---
-# ⚠️ Dhyan Dein: Yahan 'filters.forwarded' hi hona chahiye
+# Note: 'filters.forwarded' use kiya hai jo sahi hai
 @Client.on_message(filters.forwarded & filters.user(ADMINS))
 async def step_two_forward(bot, message):
     user_id = message.from_user.id
@@ -38,7 +37,7 @@ async def step_two_forward(bot, message):
                 target_chat_id = message.forward_from_chat.id
                 last_msg_id = message.forward_from_message_id
             else:
-                return await message.reply("❌ Ye Channel ka message nahi lag raha. Kripya Channel se direct forward karein.")
+                return await message.reply("❌ Ye Channel ka message nahi lag raha. Channel se direct forward karein.")
         except:
             return await message.reply("❌ Error! Sahi se forward nahi hua.")
 
@@ -54,12 +53,13 @@ async def step_two_forward(bot, message):
             f"Agar shuru se scan karna hai to **0** bhejo."
         )
 
-# --- STEP 3: Skip Number Aaya ---
-@Client.on_message(filters.text & filters.user(ADMINS))
+# --- STEP 3: Skip Number Aaya (DEBUG MODE) ---
+# Sirf Numbers ko pakdega
+@Client.on_message(filters.regex(r"^\d+$") & filters.user(ADMINS))
 async def step_three_skip(bot, message):
     user_id = message.from_user.id
     
-    # Check agar user session mein hai
+    # SCENARIO 1: Sab Sahi Hai
     if user_id in INDEX_CACHE and INDEX_CACHE[user_id]['state'] == 'waiting_skip':
         try:
             skip = int(message.text)
@@ -85,15 +85,21 @@ async def step_three_skip(bot, message):
             f"Kya main start karu?",
             reply_markup=InlineKeyboardMarkup(buttons)
         )
+    
+    # SCENARIO 2: Bot Restart Ho Gaya Tha (Session Lost)
+    elif user_id not in INDEX_CACHE:
+        # Agar user number bhej raha hai par cache mein nahi hai, to batayein
+        # (Ye optional reply hai taaki pata chale ki bot zinda hai par bhool gaya hai)
+        # Aap chahein to ise hata sakte hain agar spam lage
+        await message.reply("⚠️ **Session Expired / Bot Restarted**\n\nBot shayad crash hokar restart hua hai. Kripya shuru se `/index` command dein.")
 
 # --- STEP 4: Start Button Click ---
 @Client.on_callback_query(filters.regex("^start_index"))
 async def start_indexing_callback(bot, query):
     user_id = query.from_user.id
     
-    # Agar bot restart ho gaya tha to session gayab ho jayega
     if user_id not in INDEX_CACHE or INDEX_CACHE[user_id]['state'] != 'ready':
-        return await query.answer("Session expired (Bot Restarted). Dobara /index command dein.", show_alert=True)
+        return await query.answer("Session expired. Dobara /index command dein.", show_alert=True)
 
     data = INDEX_CACHE[user_id]
     chat_id = data['chat_id']
@@ -144,7 +150,7 @@ async def start_indexing_callback(bot, query):
                     deleted += 1
 
             try:
-                if current_id % 200 == 0: # Thoda kam update karenge taaki floodwait na aaye
+                if current_id % 200 == 0:
                     await status_msg.edit(
                         f"⚙️ **Indexing in Progress...**\n\n"
                         f"📥 Scanned: {min(end_id, last_id)} / {last_id}\n"

@@ -8,22 +8,15 @@ class MediaDB:
         self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         
-        # Collection 1: Data (Small - Sirf IDs rakhta hai)
-        self.data_col = self.db.files_data   
-        
-        # Collection 2: Search (Big - Naam aur Details rakhta hai)
-        self.search_col = self.db.files_search 
-        
-        # Collection 3: Counters (Integer ID generate karne ke liye)
+        self.data_col = self.db.files_data   # Stores IDs
+        self.search_col = self.db.files_search # Stores Names
         self.counters = self.db.counters
 
     async def ensure_indexes(self):
-        # Search fast karne ke liye indexes
         await self.search_col.create_index("file_name")
         await self.search_col.create_index("link_id")
 
     async def get_next_sequence_value(self, sequence_name):
-        """Auto-Increment ID generator (1, 2, 3...)"""
         doc = await self.counters.find_one_and_update(
             {"_id": sequence_name},
             {"$inc": {"sequence_value": 1}},
@@ -32,11 +25,10 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
+    # ✅ STEP 1: Verify we are saving chat_id and msg_id
     async def save_file(self, media, message):
-        """File ko do collections me tod kar save karta hai"""
         try:
-            # 1. DUPLICATE CHECK
-            # Check karte hain ki kya ye wala message pehle se saved hai?
+            # Duplicate Check (Same Chat + Same Message ID)
             duplicate = await self.data_col.find_one({
                 'chat_id': message.chat.id,
                 'msg_id': message.id
@@ -44,29 +36,26 @@ class MediaDB:
             if duplicate:
                 return 'duplicate'
 
-            # 2. GENERATE ID
             unique_id = await self.get_next_sequence_value("file_id_counter")
             
-            # 3. GATHER DATA
             file_name = media.file_name
             file_size = media.file_size
+            # Caption handle
             caption = message.caption.html if message.caption else None
 
-            # 4. SAVE TO DATA COLLECTION (Small Part)
-            # Isme hum custom Integer ID use karte hain as '_id'
+            # 1. Save Location Data (For copy_message)
             await self.data_col.insert_one({
-                '_id': unique_id,             # e.g., 125
-                'msg_id': message.id,         # Real Telegram Message ID
-                'chat_id': message.chat.id    # Channel ID
+                '_id': unique_id,
+                'msg_id': message.id,       # Message ID
+                'chat_id': message.chat.id  # Channel ID
             })
 
-            # 5. SAVE TO SEARCH COLLECTION (Big Part)
-            # Isme hum 'link_id' rakhte hain jo upar wale '_id' se judta hai
+            # 2. Save Search Data
             await self.search_col.insert_one({
                 'file_name': file_name,
-                'file_size': file_size,       # Size button me dikhane ke liye
+                'file_size': file_size,
                 'caption': caption,
-                'link_id': unique_id          # Connection Link
+                'link_id': unique_id
             })
             return 'saved'
             
@@ -75,13 +64,10 @@ class MediaDB:
             return 'error'
 
     async def get_search_results(self, query):
-        """Regex use karke search karta hai"""
         try:
             regex = re.compile(query, re.IGNORECASE)
             cursor = self.search_col.find({"file_name": regex})
-            cursor.sort('$natural', -1) # Latest files pehle
-            
-            # Top 10 results return karo
+            cursor.sort('$natural', -1)
             files = await cursor.to_list(length=10)
             return files
         except Exception as e:
@@ -89,27 +75,21 @@ class MediaDB:
             return []
 
     async def get_file_details(self, link_id):
-        """Integer ID (link_id) se asli Message ID nikalta hai"""
         try:
+            # Retrieve chat_id and msg_id using link_id
             return await self.data_col.find_one({'_id': int(link_id)})
         except Exception as e:
             print(f"Get File Error: {e}")
             return None
 
-    # --- STATS FUNCTIONS (For /stats command) ---
-
-    async def get_db_size(self):
-        """Database ka total size (storage) batata hai"""
-        try:
-            stats = await self.db.command("dbstats")
-            return stats['dataSize'] 
-        except Exception as e:
-            print(f"DB Size Error: {e}")
-            return 0
-    
     async def total_files_count(self):
-        """Total kitni files saved hain"""
         return await self.data_col.count_documents({})
 
-# Database Object
+    async def get_db_size(self):
+        try:
+            stats = await self.db.command("dbstats")
+            return stats['dataSize']
+        except:
+            return 0
+
 Media = MediaDB(DATABASE_URI, DATABASE_NAME)

@@ -1,6 +1,7 @@
 import logging
 import re
 from motor.motor_asyncio import AsyncIOMotorClient
+from bson.objectid import ObjectId # <-- Ye zaruri import hai ID ke liye
 from info import DATABASE_URI
 
 class MediaDB:
@@ -13,33 +14,28 @@ class MediaDB:
         await self.col.create_index([("file_name", "text")])
         await self.col.create_index("file_id", unique=True)
 
-    # FIX: 'message' parameter add kiya hai taaki caption mil sake
     async def save_file(self, media, message=None):
         try:
             file_id = media.file_id
             file_name = media.file_name
             file_size = media.file_size
             
-            # Caption nikalne ka sahi tareeka
             caption = None
             if message and message.caption:
                 caption = message.caption.html
 
-            # Duplicate Check
             file = await self.col.find_one({'file_id': file_id})
             if file:
                 return 'duplicate'
             
-            # Save File
             await self.col.insert_one({
                 'file_id': file_id,
                 'file_name': file_name,
                 'file_size': file_size,
-                'caption': caption, # Fixed Caption
+                'caption': caption,
                 'file_type': media.mime_type
             })
             return 'saved'
-            
         except Exception as e:
             print(f"Error saving file: {e}")
             return 'error'
@@ -50,5 +46,15 @@ class MediaDB:
         cursor.sort('$natural', -1)
         files = await cursor.to_list(length=10)
         return files
+
+    # --- NAYA FUNCTION (Button Click ke liye) ---
+    async def get_file_by_id(self, _id):
+        try:
+            # Short ID se asli file data nikalo
+            file = await self.col.find_one({'_id': ObjectId(_id)})
+            return file
+        except Exception as e:
+            print(f"Get File Error: {e}")
+            return None
 
 Media = MediaDB(DATABASE_URI, "MyBotDB")

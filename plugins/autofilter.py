@@ -3,41 +3,33 @@ from pyrogram import Client, filters
 from database.ia_filterdb import Media
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Logs me print karne ke liye
 logger = logging.getLogger(__name__)
 
 def btn_parser(files):
     buttons = []
     for file in files:
         f_name = file['file_name']
-        f_size = file['file_size'] # Size convert karna ho to utils use karein
-        f_id = file['file_id']
         
-        # Button: [File Name]
-        buttons.append([InlineKeyboardButton(text=f"📂 {f_name}", callback_data=f"sendfile#{f_id}")])
+        # ✅ FIX: File ID ki jagah Database ID (_id) use karein jo chhota hota hai
+        db_id = str(file['_id']) 
+        
+        # Button callback ab chhota hoga (e.g., sendfile#64d123...)
+        buttons.append([InlineKeyboardButton(text=f"📂 {f_name}", callback_data=f"sendfile#{db_id}")])
     return buttons
 
 @Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index"]))
 async def auto_filter(client, message):
     
     query = message.text
-    # Agar message chhota hai to ignore karo
-    if len(query) < 2:
-        return
-
-    print(f"DEBUG: Searching for '{query}' from user {message.from_user.id}")
+    if len(query) < 2: return
 
     try:
-        # Database Search
         files = await Media.get_search_results(query)
         
         if not files:
-            # DEBUG: Agar file nahi mili to user ko batao
-            # (Baad me aap is line ko hata sakte hain taaki group me shor na ho)
-            await message.reply_text(f"❌ **No results found for:** `{query}`\n\nCheck spelling or try another keyword.")
+            await message.reply_text(f"❌ **No results found for:** `{query}`")
             return
 
-        # Buttons banao
         buttons = btn_parser(files)
         
         await message.reply_text(
@@ -47,21 +39,30 @@ async def auto_filter(client, message):
         
     except Exception as e:
         print(f"Search Error: {e}")
-        await message.reply_text(f"❌ Error: {e}")
 
 # --- Callback Handler (File Bhejne ke liye) ---
 @Client.on_callback_query(filters.regex(r"^sendfile#"))
 async def send_file_handler(client, callback_query):
     try:
-        file_id = callback_query.data.split("#")[1]
+        # 1. Button se Short ID nikalo
+        _id = callback_query.data.split("#")[1]
         
-        # File bhejo
+        # 2. Database se Asli File ID maango
+        file_info = await Media.get_file_by_id(_id)
+        
+        if not file_info:
+            return await callback_query.answer("File nahi mili (Deleted?)", show_alert=True)
+            
+        file_id = file_info['file_id']
+        caption = file_info.get('caption', "🤖 **File Sent by AutoFilter Bot**")
+
+        # 3. File Bhejo
         await callback_query.message.reply_document(
             document=file_id,
-            caption="🤖 **File Sent by AutoFilter Bot**"
+            caption=caption
         )
         await callback_query.answer()
         
     except Exception as e:
         print(f"Send File Error: {e}")
-        await callback_query.answer("❌ File bhejne me error aaya.", show_alert=True)
+        await callback_query.answer("❌ Error sending file.", show_alert=True)

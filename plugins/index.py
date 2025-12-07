@@ -34,7 +34,7 @@ async def step_two_forward(bot, message):
                 INDEX_CACHE[user_id]['chat_id'] = message.forward_from_chat.id
                 INDEX_CACHE[user_id]['last_msg_id'] = message.forward_from_message_id
                 INDEX_CACHE[user_id]['state'] = 'waiting_skip'
-                await message.reply_text(f"✅ **Detected!**\nLast ID: `{message.forward_from_message_id}`\n\n**🆔 Step 2:** Ab **Skip Number** (e.g., 235) bhejein.")
+                await message.reply_text(f"✅ **Detected!**\nLast ID: `{message.forward_from_message_id}`\n\n**🆔 Step 2:** Ab **Skip Number** (jitni files skip karni hain) likh kar bhejein.\nExample: 200, 500, etc.")
             else:
                 await message.reply("❌ Ye Channel ka message nahi hai. Direct Channel se forward karein.")
         except Exception as e:
@@ -47,12 +47,14 @@ async def step_three_skip(bot, message):
     if user_id not in INDEX_CACHE: return
     
     if INDEX_CACHE[user_id]['state'] == 'waiting_skip':
+        # Yahan aapka diya hua number (200, 500, etc.) save ho jayega
         skip = int(message.text)
         INDEX_CACHE[user_id]['skip'] = skip
         INDEX_CACHE[user_id]['state'] = 'ready'
         
         data = INDEX_CACHE[user_id]
-        total = data['last_msg_id'] - skip
+        # Total me se skip number minus karke dikhayega ki aur kitni scan karni hain
+        files_to_scan = data['last_msg_id'] - skip
         
         buttons = [[
             InlineKeyboardButton("🚀 Start Indexing", callback_data="start_index"),
@@ -60,11 +62,14 @@ async def step_three_skip(bot, message):
         ]]
         
         await message.reply_text(
-            f"📊 **Ready to Index**\nTotal Range: {total}\nSkip Previous: {skip}\n\nStart karu?",
+            f"📊 **Ready to Index**\n\n"
+            f"🔢 Total Range to Scan: `{files_to_scan}` messages\n"
+            f"⏭ Skipping First: `{skip}` messages\n\n"
+            f"Kya main start karu?",
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
-# --- STEP 4: Start Indexing (Smart Counter Logic) ---
+# --- STEP 4: Start Indexing ---
 @Client.on_callback_query(filters.regex("^start_index"))
 async def start_index(bot, query):
     user_id = query.from_user.id
@@ -82,12 +87,14 @@ async def start_index(bot, query):
     chat_id = data['chat_id']
     last_id = data['last_msg_id']
     skip = data['skip']
+    
+    # Logic: Indexing wahan se shuru hogi jahan aapne skip kiya
     current = skip + 1
     
-    # ✅ CHANGE: Saved count ko 'skip' se shuru karo
+    # Stats: Saved count aapke skip number se shuru hoga
     stats = {
-        'saved': skip,  # Agar 235 skip kiya, to count 235 se shuru hoga
-        'new_saved': 0, # Ye batayega ki abhi kitni nayi save hui
+        'saved': skip,  
+        'new_saved': 0, 
         'dup': 0, 
         'err': 0
     }
@@ -116,7 +123,6 @@ async def start_index(bot, query):
                         stats['saved'] += 1
                         stats['new_saved'] += 1
                     elif res == 'duplicate': 
-                        # Duplicate hai matlab ye bhi saved hi hai, bas dobara save nahi kiya
                         stats['saved'] += 1 
                         stats['dup'] += 1
                     else: 
@@ -125,10 +131,10 @@ async def start_index(bot, query):
             try: 
                 await query.message.edit(
                     f"⚙️ **Running...**\n"
-                    f"📥 Total Scanned: {min(end, last_id)} / {last_id}\n"
+                    f"📥 Scanned: {min(end, last_id)} / {last_id}\n"
                     f"✅ **Total Saved: {stats['saved']}**\n"
                     f"🆕 Newly Added: {stats['new_saved']}\n"
-                    f"♻️ Duplicates Found: {stats['dup']}",
+                    f"♻️ Duplicates: {stats['dup']}",
                     reply_markup=cancel_btn
                 )
             except: pass

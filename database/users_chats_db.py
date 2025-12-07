@@ -7,6 +7,8 @@ class UserChatDB:
         self.db = self._client[database_name]
         self.users = self.db.users
         self.groups = self.db.groups
+        # Collection for banned users/chats
+        self.banned = self.db.banned 
 
     async def add_user(self, id):
         """User ko database me add karta hai"""
@@ -27,6 +29,28 @@ class UserChatDB:
     async def total_groups_count(self):
         """Total Groups ginta hai"""
         return await self.groups.count_documents({})
+
+    # --- MISSING FUNCTIONS ADDED BELOW ---
+
+    async def get_banned(self):
+        """Banned users aur chats ki list return karta hai"""
+        users = []
+        chats = []
+        async for banned_user in self.banned.find({"type": "user"}):
+            users.append(banned_user["id"])
+        async for banned_chat in self.banned.find({"type": "chat"}):
+            chats.append(banned_chat["id"])
+        return users, chats
+
+    async def add_ban(self, id, type="user"):
+        """User ya Chat ko ban karta hai"""
+        is_exist = await self.banned.find_one({"id": int(id), "type": type})
+        if not is_exist:
+            await self.banned.insert_one({"id": int(id), "type": type})
+
+    async def remove_ban(self, id, type="user"):
+        """User ya Chat ko unban karta hai"""
+        await self.banned.delete_one({"id": int(id), "type": type})
 
 # Database Object
 db = UserChatDB(DATABASE_URI, DATABASE_NAME)

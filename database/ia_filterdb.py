@@ -29,12 +29,12 @@ class MediaDB:
             file_name = media.file_name
             file_size = media.file_size
             
-            # Check duplicate by unique ID or File ID
+            # 1. Check Duplicate (Pehle se hai ya nahi)
             file = await self.col.find_one({'file_id': file_id})
             if file:
                 return 'duplicate'
             
-            # Nayi file save karein
+            # 2. Nayi file Save karo
             await self.col.insert_one({
                 'file_id': file_id,
                 'file_name': file_name,

@@ -3,7 +3,7 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 
-# Size converter function
+# Size converter
 def get_size(size):
     if not size: return ""
     power = 2**10
@@ -14,7 +14,8 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-@Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "delete_all", "fix_index"]))
+# ✅ FIX: Yahan list me "stats" add kiya hai taaki bot use search na samjhe
+@Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index"]))
 async def auto_filter(client, message):
     query = message.text
     if len(query) < 2: return
@@ -43,8 +44,6 @@ def btn_parser(files):
         link_id = file.get('link_id')
         f_size = file.get('file_size', 0)
         
-        # ✅ Button Text ab Size bhi dikhayega
-        # Example: Khakee.mkv [1.2 GB]
         size_str = get_size(f_size)
         btn_text = f"📂 {f_name} [{size_str}]"
         

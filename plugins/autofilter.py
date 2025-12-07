@@ -10,10 +10,9 @@ def btn_parser(files):
     for file in files:
         f_name = file['file_name']
         
-        # ✅ FIX: Use the short Database ID (_id) instead of long file_id
+        # ✅ FIX 1: Use Short Database ID (_id) to fix BUTTON_DATA_INVALID
         db_id = str(file['_id']) 
         
-        # Now the data is short (e.g., sendfile#64d123...) and fits in the limit
         buttons.append([InlineKeyboardButton(text=f"📂 {f_name}", callback_data=f"sendfile#{db_id}")])
     return buttons
 
@@ -40,28 +39,36 @@ async def auto_filter(client, message):
     except Exception as e:
         print(f"Search Error: {e}")
 
-# --- Callback Handler (Updated for Short ID) ---
+# --- Callback Handler (Robust Version) ---
 @Client.on_callback_query(filters.regex(r"^sendfile#"))
 async def send_file_handler(client, callback_query):
     try:
-        # 1. Get the Short ID from button
         _id = callback_query.data.split("#")[1]
         
-        # 2. Ask Database for the full file info using Short ID
+        # 1. Get File Info
         file_info = await Media.get_file_by_id(_id)
         
         if not file_info:
-            return await callback_query.answer("❌ File Database me nahi mili.", show_alert=True)
+            return await callback_query.answer("❌ File not found in DB.", show_alert=True)
             
         file_id = file_info['file_id']
-        # Use saved caption, or default if none
         caption = file_info.get('caption', "🤖 **File Sent by AutoFilter Bot**")
 
-        # 3. Send the file
-        await callback_query.message.reply_document(
-            document=file_id,
-            caption=caption
-        )
+        # ✅ FIX 2: Use 'reply_cached_media' 
+        # This automatically handles both Videos and Documents, fixing the "Expected DOCUMENT" error.
+        try:
+            await callback_query.message.reply_cached_media(
+                file_id=file_id,
+                caption=caption
+            )
+        except Exception as e:
+            # Fallback if cached media fails (rare)
+            print(f"Cached Media Failed: {e}")
+            await callback_query.message.reply_document(
+                document=file_id,
+                caption=caption
+            )
+            
         await callback_query.answer()
         
     except Exception as e:

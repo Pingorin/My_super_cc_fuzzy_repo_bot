@@ -1,8 +1,8 @@
 import logging
 import re
 from motor.motor_asyncio import AsyncIOMotorClient
-# 👇 Ye line sabse zaruri hai
-from bson.objectid import ObjectId 
+# 👇 THIS IMPORT IS CRITICAL
+from bson.objectid import ObjectId
 from info import DATABASE_URI
 
 class MediaDB:
@@ -48,7 +48,7 @@ class MediaDB:
         files = await cursor.to_list(length=10)
         return files
 
-    # 👇 Ye naya function add hona chahiye
+    # 👇 NEW FUNCTION TO FETCH FILE BY SHORT ID
     async def get_file_by_id(self, _id):
         try:
             return await self.col.find_one({'_id': ObjectId(_id)})

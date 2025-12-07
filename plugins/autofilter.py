@@ -3,7 +3,6 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 
-# --- Utility: File Size Converter ---
 def get_size(size):
     if not size: return ""
     power = 2**10
@@ -14,7 +13,6 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-# --- Main Auto Filter Logic ---
 @Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index"]))
 async def auto_filter(client, message):
     query = message.text
@@ -27,24 +25,20 @@ async def auto_filter(client, message):
             return
 
         buttons = btn_parser(files)
-        
         await message.reply_text(
             f"✅ **Found {len(files)} results for** `{query}`:",
             reply_markup=InlineKeyboardMarkup(buttons)
         )
-        
     except Exception as e:
         print(f"Search Error: {e}")
         await message.reply_text(f"❌ Error: {e}")
 
-# --- Button Parser ---
 def btn_parser(files):
     buttons = []
     for file in files:
         f_name = file['file_name']
         link_id = file.get('link_id')
         f_size = file.get('file_size', 0)
-        
         size_str = get_size(f_size)
         btn_text = f"📂 {f_name} [{size_str}]"
         
@@ -52,32 +46,31 @@ def btn_parser(files):
             buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"get_{link_id}")])
     return buttons
 
-# --- Callback Handler (File Sending) ---
+# ✅ STEP 2 & 3: Using copy_message
 @Client.on_callback_query(filters.regex(r"^get_"))
 async def get_file_handler(client, callback_query):
     try:
         link_id = int(callback_query.data.split("_")[1])
         
-        # Database se Message ID aur Chat ID nikalo
+        # 1. Fetch file location from DB
         file_data = await Media.get_file_details(link_id)
         
         if not file_data:
-            return await callback_query.answer("❌ File delete ho gayi hai.", show_alert=True)
+            return await callback_query.answer("❌ File not found in DB (Re-index required).", show_alert=True)
             
         msg_id = file_data['msg_id']
-        chat_id = file_data['chat_id']
+        chat_id = file_data['chat_id'] # This is the Channel ID
 
-        # ✅ FIX: Yahan se 'caption' parameter hata diya hai.
-        # Ab ye Channel wala ORIGINAL caption copy karega.
+        # 2. Use copy_message instead of send_document
         await client.copy_message(
-            chat_id=callback_query.message.chat.id,
-            from_chat_id=chat_id,
-            message_id=msg_id
-            # caption=...  <-- Ye line hata di, taaki original caption aaye
+            chat_id=callback_query.message.chat.id, # Bhejna kahan hai (User ko)
+            from_chat_id=chat_id,                   # Uthana kahan se hai (Channel se)
+            message_id=msg_id                       # Kaunsa message
         )
         
         await callback_query.answer()
         
     except Exception as e:
         print(f"File Send Error: {e}")
-        await callback_query.answer(f"❌ Error: {e}", show_alert=True)
+        # Agar bot admin nahi hai ya channel access nahi kar pa raha
+        await callback_query.answer(f"❌ Error: Bot Channel access nahi kar pa raha. Make sure Bot is Admin in Channel.", show_alert=True)

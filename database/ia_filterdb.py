@@ -1,7 +1,8 @@
 import logging
 import re
 from motor.motor_asyncio import AsyncIOMotorClient
-from bson.objectid import ObjectId # <-- Ye zaruri import hai ID ke liye
+# 👇 Ye line sabse zaruri hai
+from bson.objectid import ObjectId 
 from info import DATABASE_URI
 
 class MediaDB:
@@ -47,12 +48,10 @@ class MediaDB:
         files = await cursor.to_list(length=10)
         return files
 
-    # --- NAYA FUNCTION (Button Click ke liye) ---
+    # 👇 Ye naya function add hona chahiye
     async def get_file_by_id(self, _id):
         try:
-            # Short ID se asli file data nikalo
-            file = await self.col.find_one({'_id': ObjectId(_id)})
-            return file
+            return await self.col.find_one({'_id': ObjectId(_id)})
         except Exception as e:
             print(f"Get File Error: {e}")
             return None

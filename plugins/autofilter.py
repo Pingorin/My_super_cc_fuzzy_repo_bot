@@ -3,7 +3,7 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 
-# --- Utility: File Size Converter ---
+# Size converter
 def get_size(size):
     if not size: return ""
     power = 2**10
@@ -14,7 +14,7 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-# --- Main Auto Filter Logic ---
+# ✅ FIX: Yahan list me "stats" add kiya hai taaki bot use search na samjhe
 @Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index"]))
 async def auto_filter(client, message):
     query = message.text
@@ -37,7 +37,6 @@ async def auto_filter(client, message):
         print(f"Search Error: {e}")
         await message.reply_text(f"❌ Error: {e}")
 
-# --- Button Parser ---
 def btn_parser(files):
     buttons = []
     for file in files:
@@ -52,13 +51,10 @@ def btn_parser(files):
             buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"get_{link_id}")])
     return buttons
 
-# --- Callback Handler (File Sending) ---
 @Client.on_callback_query(filters.regex(r"^get_"))
 async def get_file_handler(client, callback_query):
     try:
         link_id = int(callback_query.data.split("_")[1])
-        
-        # Database se Message ID aur Chat ID nikalo
         file_data = await Media.get_file_details(link_id)
         
         if not file_data:
@@ -67,15 +63,12 @@ async def get_file_handler(client, callback_query):
         msg_id = file_data['msg_id']
         chat_id = file_data['chat_id']
 
-        # ✅ FIX: Yahan se 'caption' parameter hata diya hai.
-        # Ab ye Channel wala ORIGINAL caption copy karega.
         await client.copy_message(
             chat_id=callback_query.message.chat.id,
             from_chat_id=chat_id,
-            message_id=msg_id
-            # caption=...  <-- Ye line hata di, taaki original caption aaye
+            message_id=msg_id,
+            caption=f"📂 **File Delivered!**\n\n🤖 Powered by AutoFilter"
         )
-        
         await callback_query.answer()
         
     except Exception as e:

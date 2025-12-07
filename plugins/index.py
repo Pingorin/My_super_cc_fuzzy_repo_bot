@@ -11,6 +11,7 @@ INDEX_CACHE = {}
 # --- STEP 1: Command Aaya ---
 @Client.on_message(filters.command("index") & filters.user(ADMINS))
 async def step_one_index(bot, message):
+    # User ka session shuru karo
     INDEX_CACHE[message.from_user.id] = {
         'state': 'waiting_forward',
         'chat_id': None,
@@ -24,11 +25,12 @@ async def step_one_index(bot, message):
     )
 
 # --- STEP 2: Forward Message Receive Hua ---
-# ⚠️ FIXED LINE: filters.forwarded use kiya hai
+# ⚠️ Dhyan Dein: Yahan 'filters.forwarded' hi hona chahiye
 @Client.on_message(filters.forwarded & filters.user(ADMINS))
 async def step_two_forward(bot, message):
     user_id = message.from_user.id
     
+    # Check agar user session mein hai
     if user_id in INDEX_CACHE and INDEX_CACHE[user_id]['state'] == 'waiting_forward':
         
         try:
@@ -57,6 +59,7 @@ async def step_two_forward(bot, message):
 async def step_three_skip(bot, message):
     user_id = message.from_user.id
     
+    # Check agar user session mein hai
     if user_id in INDEX_CACHE and INDEX_CACHE[user_id]['state'] == 'waiting_skip':
         try:
             skip = int(message.text)
@@ -83,13 +86,14 @@ async def step_three_skip(bot, message):
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
-# --- STEP 4: Start Button Click (Main Logic) ---
+# --- STEP 4: Start Button Click ---
 @Client.on_callback_query(filters.regex("^start_index"))
 async def start_indexing_callback(bot, query):
     user_id = query.from_user.id
     
+    # Agar bot restart ho gaya tha to session gayab ho jayega
     if user_id not in INDEX_CACHE or INDEX_CACHE[user_id]['state'] != 'ready':
-        return await query.answer("Session expired. Dobara /index karein.", show_alert=True)
+        return await query.answer("Session expired (Bot Restarted). Dobara /index command dein.", show_alert=True)
 
     data = INDEX_CACHE[user_id]
     chat_id = data['chat_id']
@@ -106,8 +110,6 @@ async def start_indexing_callback(bot, query):
     deleted = 0
     
     status_msg = query.message
-    
-    # --- BATCH PROCESSING ---
     current_id = skip + 1
     
     try:
@@ -142,16 +144,14 @@ async def start_indexing_callback(bot, query):
                     deleted += 1
 
             try:
-                await status_msg.edit(
-                    f"⚙️ **Indexing in Progress...**\n\n"
-                    f"📥 Scanned: {min(end_id, last_id)} / {last_id}\n"
-                    f"✅ Saved: {total_files}\n"
-                    f"♻️ Duplicates: {duplicate}\n"
-                    f"🗑️ Skipped/Deleted: {deleted}\n"
-                    f"⚠️ Errors: {errors}"
-                )
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
+                if current_id % 200 == 0: # Thoda kam update karenge taaki floodwait na aaye
+                    await status_msg.edit(
+                        f"⚙️ **Indexing in Progress...**\n\n"
+                        f"📥 Scanned: {min(end_id, last_id)} / {last_id}\n"
+                        f"✅ Saved: {total_files}\n"
+                        f"♻️ Duplicates: {duplicate}\n"
+                        f"🗑️ Skipped: {deleted}\n"
+                    )
             except:
                 pass
             

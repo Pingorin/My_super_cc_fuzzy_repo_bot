@@ -5,13 +5,13 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from info import ADMINS
 
-# Temporary Storage for Steps (RAM me data rakhega)
+# Temporary Memory (RAM) me user ka data rakhne ke liye
 INDEX_CACHE = {}
 
 # --- STEP 1: Command Aaya ---
 @Client.on_message(filters.command("index") & filters.user(ADMINS))
 async def step_one_index(bot, message):
-    # User ko cache me daal do ki wo abhi indexing process me hai
+    # User ko 'waiting' state me daal do
     INDEX_CACHE[message.from_user.id] = {
         'state': 'waiting_forward',
         'chat_id': None,
@@ -19,10 +19,12 @@ async def step_one_index(bot, message):
         'skip': 0
     }
     await message.reply_text(
-        "**🆔 Step 1:**\n\nApne Movie Channel se **Last Message** (sabse niche wala) yahan **Forward** karo.\n\nIsse mujhe pata chalega ki kahan tak scan karna hai."
+        "**🆔 Step 1: Forward Last Message**\n\n"
+        "Apne Movie Channel me jayiye, **Sabse Niche wala (Last)** message select kijiye aur yahan **Forward** kijiye.\n\n"
+        "_(Isse mujhe pata chalega ki total kitni files hain)_"
     )
 
-# --- STEP 2: Forward Message Aaya ---
+# --- STEP 2: Forward Message Receive Hua ---
 @Client.on_message(filters.forward & filters.user(ADMINS))
 async def step_two_forward(bot, message):
     user_id = message.from_user.id
@@ -30,23 +32,30 @@ async def step_two_forward(bot, message):
     # Check agar user ne /index command diya tha
     if user_id in INDEX_CACHE and INDEX_CACHE[user_id]['state'] == 'waiting_forward':
         
-        # Data extract karo
         try:
-            target_chat_id = message.forward_from_chat.id
-            last_msg_id = message.forward_from_message_id
+            # Agar message channel se forward hua hai
+            if message.forward_from_chat:
+                target_chat_id = message.forward_from_chat.id
+                last_msg_id = message.forward_from_message_id
+            else:
+                return await message.reply("❌ Ye Channel ka message nahi lag raha. Channel se direct forward karein.")
         except:
-            return await message.reply("❌ Sahi se forward nahi hua. Channel se direct forward karein.")
+            return await message.reply("❌ Error! Sahi se forward nahi hua.")
 
-        # Cache update
+        # Data store karo aur next step par jao
         INDEX_CACHE[user_id]['chat_id'] = target_chat_id
         INDEX_CACHE[user_id]['last_msg_id'] = last_msg_id
         INDEX_CACHE[user_id]['state'] = 'waiting_skip'
 
         await message.reply_text(
-            f"✅ Channel Detected: `{target_chat_id}`\n📄 Last Message ID: `{last_msg_id}`\n\n**🆔 Step 2:**\nAb **Skip Number** bhejo.\n(Agar shuru se scan karna hai to `0` bhejo)."
+            f"✅ **Channel Detected:** `{target_chat_id}`\n"
+            f"📄 **Last Message ID:** `{last_msg_id}`\n\n"
+            f"**🆔 Step 2: Set Skip Number**\n"
+            f"Agar shuru ke kuch messages chhodne hain to number bhejo.\n"
+            f"Agar shuru se scan karna hai to **0** bhejo."
         )
 
-# --- STEP 3: Number (Skip) Aaya ---
+# --- STEP 3: Skip Number Aaya ---
 @Client.on_message(filters.text & filters.user(ADMINS))
 async def step_three_skip(bot, message):
     user_id = message.from_user.id
@@ -58,29 +67,29 @@ async def step_three_skip(bot, message):
         except:
             return await message.reply("❌ Kripya sirf number bhejein (Example: 0).")
 
-        # Data save
+        # Final Data Store
         INDEX_CACHE[user_id]['skip'] = skip
         INDEX_CACHE[user_id]['state'] = 'ready'
         
         data = INDEX_CACHE[user_id]
         total_approx = data['last_msg_id'] - skip
 
-        # Buttons Dikhana
+        # Buttons Confirmation
         buttons = [[
-            InlineKeyboardButton(f"🚀 Start Indexing ({total_approx} Files)", callback_data="start_index"),
+            InlineKeyboardButton(f"🚀 Start Indexing ({total_approx} Msgs)", callback_data="start_index"),
             InlineKeyboardButton("❌ Cancel", callback_data="cancel_index")
         ]]
         
         await message.reply_text(
             f"📊 **Indexing Summary**\n\n"
             f"📢 Channel ID: `{data['chat_id']}`\n"
-            f"🔢 Total Messages to Scan: `{total_approx}`\n"
-            f"⏭ Skip First: `{skip}` messages\n\n"
+            f"🔢 Total Range: `{skip}` se `{data['last_msg_id']}` tak\n"
+            f"📂 Total Messages to Check: `{total_approx}`\n\n"
             f"Kya main start karu?",
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
-# --- STEP 4: Start Button Click Hua ---
+# --- STEP 4: Start Button Click (Main Logic) ---
 @Client.on_callback_query(filters.regex("^start_index"))
 async def start_indexing_callback(bot, query):
     user_id = query.from_user.id
@@ -88,55 +97,57 @@ async def start_indexing_callback(bot, query):
     if user_id not in INDEX_CACHE or INDEX_CACHE[user_id]['state'] != 'ready':
         return await query.answer("Session expired. Dobara /index karein.", show_alert=True)
 
+    # Data nikalo
     data = INDEX_CACHE[user_id]
     chat_id = data['chat_id']
     last_id = data['last_msg_id']
     skip = data['skip']
     
-    # Cache clear kar do
+    # Cache clear
     del INDEX_CACHE[user_id]
     
-    await query.message.edit_text("⏳ **Initializing...** Connection check kar raha hu...")
+    await query.message.edit_text("⏳ **Initializing...** Database connect kar raha hu...")
     
-    # Indexing Logic Starts
+    # Counters
     total_files = 0
     duplicate = 0
     errors = 0
     deleted = 0
     
-    # Status Message
     status_msg = query.message
     
-    # Loop Logic (Batch Processing for Speed)
-    # Hum 200-200 messages ka batch uthayenge
+    # --- BATCH PROCESSING (Fast Speed) ---
+    # Hum ek saath 200 messages uthayenge
     current_id = skip + 1
     
     try:
         while current_id <= last_id:
-            # Batch calculate karo
+            # Batch calculate (e.g., ID 1 se 200, fir 201 se 400)
             end_id = min(current_id + 200, last_id + 1)
             ids_to_fetch = list(range(current_id, end_id))
             
             try:
-                # Get Messages (Ye 'Blind Bot' issue solve karta hai)
+                # Direct ID se message uthana (Ye 'Blind Bot' issue solve karega)
                 messages = await bot.get_messages(chat_id, ids_to_fetch)
             except FloodWait as e:
-                await asyncio.sleep(e.value)
+                await asyncio.sleep(e.value) # Telegram ne roka to wait karo
                 continue
             except Exception as e:
-                await status_msg.edit(f"❌ Critical Error: `{e}`")
+                # Agar critical error aaye
+                await status_msg.edit(f"❌ Error fetching messages: `{e}`")
                 return
 
+            # Messages Process Karna
             for message in messages:
-                # Agar message deleted hai (None)
+                # Agar message delete ho chuka hai (None)
                 if message is None or message.empty:
                     deleted += 1
                     continue
                 
-                # Media Check
+                # Check Media Type
                 media = message.document or message.video or message.audio
                 if media:
-                    # Database Save Call
+                    # Database me save karo
                     res = await Media.save_file(media)
                     if res == 'saved':
                         total_files += 1
@@ -145,14 +156,14 @@ async def start_indexing_callback(bot, query):
                     elif res == 'error':
                         errors += 1
                 else:
-                    # Text message wagera
+                    # Text ya Photo hai to skip
                     deleted += 1
 
-            # Har 200 messages ke baad status update
+            # Har 200 messages ke baad Update Message
             try:
                 await status_msg.edit(
                     f"⚙️ **Indexing in Progress...**\n\n"
-                    f"📥 Fetched: {current_id} / {last_id}\n"
+                    f"📥 Scanned: {min(end_id, last_id)} / {last_id}\n"
                     f"✅ Saved: {total_files}\n"
                     f"♻️ Duplicates: {duplicate}\n"
                     f"🗑️ Skipped/Deleted: {deleted}\n"
@@ -163,17 +174,18 @@ async def start_indexing_callback(bot, query):
             except:
                 pass
             
-            # Next Batch
+            # Next Batch ke liye aage badho
             current_id += 200
 
     except Exception as e:
-        await status_msg.reply(f"❌ Indexing Stopped due to error: {e}")
+        await status_msg.reply(f"❌ Indexing Stopped: {e}")
 
+    # Final Report
     await status_msg.edit(
         f"✅ **Indexing Completed Successfully!**\n\n"
-        f"📂 Total Saved: **{total_files}**\n"
-        f"♻️ Duplicates Skipped: **{duplicate}**\n"
-        f"🗑️ Other Messages: **{deleted}**\n"
+        f"📂 Total Files Saved: **{total_files}**\n"
+        f"♻️ Duplicates Ignored: **{duplicate}**\n"
+        f"🗑️ Skipped Messages: **{deleted}**\n"
         f"⚠️ Errors: **{errors}**"
     )
 

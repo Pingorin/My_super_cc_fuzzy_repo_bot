@@ -5,13 +5,12 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from info import ADMINS
 
-# Global Variable for Memory
+# Global Variable
 INDEX_CACHE = {}
 
-# --- STEP 1: Command Handler ---
-@Client.on_message(filters.command("index") & filters.user(ADMINS))
+# --- STEP 1: Command Handler (Group -1: High Priority) ---
+@Client.on_message(filters.command("index") & filters.user(ADMINS), group=-1)
 async def step_one_index(bot, message):
-    print(f"DEBUG: /index command received from {message.from_user.id}")
     INDEX_CACHE[message.from_user.id] = {
         'state': 'waiting_forward',
         'chat_id': None,
@@ -23,11 +22,10 @@ async def step_one_index(bot, message):
         "Apne Movie Channel se **Last Message** forward kijiye."
     )
 
-# --- STEP 2: Forward Handler ---
-@Client.on_message(filters.forwarded & filters.user(ADMINS))
+# --- STEP 2: Forward Handler (Group -1) ---
+@Client.on_message(filters.forwarded & filters.user(ADMINS), group=-1)
 async def step_two_forward(bot, message):
     user_id = message.from_user.id
-    print(f"DEBUG: Forward received from {user_id}")
     
     if user_id in INDEX_CACHE and INDEX_CACHE[user_id]['state'] == 'waiting_forward':
         try:
@@ -49,21 +47,18 @@ async def step_two_forward(bot, message):
             f"**🆔 Step 2:** Ab **Skip Number** (e.g., 0) likh kar bhejein."
         )
 
-# --- STEP 3: Skip Number Handler (SUPER DEBUG) ---
-@Client.on_message(filters.text & filters.user(ADMINS))
+# --- STEP 3: Skip Number Handler (Group -1) ---
+# Ye sabse zaruri hai taaki Autofilter isse interfere na kare
+@Client.on_message(filters.text & filters.user(ADMINS), group=-1)
 async def step_three_skip(bot, message):
     user_id = message.from_user.id
     text = message.text
-    print(f"DEBUG: Text received from {user_id}: {text}")
 
-    # Agar user ka koi session hi nahi hai (Bot Restarted)
+    # Agar user session mein hai hi nahi, to ignore karo (Autofilter sambhal lega)
     if user_id not in INDEX_CACHE:
-        # Sirf numbers par reply karein taaki normal chat disturb na ho
-        if text.isdigit():
-            await message.reply("⚠️ **Session Expired!**\n\nBot restart hone ki wajah se memory saaf ho gayi hai.\nKripya dobara `/index` command dein.")
         return
 
-    # Agar session hai, check karein ki wo kis state mein hai
+    # Agar session hai, to process karo
     state = INDEX_CACHE[user_id]['state']
     
     if state == 'waiting_skip':
@@ -93,10 +88,9 @@ async def start_indexing_callback(bot, query):
     user_id = query.from_user.id
     
     if user_id not in INDEX_CACHE:
-        return await query.answer("Bot Restarted. Dobara /index karein.", show_alert=True)
+        return await query.answer("Session expired. Dobara /index karein.", show_alert=True)
 
     data = INDEX_CACHE[user_id]
-    # Cache clear kar rahe hain taaki memory free ho
     del INDEX_CACHE[user_id]
     
     chat_id = data['chat_id']
@@ -105,11 +99,9 @@ async def start_indexing_callback(bot, query):
     
     await query.message.edit_text("⏳ **Initializing...**")
     
-    # Counters
     stats = {'saved': 0, 'dup': 0, 'err': 0, 'del': 0}
     status_msg = query.message
     
-    # Batch Processing
     current = skip + 1
     BATCH_SIZE = 200
     
@@ -141,7 +133,6 @@ async def start_indexing_callback(bot, query):
                 else:
                     stats['del'] += 1
 
-            # Update Status every batch
             try:
                 await status_msg.edit(
                     f"⚙️ **Indexing...**\n"

@@ -4,10 +4,9 @@ from pyrogram.errors import FloodWait
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from info import ADMINS
+from pymongo import TEXT 
 
 # Global Variables
-# INDEX_CACHE: यूजर का डेटा (Chat ID, Skip count) टेंपररी सेव करने के लिए
-# RUNNING_TASKS: अगर यूजर 'Cancel' बटन दबाए तो प्रोसेस रोकने के लिए
 INDEX_CACHE = {}
 RUNNING_TASKS = {}
 
@@ -26,7 +25,7 @@ async def step_one_index(bot, message):
         "_(Isse mujhe pata chalega ki kahan tak scan karna hai)_"
     )
 
-# --- STEP 2: Forward Handler ---
+# --- STEP 2: Forward Handler (Group -1) ---
 @Client.on_message(filters.forwarded & filters.user(ADMINS), group=-1)
 async def step_two_forward(bot, message):
     user_id = message.from_user.id
@@ -50,7 +49,7 @@ async def step_two_forward(bot, message):
         except Exception as e:
             return await message.reply(f"❌ Error: {e}")
 
-# --- STEP 3: Skip Number Handler ---
+# --- STEP 3: Skip Number Handler (Group -1) ---
 @Client.on_message(filters.regex(r"^\d+$") & filters.user(ADMINS), group=-1)
 async def step_three_skip(bot, message):
     user_id = message.from_user.id
@@ -133,8 +132,7 @@ async def start_index(bot, query):
                 
                 media = m.document or m.video or m.audio
                 if media:
-                    # ✅ IMPORTANT: Hum 'm' (message object) pass kar rahe hain
-                    # Taaki DB logic msg_id aur chat_id nikaal sake 'files_data' collection ke liye
+                    # ✅ IMPORTANT: Passing 'm' (message object) for Optimized DB
                     res = await Media.save_file(media, m) 
                     
                     if res == 'saved': 
@@ -193,3 +191,19 @@ async def cancel(bot, query):
         return
 
     await query.answer("Nothing to cancel.")
+
+# --- EMERGENCY FIX COMMAND (Use this once) ---
+@Client.on_message(filters.command("fix_index") & filters.user(ADMINS), group=-1)
+async def fix_database_index(bot, message):
+    msg = await message.reply("🛠 **Fixing Database...**\nText Index create kar raha hu, please wait...")
+    
+    try:
+        # Zabardasti Index Create karo
+        await Media.search_col.create_index([("file_name", TEXT)])
+        
+        await msg.edit("✅ **Success! Text Index Created.**\n\nAb aap Search try kar sakte hain. Wo 100% chalega!")
+        print("Text Index Created Successfully via Command.")
+        
+    except Exception as e:
+        await msg.edit(f"❌ Error: {e}")
+        print(f"Index Error: {e}")

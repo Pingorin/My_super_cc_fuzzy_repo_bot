@@ -11,29 +11,22 @@ class UserChatDB:
         self.banned = self.db.banned 
 
     async def add_user(self, id):
-        """User ko database me add karta hai"""
         user = await self.users.find_one({'id': int(id)})
         if not user:
             await self.users.insert_one({'id': int(id)})
 
     async def add_group(self, id):
-        """Group ko database me add karta hai"""
         group = await self.groups.find_one({'id': int(id)})
         if not group:
             await self.groups.insert_one({'id': int(id)})
 
     async def total_users_count(self):
-        """Total Users ginta hai"""
         return await self.users.count_documents({})
 
     async def total_groups_count(self):
-        """Total Groups ginta hai"""
         return await self.groups.count_documents({})
 
-    # --- MISSING FUNCTIONS ADDED BELOW ---
-
     async def get_banned(self):
-        """Banned users aur chats ki list return karta hai"""
         users = []
         chats = []
         async for banned_user in self.banned.find({"type": "user"}):
@@ -43,14 +36,11 @@ class UserChatDB:
         return users, chats
 
     async def add_ban(self, id, type="user"):
-        """User ya Chat ko ban karta hai"""
         is_exist = await self.banned.find_one({"id": int(id), "type": type})
         if not is_exist:
             await self.banned.insert_one({"id": int(id), "type": type})
 
     async def remove_ban(self, id, type="user"):
-        """User ya Chat ko unban karta hai"""
         await self.banned.delete_one({"id": int(id), "type": type})
 
-# Database Object
 db = UserChatDB(DATABASE_URI, DATABASE_NAME)

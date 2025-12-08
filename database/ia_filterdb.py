@@ -1,6 +1,7 @@
 import logging
 import re
 from motor.motor_asyncio import AsyncIOMotorClient
+from bson.objectid import ObjectId
 from info import DATABASE_URI, DATABASE_NAME
 
 class MediaDB:
@@ -38,22 +39,46 @@ class MediaDB:
             
             file_name = media.file_name
             file_size = media.file_size
-            file_id = media.file_id # ✅ ID wapis le aaye
+            file_id = media.file_id
+            
+            # --- CAPTION CLEANING LOGIC ---
             caption = message.caption.html if message.caption else None
+            
+            if caption:
+                # Ye Extensions dhoondhega (Case Insensitive)
+                # Aap aur bhi add kar sakte hain
+                regex = r"(?i)(.*?)(\.mkv|\.mp4|\.avi|\.webm|\.m4v|\.flv)"
+                
+                # Search karega
+                match = re.search(regex, caption, re.DOTALL)
+                
+                if match:
+                    # Group 1: File ka naam
+                    # Group 2: Extension (.mkv)
+                    # Sirf wahi tak rakhna hai, uske baad ka sab uda dena hai
+                    caption = match.group(1) + match.group(2)
+                    
+                    # Agar caption HTML (Bold) me tha, to Tags fix karne ki koshish (Optional safety)
+                    if "<b>" in caption and "</b>" not in caption:
+                        caption += "</b>"
+                    if "<i>" in caption and "</i>" not in caption:
+                        caption += "</i>"
+                        
+            # -------------------------------
 
-            # 1. Save Data (Ab File ID bhi save hogi)
+            # 1. Save Data
             await self.data_col.insert_one({
                 '_id': unique_id,
                 'msg_id': message.id,
                 'chat_id': message.chat.id,
-                'file_id': file_id # ✅ Added for send_cached_media
+                'file_id': file_id
             })
 
-            # 2. Save Search Info
+            # 2. Save Search Info (Clean Caption ke saath)
             await self.search_col.insert_one({
                 'file_name': file_name,
                 'file_size': file_size, 
-                'caption': caption,
+                'caption': caption, # Ab ye clean wala save hoga
                 'link_id': unique_id
             })
             return 'saved'
@@ -65,7 +90,12 @@ class MediaDB:
     async def get_search_results(self, query):
         try:
             regex = re.compile(query, re.IGNORECASE)
-            search_query = {"$or": [{"file_name": regex}, {"caption": regex}]}
+            search_query = {
+                "$or": [
+                    {"file_name": regex}, 
+                    {"caption": regex}
+                ]
+            }
             cursor = self.search_col.find(search_query)
             cursor.sort('$natural', -1)
             files = await cursor.to_list(length=10)

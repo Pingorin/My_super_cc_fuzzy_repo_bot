@@ -2,6 +2,7 @@ import logging
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
+from pyrogram.errors import PeerIdInvalid
 
 def get_size(size):
     if not size: return ""
@@ -46,31 +47,54 @@ def btn_parser(files):
             buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"get_{link_id}")])
     return buttons
 
-# ✅ STEP 2 & 3: Using copy_message
+# ✅ UPDATED: Using send_cached_media
 @Client.on_callback_query(filters.regex(r"^get_"))
 async def get_file_handler(client, callback_query):
     try:
         link_id = int(callback_query.data.split("_")[1])
         
-        # 1. Fetch file location from DB
+        # 1. Get File Details (including file_id)
         file_data = await Media.get_file_details(link_id)
+        search_data = await Media.search_col.find_one({'link_id': link_id}) # Caption ke liye
         
         if not file_data:
-            return await callback_query.answer("❌ File not found in DB (Re-index required).", show_alert=True)
+            return await callback_query.answer("❌ File not found in DB.", show_alert=True)
             
-        msg_id = file_data['msg_id']
-        chat_id = file_data['chat_id'] # This is the Channel ID
-
-        # 2. Use copy_message instead of send_document
-        await client.copy_message(
-            chat_id=callback_query.message.chat.id, # Bhejna kahan hai (User ko)
-            from_chat_id=chat_id,                   # Uthana kahan se hai (Channel se)
-            message_id=msg_id                       # Kaunsa message
-        )
+        file_id = file_data.get('file_id') # ✅ Ab ye milega
         
+        # Caption Logic
+        caption = None
+        if search_data and search_data.get('caption'):
+            caption = search_data['caption']
+        else:
+            caption = f"📂 **{search_data.get('file_name')}**"
+
+        if not file_id:
+            # Fallback agar purana data ho
+            return await callback_query.answer("❌ File ID missing. Re-index required.", show_alert=True)
+
+        try:
+            # ✅ YOUR REQUEST: send_cached_media
+            await client.send_cached_media(
+                chat_id=callback_query.message.chat.id,
+                file_id=file_id,
+                caption=caption
+            )
+        except PeerIdInvalid:
+             # Retry Logic
+            try:
+                chat_id = file_data['chat_id']
+                await client.get_chat(chat_id) # Refresh connection
+                await client.send_cached_media(
+                    chat_id=callback_query.message.chat.id,
+                    file_id=file_id,
+                    caption=caption
+                )
+            except:
+                 return await callback_query.answer("⚠️ Connection lost. Forward a message to bot.", show_alert=True)
+
         await callback_query.answer()
         
     except Exception as e:
         print(f"File Send Error: {e}")
-        # Agar bot admin nahi hai ya channel access nahi kar pa raha
-        await callback_query.answer(f"❌ Error: Bot Channel access nahi kar pa raha. Make sure Bot is Admin in Channel.", show_alert=True)
+        await callback_query.answer(f"❌ Error: {e}", show_alert=True)

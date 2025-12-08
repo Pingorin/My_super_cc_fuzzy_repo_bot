@@ -1,6 +1,7 @@
 import logging
 import re
 from motor.motor_asyncio import AsyncIOMotorClient
+from bson.objectid import ObjectId
 from info import DATABASE_URI, DATABASE_NAME
 
 class MediaDB:
@@ -8,12 +9,14 @@ class MediaDB:
         self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         
-        self.data_col = self.db.files_data   # Stores IDs
-        self.search_col = self.db.files_search # Stores Names
+        self.data_col = self.db.files_data   
+        self.search_col = self.db.files_search 
         self.counters = self.db.counters
 
     async def ensure_indexes(self):
+        # Name aur Caption dono par index banao (Optional but good for speed)
         await self.search_col.create_index("file_name")
+        await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
 
     async def get_next_sequence_value(self, sequence_name):
@@ -25,10 +28,8 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
-    # ✅ STEP 1: Verify we are saving chat_id and msg_id
     async def save_file(self, media, message):
         try:
-            # Duplicate Check (Same Chat + Same Message ID)
             duplicate = await self.data_col.find_one({
                 'chat_id': message.chat.id,
                 'msg_id': message.id
@@ -40,20 +41,19 @@ class MediaDB:
             
             file_name = media.file_name
             file_size = media.file_size
-            # Caption handle
             caption = message.caption.html if message.caption else None
 
-            # 1. Save Location Data (For copy_message)
+            # 1. Save Data
             await self.data_col.insert_one({
                 '_id': unique_id,
-                'msg_id': message.id,       # Message ID
-                'chat_id': message.chat.id  # Channel ID
+                'msg_id': message.id,
+                'chat_id': message.chat.id
             })
 
-            # 2. Save Search Data
+            # 2. Save Search Info
             await self.search_col.insert_one({
                 'file_name': file_name,
-                'file_size': file_size,
+                'file_size': file_size, 
                 'caption': caption,
                 'link_id': unique_id
             })
@@ -63,10 +63,20 @@ class MediaDB:
             print(f"Error saving file: {e}")
             return 'error'
 
+    # ✅ MAJOR CHANGE: Search Logic Updated
     async def get_search_results(self, query):
         try:
             regex = re.compile(query, re.IGNORECASE)
-            cursor = self.search_col.find({"file_name": regex})
+            
+            # MongoDB Query: (File Name match kare) YA (Caption match kare)
+            search_query = {
+                "$or": [
+                    {"file_name": regex}, 
+                    {"caption": regex}
+                ]
+            }
+            
+            cursor = self.search_col.find(search_query)
             cursor.sort('$natural', -1)
             files = await cursor.to_list(length=10)
             return files
@@ -76,7 +86,6 @@ class MediaDB:
 
     async def get_file_details(self, link_id):
         try:
-            # Retrieve chat_id and msg_id using link_id
             return await self.data_col.find_one({'_id': int(link_id)})
         except Exception as e:
             print(f"Get File Error: {e}")

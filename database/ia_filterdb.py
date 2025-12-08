@@ -1,7 +1,6 @@
 import logging
 import re
 from motor.motor_asyncio import AsyncIOMotorClient
-from bson.objectid import ObjectId
 from info import DATABASE_URI, DATABASE_NAME
 
 class MediaDB:
@@ -15,6 +14,7 @@ class MediaDB:
 
     async def ensure_indexes(self):
         await self.search_col.create_index("file_name")
+        await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
 
     async def get_next_sequence_value(self, sequence_name):
@@ -25,22 +25,6 @@ class MediaDB:
             return_document=True
         )
         return doc["sequence_value"]
-
-    # ✅ NEW: Cleaning Function
-    def clean_text(self, text):
-        if not text:
-            return None
-        
-        # 1. Remove anything inside [ ] brackets (e.g., [@RunningMoviesHD])
-        text = re.sub(r"\[.*?\]", "", text)
-        
-        # 2. Remove any word starting with @ (e.g., @VPFILS)
-        text = re.sub(r"@\w+", "", text)
-        
-        # 3. Remove extra spaces (Double spaces ko single banao)
-        text = re.sub(r"\s+", " ", text).strip()
-        
-        return text
 
     async def save_file(self, media, message):
         try:
@@ -53,34 +37,48 @@ class MediaDB:
 
             unique_id = await self.get_next_sequence_value("file_id_counter")
             
-            # --- FILE NAME CLEANING ---
-            original_filename = media.file_name
-            # Yahan hum 'clean_text' function use kar rahe hain
-            file_name = self.clean_text(original_filename)
-            
+            file_name = media.file_name
             file_size = media.file_size
             file_id = media.file_id
             
-            # --- CAPTION CLEANING ---
+            # --- ✨ CLEANING FUNCTION (Kachra Hatao) ---
+            def clean_text(text):
+                if not text: return None
+                
+                # 1. Specific Tag Remove karo (Case Insensitive)
+                # [@RunningMoviesHD] ko hatayega
+                text = re.sub(r"\[@RunningMoviesHD\]", "", text, flags=re.IGNORECASE)
+                
+                # 2. Koi bhi @Username hatao (@... kuch bhi)
+                text = re.sub(r"@\w+", "", text)
+                
+                # 3. Extra spaces (starting/ending) saaf karo
+                return re.sub(r"\s+", " ", text).strip()
+
+            # ✅ 1. File Name Clean Karo
+            file_name = clean_text(file_name)
+
+            # ✅ 2. Caption Clean Karo
             caption = message.caption.html if message.caption else None
             
             if caption:
-                # Step 1: Remove [ ] and @
-                caption = self.clean_text(caption)
+                # Pehle Tag aur Username hatao
+                caption = clean_text(caption)
                 
-                # Step 2: Stop at .mkv/.mp4 (Purana Logic)
+                # Phir .mkv/.mp4 ke baad ka hissa kato (Purana Logic)
                 regex = r"(?i)(.*?)(\.mkv|\.mp4|\.avi|\.webm|\.m4v|\.flv)"
                 match = re.search(regex, caption, re.DOTALL)
+                
                 if match:
                     caption = match.group(1) + match.group(2)
-            
-            # Agar caption khali ho gaya (cleaning ke baad), to file name use karo
-            if not caption:
-                caption = file_name
+                    
+                    # HTML Tags Safety (Agar galti se kat jaye)
+                    if "<b>" in caption and "</b>" not in caption: caption += "</b>"
+                    if "<i>" in caption and "</i>" not in caption: caption += "</i>"
+                        
+            # -------------------------------------------
 
-            # -------------------------------
-
-            # 1. Save Data
+            # 1. Save Data (Location & File ID)
             await self.data_col.insert_one({
                 '_id': unique_id,
                 'msg_id': message.id,
@@ -88,11 +86,11 @@ class MediaDB:
                 'file_id': file_id
             })
 
-            # 2. Save Search Info (Ab Clean Name aur Clean Caption save hoga)
+            # 2. Save Search Info (AB CLEAN DATA SAVE HOGA)
             await self.search_col.insert_one({
-                'file_name': file_name,
+                'file_name': file_name, # Saaf naam
                 'file_size': file_size, 
-                'caption': caption,
+                'caption': caption,     # Saaf caption
                 'link_id': unique_id
             })
             return 'saved'

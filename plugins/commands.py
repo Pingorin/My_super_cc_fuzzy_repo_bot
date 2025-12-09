@@ -6,7 +6,7 @@ from database.users_chats_db import db
 from database.ia_filterdb import Media
 from info import ADMINS
 from utils import temp
-from Script import script # Footer ke liye
+from Script import script 
 from pyrogram.errors import PeerIdInvalid
 
 logger = logging.getLogger(__name__)
@@ -44,15 +44,15 @@ async def start_handler(client, message):
             msg_id = file_data['msg_id']
             chat_id = file_data['chat_id']
 
-            # Caption & Footer Logic
+            # Caption Logic
             db_caption = search_data.get('caption')
             if not db_caption:
                 db_caption = f"📂 <b>{search_data.get('file_name')}</b>"
             
             final_caption = f"{db_caption}\n{script.CUSTOM_FOOTER}"
 
-            # File Bhejo
-            await message.reply_text("📂 **Sending File...** Please wait.")
+            # 🚀 CHANGE: "Sending File..." msg hata diya gaya hai.
+            # Ab seedha file bheji jayegi (No Delay)
             
             try:
                 await client.copy_message(

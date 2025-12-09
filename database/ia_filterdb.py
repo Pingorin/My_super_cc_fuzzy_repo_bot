@@ -41,44 +41,44 @@ class MediaDB:
             file_size = media.file_size
             file_id = media.file_id
             
-            # --- ✨ CLEANING FUNCTION (Kachra Hatao) ---
+            # --- ✨ CLEANING FUNCTION (Updated) ---
             def clean_text(text):
                 if not text: return None
                 
-                # 1. Specific Tag Remove karo (Case Insensitive)
-                # [@RunningMoviesHD] ko hatayega
+                # 1. Specific Tag Remove karo
                 text = re.sub(r"\[@RunningMoviesHD\]", "", text, flags=re.IGNORECASE)
                 
-                # 2. Koi bhi @Username hatao (@... kuch bhi)
+                # 2. @Username hatao
                 text = re.sub(r"@\w+", "", text)
                 
-                # 3. Extra spaces (starting/ending) saaf karo
+                # 3. ✅ NEW: Hyphen (-) aur Underscore (_) ko Space bana do
+                text = re.sub(r"[-_]", " ", text)
+                
+                # 4. Extra spaces saaf karo (Multiple spaces -> Single space)
                 return re.sub(r"\s+", " ", text).strip()
 
-            # ✅ 1. File Name Clean Karo
+            # ✅ 1. File Name Clean
             file_name = clean_text(file_name)
 
-            # ✅ 2. Caption Clean Karo
+            # ✅ 2. Caption Clean
             caption = message.caption.html if message.caption else None
             
             if caption:
-                # Pehle Tag aur Username hatao
+                # Pehle Tag, Username aur Hyphen hatao
                 caption = clean_text(caption)
                 
-                # Phir .mkv/.mp4 ke baad ka hissa kato (Purana Logic)
+                # Phir .mkv/.mp4 ke baad ka hissa kato
                 regex = r"(?i)(.*?)(\.mkv|\.mp4|\.avi|\.webm|\.m4v|\.flv)"
                 match = re.search(regex, caption, re.DOTALL)
                 
                 if match:
                     caption = match.group(1) + match.group(2)
                     
-                    # HTML Tags Safety (Agar galti se kat jaye)
                     if "<b>" in caption and "</b>" not in caption: caption += "</b>"
                     if "<i>" in caption and "</i>" not in caption: caption += "</i>"
                         
             # -------------------------------------------
 
-            # 1. Save Data (Location & File ID)
             await self.data_col.insert_one({
                 '_id': unique_id,
                 'msg_id': message.id,
@@ -86,11 +86,10 @@ class MediaDB:
                 'file_id': file_id
             })
 
-            # 2. Save Search Info (AB CLEAN DATA SAVE HOGA)
             await self.search_col.insert_one({
-                'file_name': file_name, # Saaf naam
+                'file_name': file_name,
                 'file_size': file_size, 
-                'caption': caption,     # Saaf caption
+                'caption': caption,
                 'link_id': unique_id
             })
             return 'saved'

@@ -40,9 +40,13 @@ async def start_handler(client, message):
             
             if not file_data:
                 return await message.reply("❌ File Database se delete ho gayi hai.")
-                
-            msg_id = file_data['msg_id']
-            chat_id = file_data['chat_id']
+            
+            # ✅ MAIN FIX: File ID nikalo
+            file_id = file_data.get('file_id')
+            
+            if not file_id:
+                # Agar purana data hai jisme ID nahi thi
+                return await message.reply("❌ Error: Is file ki ID database me nahi hai. Admin ko Re-Index karna padega.")
 
             # Caption Logic
             db_caption = search_data.get('caption')
@@ -51,29 +55,19 @@ async def start_handler(client, message):
             
             final_caption = f"{db_caption}\n{script.CUSTOM_FOOTER}"
 
-            # 🚀 CHANGE: "Sending File..." msg hata diya gaya hai.
-            # Ab seedha file bheji jayegi (No Delay)
+            # 🚀 CHANGE: Use 'send_cached_media' instead of 'copy_message'
+            # Ye channel access nahi karega, seedha file bhejega.
             
             try:
-                await client.copy_message(
+                await client.send_cached_media(
                     chat_id=message.from_user.id,
-                    from_chat_id=chat_id,
-                    message_id=msg_id,
+                    file_id=file_id, # ✅ Using Saved File ID
                     caption=final_caption,
                     parse_mode=enums.ParseMode.HTML
                 )
-            except PeerIdInvalid:
-                try:
-                    await client.get_chat(chat_id)
-                    await client.copy_message(
-                        chat_id=message.from_user.id,
-                        from_chat_id=chat_id,
-                        message_id=msg_id,
-                        caption=final_caption,
-                        parse_mode=enums.ParseMode.HTML
-                    )
-                except:
-                    await message.reply("⚠️ Bot Channel access nahi kar pa raha.")
+            except Exception as e:
+                # Agar File ID expire ho gayi ho ya koi aur issue ho
+                await message.reply(f"❌ Failed to send file.\nError: `{e}`")
                     
         except Exception as e:
             await message.reply(f"❌ Error: {e}")

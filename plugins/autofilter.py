@@ -1,10 +1,9 @@
 import logging
-from pyrogram import Client, filters, enums
+from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
-from Script import script  # ✅ Import Script file
+from pyrogram.errors import PeerIdInvalid
 
-# --- Utility: File Size Converter ---
 def get_size(size):
     if not size: return ""
     power = 2**10
@@ -15,7 +14,6 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-# --- Main Auto Filter Logic ---
 @Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index"]))
 async def auto_filter(client, message):
     query = message.text
@@ -27,7 +25,8 @@ async def auto_filter(client, message):
             await message.reply_text(f"❌ **No results found for:** `{query}`")
             return
 
-        buttons = btn_parser(files)
+        # ✅ CHANGE: 'query' bhi pass kar rahe hain check karne ke liye
+        buttons = btn_parser(files, query)
         
         await message.reply_text(
             f"✅ **Found {len(files)} results for** `{query}`:",
@@ -38,30 +37,45 @@ async def auto_filter(client, message):
         print(f"Search Error: {e}")
         await message.reply_text(f"❌ Error: {e}")
 
-# --- Button Parser ---
-def btn_parser(files):
+# --- SMART BUTTON PARSER ---
+def btn_parser(files, query):
     buttons = []
     for file in files:
         f_name = file['file_name']
+        caption = file.get('caption')
         link_id = file.get('link_id')
         f_size = file.get('file_size', 0)
         
+        # --- 🧠 SMART LOGIC START ---
+        display_name = f_name # Default: File Name dikhao
+        
+        # Check: Agar User ka search word File Name me NAHI hai...
+        # Lekin Caption me HAI... to Caption dikhao.
+        if caption:
+            q = query.lower() # User ki search (small letters)
+            n = f_name.lower() # File Name (small letters)
+            c = caption.lower() # Caption (small letters)
+            
+            # Agar naam me match nahi hua, par caption me match ho gaya
+            if q not in n and q in c:
+                display_name = caption
+        # --- SMART LOGIC END ---
+
+        # Size Add karo
         size_str = get_size(f_size)
-        btn_text = f"📂 {f_name} [{size_str}]"
+        btn_text = f"📂 {display_name} [{size_str}]"
         
         if link_id is not None:
             buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"get_{link_id}")])
     return buttons
 
-# --- Callback Handler (The Main Magic) ---
 @Client.on_callback_query(filters.regex(r"^get_"))
 async def get_file_handler(client, callback_query):
     try:
         link_id = int(callback_query.data.split("_")[1])
         
-        # 1. Database se details nikalo
         file_data = await Media.get_file_details(link_id)
-        # Search collection se caption nikalo (Jo humne clean kiya tha)
+        # Caption ke liye search data bhi nikalo
         search_data = await Media.search_col.find_one({'link_id': link_id})
         
         if not file_data:
@@ -69,29 +83,38 @@ async def get_file_handler(client, callback_query):
             
         msg_id = file_data['msg_id']
         chat_id = file_data['chat_id']
+        file_id = file_data.get('file_id') # For send_cached_media
 
-        # 2. CAPTION LOGIC (Original + Footer)
-        db_caption = search_data.get('caption')
-        
-        # Agar caption nahi hai to filename use karo
-        if not db_caption:
-            db_caption = f"📂 <b>{search_data.get('file_name')}</b>"
-            
-        # ✅ Footer Add karo
-        final_caption = f"{db_caption}\n{script.CUSTOM_FOOTER}"
+        # Caption Selection for Sending File
+        # (Yahan bhi hum wahi bhejenge jo database me saaf hokar save hua tha)
+        final_caption = None
+        if search_data and search_data.get('caption'):
+            final_caption = search_data['caption']
+        else:
+            final_caption = f"📂 **{search_data.get('file_name')}**"
 
-        # 3. Send File (Caption Override ke sath)
-        await client.copy_message(
-            chat_id=callback_query.message.chat.id,
-            from_chat_id=chat_id,
-            message_id=msg_id,
-            caption=final_caption, # Yahan naya caption jayega
-            parse_mode=enums.ParseMode.HTML
-        )
-        
+        # Using copy_message (Best method)
+        try:
+            await client.copy_message(
+                chat_id=callback_query.message.chat.id,
+                from_chat_id=chat_id,
+                message_id=msg_id,
+                caption=final_caption 
+            )
+        except PeerIdInvalid:
+            try:
+                await client.get_chat(chat_id)
+                await client.copy_message(
+                    chat_id=callback_query.message.chat.id,
+                    from_chat_id=chat_id,
+                    message_id=msg_id,
+                    caption=final_caption
+                )
+            except:
+                 return await callback_query.answer("⚠️ Connection lost. Forward msg to bot.", show_alert=True)
+
         await callback_query.answer()
         
     except Exception as e:
         print(f"File Send Error: {e}")
-        # Agar error aaye (jaise PeerIdInvalid), user ko guide karo
-        await callback_query.answer("⚠️ Error: Bot Channel access nahi kar pa raha. Message Forward karo.", show_alert=True)
+        await callback_query.answer(f"❌ Error: {e}", show_alert=True)

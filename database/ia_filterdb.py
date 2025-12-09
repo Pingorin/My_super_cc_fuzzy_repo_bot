@@ -13,39 +13,34 @@ class MediaDB:
         self.counters = self.db.counters
 
     async def ensure_indexes(self):
+        # Regular indexes (Backup ke liye)
         await self.search_col.create_index("file_name")
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
-        # Duplicate check ko fast karne ke liye index
         await self.data_col.create_index([("chat_id", 1), ("msg_id", 1)], unique=True)
 
     async def get_next_sequence_value(self, sequence_name, increment=1):
         doc = await self.counters.find_one_and_update(
             {"_id": sequence_name},
-            {"$inc": {"sequence_value": increment}}, # ✅ Bulk Increment
+            {"$inc": {"sequence_value": increment}}, 
             upsert=True,
             return_document=True
         )
         return doc["sequence_value"]
 
-    # --- ✨ BULK SAVE LOGIC (SUPER FAST) ---
+    # --- BULK SAVE (FAST) ---
     async def save_batch(self, items):
-        # items is a list of tuples: (media, message)
-        if not items: return 0, 0 # Saved, Duplicates
+        if not items: return 0, 0 
         
         count = len(items)
-        
-        # 1. Ek baar me saare IDs reserve kar lo
         end_sequence = await self.get_next_sequence_value("file_id_counter", increment=count)
         start_sequence = end_sequence - count + 1
         
         data_docs = []
         search_docs = []
-        
         current_id = start_sequence
         
         for media, message in items:
-            # Cleaning Logic
             def clean_text(text):
                 if not text: return None
                 text = re.sub(r"\[@RunningMoviesHD\]", "", text, flags=re.IGNORECASE)
@@ -65,7 +60,6 @@ class MediaDB:
                     if "<b>" in caption and "</b>" not in caption: caption += "</b>"
                     if "<i>" in caption and "</i>" not in caption: caption += "</i>"
 
-            # Prepare Documents
             data_docs.append({
                 '_id': current_id,
                 'msg_id': message.id,
@@ -79,25 +73,18 @@ class MediaDB:
                 'caption': caption,
                 'link_id': current_id
             })
-            
             current_id += 1
 
-        # 2. Bulk Insert (Try-Catch for Duplicates)
         saved_count = 0
         duplicate_count = 0
         
         try:
-            # Ordered=False ka matlab: Agar ek fail ho (duplicate), to baaki rukenge nahi
             if data_docs:
                 await self.data_col.insert_many(data_docs, ordered=False)
                 await self.search_col.insert_many(search_docs, ordered=False)
                 saved_count = len(data_docs)
         except Exception as e:
-            # Agar duplicate error aaye (BulkWriteError), to hum count nikalenge
             if "E11000" in str(e):
-                # Jitne insert ho gaye wo saved, baaki duplicate
-                # Exact count nikalna mushkil hai bulk me bina slow kiye, 
-                # hum assume karte hain jo fail huye wo duplicate hain.
                 try:
                     saved_count = e.details['nInserted']
                     duplicate_count = count - saved_count
@@ -106,20 +93,46 @@ class MediaDB:
                     duplicate_count = count
             else:
                 print(f"Bulk Save Error: {e}")
-                
         return saved_count, duplicate_count
 
-    # Single File Save (Backup ke liye)
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
+    # 🚀 ATLAS SEARCH LOGIC (LUCENE) 🚀
     async def get_search_results(self, query):
-        regex = re.compile(query, re.IGNORECASE)
-        search_query = {"$or": [{"file_name": regex}, {"caption": regex}]}
-        cursor = self.search_col.find(search_query)
-        cursor.sort('$natural', -1)
-        files = await cursor.to_list(length=10)
-        return files
+        try:
+            # $search Aggregation Pipeline
+            pipeline = [
+                {
+                    "$search": {
+                        "index": "default", # Step 1 wala index name
+                        "text": {
+                            "query": query,
+                            "path": ["file_name", "caption"], # Kahan dhundna hai
+                            "fuzzy": {
+                                "maxEdits": 1 # 1 letter ki galti maaf (Typo Tolerance)
+                            }
+                        }
+                    }
+                },
+                {
+                    "$limit": 10 # Top 10 results
+                }
+            ]
+            
+            # Aggregate run karo
+            cursor = self.search_col.aggregate(pipeline)
+            files = await cursor.to_list(length=10)
+            return files
+            
+        except Exception as e:
+            print(f"Atlas Search Error: {e}")
+            # Fallback: Agar Atlas Index nahi bana, to purana Regex use karo
+            print("Falling back to Regex Search...")
+            regex = re.compile(query, re.IGNORECASE)
+            cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})
+            cursor.sort('$natural', -1)
+            return await cursor.to_list(length=10)
 
     async def total_files_count(self):
         return await self.data_col.count_documents({})

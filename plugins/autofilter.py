@@ -1,5 +1,5 @@
 import logging
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums # ✅ enums import kiya
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from pyrogram.errors import PeerIdInvalid
@@ -25,7 +25,7 @@ async def auto_filter(client, message):
             await message.reply_text(f"❌ **No results found for:** `{query}`")
             return
 
-        # ✅ CHANGE: 'query' bhi pass kar rahe hain check karne ke liye
+        # Smart Button Parser call karein
         buttons = btn_parser(files, query)
         
         await message.reply_text(
@@ -46,22 +46,23 @@ def btn_parser(files, query):
         link_id = file.get('link_id')
         f_size = file.get('file_size', 0)
         
-        # --- 🧠 SMART LOGIC START ---
-        display_name = f_name # Default: File Name dikhao
+        # 🧠 SMART LOGIC: Name vs Caption
+        display_name = f_name 
         
-        # Check: Agar User ka search word File Name me NAHI hai...
-        # Lekin Caption me HAI... to Caption dikhao.
         if caption:
-            q = query.lower() # User ki search (small letters)
-            n = f_name.lower() # File Name (small letters)
-            c = caption.lower() # Caption (small letters)
+            q = query.lower()
+            n = f_name.lower()
+            c = caption.lower()
             
-            # Agar naam me match nahi hua, par caption me match ho gaya
+            # Agar naam match nahi hua par caption hua, to caption dikhao
             if q not in n and q in c:
-                display_name = caption
-        # --- SMART LOGIC END ---
+                # Caption me se HTML tags hata kar button par dikhao
+                clean_cap = caption.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
+                # Agar caption bahut lamba hai to chhota karo (Max 60 chars)
+                if len(clean_cap) > 60:
+                    clean_cap = clean_cap[:57] + "..."
+                display_name = clean_cap
 
-        # Size Add karo
         size_str = get_size(f_size)
         btn_text = f"📂 {display_name} [{size_str}]"
         
@@ -69,13 +70,13 @@ def btn_parser(files, query):
             buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"get_{link_id}")])
     return buttons
 
+# --- CALLBACK HANDLER (HTML FIX) ---
 @Client.on_callback_query(filters.regex(r"^get_"))
 async def get_file_handler(client, callback_query):
     try:
         link_id = int(callback_query.data.split("_")[1])
         
         file_data = await Media.get_file_details(link_id)
-        # Caption ke liye search data bhi nikalo
         search_data = await Media.search_col.find_one({'link_id': link_id})
         
         if not file_data:
@@ -83,23 +84,22 @@ async def get_file_handler(client, callback_query):
             
         msg_id = file_data['msg_id']
         chat_id = file_data['chat_id']
-        file_id = file_data.get('file_id') # For send_cached_media
 
-        # Caption Selection for Sending File
-        # (Yahan bhi hum wahi bhejenge jo database me saaf hokar save hua tha)
+        # Caption Logic
         final_caption = None
         if search_data and search_data.get('caption'):
             final_caption = search_data['caption']
         else:
-            final_caption = f"📂 **{search_data.get('file_name')}**"
+            # Agar caption nahi hai to filename ko Bold banao
+            final_caption = f"📂 <b>{search_data.get('file_name')}</b>"
 
-        # Using copy_message (Best method)
         try:
             await client.copy_message(
                 chat_id=callback_query.message.chat.id,
                 from_chat_id=chat_id,
                 message_id=msg_id,
-                caption=final_caption 
+                caption=final_caption,
+                parse_mode=enums.ParseMode.HTML # ✅ YE LINE MAGIC KAREGI (<b> hat jayega aur Bold dikhega)
             )
         except PeerIdInvalid:
             try:
@@ -108,7 +108,8 @@ async def get_file_handler(client, callback_query):
                     chat_id=callback_query.message.chat.id,
                     from_chat_id=chat_id,
                     message_id=msg_id,
-                    caption=final_caption
+                    caption=final_caption,
+                    parse_mode=enums.ParseMode.HTML # ✅ Yahan bhi lagaya
                 )
             except:
                  return await callback_query.answer("⚠️ Connection lost. Forward msg to bot.", show_alert=True)

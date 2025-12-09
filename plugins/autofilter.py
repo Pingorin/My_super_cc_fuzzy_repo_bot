@@ -1,8 +1,9 @@
 import logging
-from pyrogram import Client, filters, enums
+import re
+from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
-from Script import script  # ✅ Import Script file
+from pyrogram.errors import PeerIdInvalid
 
 # --- Utility: File Size Converter ---
 def get_size(size):
@@ -38,30 +39,37 @@ async def auto_filter(client, message):
         print(f"Search Error: {e}")
         await message.reply_text(f"❌ Error: {e}")
 
-# --- Button Parser ---
+# --- Button Parser (Modified for Better Name) ---
 def btn_parser(files):
     buttons = []
     for file in files:
-        f_name = file['file_name']
+        # ✅ LOGIC CHANGE: 
+        # Pehle 'caption' check karo, agar wo nahi hai to 'file_name' lo
+        display_name = file.get('caption') or file['file_name']
+        
+        # Optional: Extension (.mkv) hataane ke liye
+        # display_name = re.sub(r"\.(mkv|mp4|avi)$", "", display_name, flags=re.IGNORECASE)
+
         link_id = file.get('link_id')
         f_size = file.get('file_size', 0)
         
         size_str = get_size(f_size)
-        btn_text = f"📂 {f_name} [{size_str}]"
+        
+        # Ab Button par Caption dikhega (Clean Name)
+        btn_text = f"📂 {display_name} [{size_str}]"
         
         if link_id is not None:
             buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"get_{link_id}")])
     return buttons
 
-# --- Callback Handler (The Main Magic) ---
+# --- Callback Handler (File Sending) ---
 @Client.on_callback_query(filters.regex(r"^get_"))
 async def get_file_handler(client, callback_query):
     try:
         link_id = int(callback_query.data.split("_")[1])
         
-        # 1. Database se details nikalo
         file_data = await Media.get_file_details(link_id)
-        # Search collection se caption nikalo (Jo humne clean kiya tha)
+        # Caption ke liye search data bhi chahiye
         search_data = await Media.search_col.find_one({'link_id': link_id})
         
         if not file_data:
@@ -69,29 +77,35 @@ async def get_file_handler(client, callback_query):
             
         msg_id = file_data['msg_id']
         chat_id = file_data['chat_id']
+        file_id = file_data.get('file_id')
 
-        # 2. CAPTION LOGIC (Original + Footer)
-        db_caption = search_data.get('caption')
-        
-        # Agar caption nahi hai to filename use karo
-        if not db_caption:
-            db_caption = f"📂 <b>{search_data.get('file_name')}</b>"
-            
-        # ✅ Footer Add karo
-        final_caption = f"{db_caption}\n{script.CUSTOM_FOOTER}"
+        # Caption Logic for Message
+        caption = None
+        if search_data and search_data.get('caption'):
+            caption = search_data['caption']
+        else:
+            caption = f"📂 **{search_data.get('file_name')}**"
 
-        # 3. Send File (Caption Override ke sath)
-        await client.copy_message(
-            chat_id=callback_query.message.chat.id,
-            from_chat_id=chat_id,
-            message_id=msg_id,
-            caption=final_caption, # Yahan naya caption jayega
-            parse_mode=enums.ParseMode.HTML
-        )
-        
+        try:
+            # Using send_cached_media as per previous setup
+            await client.send_cached_media(
+                chat_id=callback_query.message.chat.id,
+                file_id=file_id,
+                caption=caption
+            )
+        except PeerIdInvalid:
+            try:
+                await client.get_chat(chat_id)
+                await client.send_cached_media(
+                    chat_id=callback_query.message.chat.id,
+                    file_id=file_id,
+                    caption=caption
+                )
+            except:
+                 return await callback_query.answer("⚠️ Connection lost. Forward a message to bot.", show_alert=True)
+
         await callback_query.answer()
         
     except Exception as e:
         print(f"File Send Error: {e}")
-        # Agar error aaye (jaise PeerIdInvalid), user ko guide karo
-        await callback_query.answer("⚠️ Error: Bot Channel access nahi kar pa raha. Message Forward karo.", show_alert=True)
+        await callback_query.answer(f"❌ Error: {e}", show_alert=True)

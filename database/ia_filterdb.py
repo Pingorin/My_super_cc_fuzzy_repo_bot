@@ -16,111 +16,110 @@ class MediaDB:
         await self.search_col.create_index("file_name")
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
+        # Duplicate check ko fast karne ke liye index
+        await self.data_col.create_index([("chat_id", 1), ("msg_id", 1)], unique=True)
 
-    async def get_next_sequence_value(self, sequence_name):
+    async def get_next_sequence_value(self, sequence_name, increment=1):
         doc = await self.counters.find_one_and_update(
             {"_id": sequence_name},
-            {"$inc": {"sequence_value": 1}},
+            {"$inc": {"sequence_value": increment}}, # ✅ Bulk Increment
             upsert=True,
             return_document=True
         )
         return doc["sequence_value"]
 
-    async def save_file(self, media, message):
-        try:
-            duplicate = await self.data_col.find_one({
-                'chat_id': message.chat.id,
-                'msg_id': message.id
-            })
-            if duplicate:
-                return 'duplicate'
-
-            unique_id = await self.get_next_sequence_value("file_id_counter")
-            
-            file_name = media.file_name
-            file_size = media.file_size
-            file_id = media.file_id
-            
-            # --- ✨ CLEANING FUNCTION (Updated) ---
+    # --- ✨ BULK SAVE LOGIC (SUPER FAST) ---
+    async def save_batch(self, items):
+        # items is a list of tuples: (media, message)
+        if not items: return 0, 0 # Saved, Duplicates
+        
+        count = len(items)
+        
+        # 1. Ek baar me saare IDs reserve kar lo
+        end_sequence = await self.get_next_sequence_value("file_id_counter", increment=count)
+        start_sequence = end_sequence - count + 1
+        
+        data_docs = []
+        search_docs = []
+        
+        current_id = start_sequence
+        
+        for media, message in items:
+            # Cleaning Logic
             def clean_text(text):
                 if not text: return None
-                
-                # 1. Specific Tag Remove karo
                 text = re.sub(r"\[@RunningMoviesHD\]", "", text, flags=re.IGNORECASE)
-                
-                # 2. @Username hatao
                 text = re.sub(r"@\w+", "", text)
-                
-                # 3. ✅ NEW: Hyphen (-) aur Underscore (_) ko Space bana do
                 text = re.sub(r"[-_]", " ", text)
-                
-                # 4. Extra spaces saaf karo (Multiple spaces -> Single space)
                 return re.sub(r"\s+", " ", text).strip()
 
-            # ✅ 1. File Name Clean
-            file_name = clean_text(file_name)
-
-            # ✅ 2. Caption Clean
+            file_name = clean_text(media.file_name)
             caption = message.caption.html if message.caption else None
             
             if caption:
-                # Pehle Tag, Username aur Hyphen hatao
                 caption = clean_text(caption)
-                
-                # Phir .mkv/.mp4 ke baad ka hissa kato
                 regex = r"(?i)(.*?)(\.mkv|\.mp4|\.avi|\.webm|\.m4v|\.flv)"
                 match = re.search(regex, caption, re.DOTALL)
-                
                 if match:
                     caption = match.group(1) + match.group(2)
-                    
                     if "<b>" in caption and "</b>" not in caption: caption += "</b>"
                     if "<i>" in caption and "</i>" not in caption: caption += "</i>"
-                        
-            # -------------------------------------------
 
-            await self.data_col.insert_one({
-                '_id': unique_id,
+            # Prepare Documents
+            data_docs.append({
+                '_id': current_id,
                 'msg_id': message.id,
                 'chat_id': message.chat.id,
-                'file_id': file_id
+                'file_id': media.file_id
             })
-
-            await self.search_col.insert_one({
-                'file_name': file_name,
-                'file_size': file_size, 
-                'caption': caption,
-                'link_id': unique_id
-            })
-            return 'saved'
             
+            search_docs.append({
+                'file_name': file_name,
+                'file_size': media.file_size, 
+                'caption': caption,
+                'link_id': current_id
+            })
+            
+            current_id += 1
+
+        # 2. Bulk Insert (Try-Catch for Duplicates)
+        saved_count = 0
+        duplicate_count = 0
+        
+        try:
+            # Ordered=False ka matlab: Agar ek fail ho (duplicate), to baaki rukenge nahi
+            if data_docs:
+                await self.data_col.insert_many(data_docs, ordered=False)
+                await self.search_col.insert_many(search_docs, ordered=False)
+                saved_count = len(data_docs)
         except Exception as e:
-            print(f"Error saving file: {e}")
-            return 'error'
+            # Agar duplicate error aaye (BulkWriteError), to hum count nikalenge
+            if "E11000" in str(e):
+                # Jitne insert ho gaye wo saved, baaki duplicate
+                # Exact count nikalna mushkil hai bulk me bina slow kiye, 
+                # hum assume karte hain jo fail huye wo duplicate hain.
+                try:
+                    saved_count = e.details['nInserted']
+                    duplicate_count = count - saved_count
+                except:
+                    saved_count = 0
+                    duplicate_count = count
+            else:
+                print(f"Bulk Save Error: {e}")
+                
+        return saved_count, duplicate_count
+
+    # Single File Save (Backup ke liye)
+    async def get_file_details(self, link_id):
+        return await self.data_col.find_one({'_id': int(link_id)})
 
     async def get_search_results(self, query):
-        try:
-            regex = re.compile(query, re.IGNORECASE)
-            search_query = {
-                "$or": [
-                    {"file_name": regex}, 
-                    {"caption": regex}
-                ]
-            }
-            cursor = self.search_col.find(search_query)
-            cursor.sort('$natural', -1)
-            files = await cursor.to_list(length=10)
-            return files
-        except Exception as e:
-            print(f"Search Error: {e}")
-            return []
-
-    async def get_file_details(self, link_id):
-        try:
-            return await self.data_col.find_one({'_id': int(link_id)})
-        except Exception as e:
-            print(f"Get File Error: {e}")
-            return None
+        regex = re.compile(query, re.IGNORECASE)
+        search_query = {"$or": [{"file_name": regex}, {"caption": regex}]}
+        cursor = self.search_col.find(search_query)
+        cursor.sort('$natural', -1)
+        files = await cursor.to_list(length=10)
+        return files
 
     async def total_files_count(self):
         return await self.data_col.count_documents({})

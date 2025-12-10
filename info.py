@@ -13,3 +13,5 @@ DATABASE_NAME = os.environ.get("DATABASE_NAME", "MyBotDB")
 ADMINS = [int(i) for i in os.environ.get("ADMINS", "").split(" ")] if os.environ.get("ADMINS") else []
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0")) # Agar log channel nahi hai to 0 rakhein
 PORT = int(os.environ.get("PORT", "8080"))
+# Channel ID jahan files upload hoti hain (Multiple IDs comma laga kar daal sakte hain)
+CHANNELS = [-1003342421845] 

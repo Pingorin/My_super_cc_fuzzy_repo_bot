@@ -1,6 +1,6 @@
 import logging
 import time
-import re # ✅ Regex import karna zaruri hai
+import re
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
@@ -19,27 +19,28 @@ def get_size(size):
 @Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index"]))
 async def auto_filter(client, message):
     
-    # 1. User ka text lo
     raw_query = message.text
     if len(raw_query) < 2: return
 
-    # --- 🧹 CLEANING LOGIC (Kachra Hatao) ---
-    # Ye regex in shabdon ko hatayega:
-    # - Please, pls, plzz, plz
-    # - Send, give, want, need, get
-    # - Movie, link, file, video
-    # - New, latest, full
+    # --- 🧹 ADVANCED CLEANING (Apki List Ke Hisab Se) ---
     
-    clean_regex = r"\b(pl(ea)?s[e\.]?|pl[sz]+|send|give|want|need|get|link|file|movie|series|video|new|latest|full)\b"
+    # Is regex me wo sab words hain jo apne bataye:
+    # 1. Requests: please, pls, plz, ples, send, give, gib, find, chahiye
+    # 2. Actions: send me
+    # 3. Common: movie, new, latest, full movie, file, link
+    # 4. Greetings: hello, hi, bro, bhai, sir, bruh
+    # 5. Languages: hindi, tamil, malayalam, eng
+    # 6. Extras: with subtitles, hd
+    
+    clean_regex = r"\b(please|pls|plz|ples|send(\s+me)?|give|gib|find|chahiye|movie|new|latest|full\s+movie|file|link|hello|hi|bro|bhai|sir|bruh|hindi|tamil|malayalam|eng|with\s+subtitles|hd)\b"
     
     # Replace junk with empty space
     query = re.sub(clean_regex, "", raw_query, flags=re.IGNORECASE)
     
-    # Extra spaces hatao (e.g. "  Avengers  " -> "Avengers")
+    # Extra spaces hatao
     query = re.sub(r"\s+", " ", query).strip()
     
-    # Agar cleaning ke baad kuch bacha hi nahi (e.g. user ne sirf "Please send" likha tha)
-    # To original text hi use kar lo fallback ke liye
+    # Fallback: Agar sab kuch delete ho gaya (e.g. user ne sirf "Hello Sir" likha tha)
     if len(query) < 2:
         query = raw_query
     # ----------------------------------------
@@ -48,7 +49,6 @@ async def auto_filter(client, message):
     start_time = time.time()
 
     try:
-        # Ab hum 'clean query' pass karenge
         files = await Media.get_search_results(query)
         
         end_time = time.time()
@@ -62,7 +62,6 @@ async def auto_filter(client, message):
             )
             return
 
-        # Button parser me bhi clean query bhejo taaki smart logic kaam kare
         buttons = btn_parser(files, query)
         
         msg_text = (

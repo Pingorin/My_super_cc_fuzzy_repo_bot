@@ -17,7 +17,10 @@ class MediaDB:
         await self.search_col.create_index("file_name")
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
-        await self.data_col.create_index([("chat_id", 1), ("msg_id", 1)], unique=True)
+        
+        # ✅ UNIQUE INDEX on file_unique_id
+        # Isse database khud duplicates ko rok dega
+        await self.data_col.create_index("file_unique_id", unique=True)
 
     async def get_next_sequence_value(self, sequence_name, increment=1):
         doc = await self.counters.find_one_and_update(
@@ -28,34 +31,34 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
-    # --- 🚀 SMART SAVE BATCH (Fixes 'No Result' Issue) ---
+    # --- 🚀 GLOBAL DUPLICATE CHECK LOGIC ---
     async def save_batch(self, items):
         if not items: return 0, 0 
         
-        # 1. Pehle Duplicate Filter Karo (DB se pucho)
-        chat_id = items[0][1].chat.id
-        all_msg_ids = [msg.id for media, msg in items]
+        # 1. Sabke Unique IDs nikalo
+        # items structure: [(media, message), ...]
+        unique_ids = [media.file_unique_id for media, msg in items]
         
-        # Database me check karo kon se msg_id pehle se hain
+        # 2. Database me check karo kon se Unique IDs pehle se hain
         existing_docs = await self.data_col.find({
-            "chat_id": chat_id,
-            "msg_id": {"$in": all_msg_ids}
+            "file_unique_id": {"$in": unique_ids}
         }).to_list(length=len(items))
         
-        existing_msg_ids = set(doc['msg_id'] for doc in existing_docs)
+        existing_unique_ids = set(doc['file_unique_id'] for doc in existing_docs)
         
-        # Sirf NEW files ko filter karo
+        # 3. Sirf bilkul NAYI files filter karo
         new_items = []
         for media, msg in items:
-            if msg.id not in existing_msg_ids:
+            if media.file_unique_id not in existing_unique_ids:
                 new_items.append((media, msg))
         
+        # Jo bachi hain wo duplicates hain
         duplicate_count = len(items) - len(new_items)
         
         if not new_items:
-            return 0, duplicate_count # Sab duplicate the
+            return 0, duplicate_count 
             
-        # 2. Ab Sirf New Files ke liye ID generate karo
+        # 4. Ab Sirf New Files ke liye ID generate karo
         count = len(new_items)
         end_sequence = await self.get_next_sequence_value("file_id_counter", increment=count)
         start_sequence = end_sequence - count + 1
@@ -88,7 +91,8 @@ class MediaDB:
                 '_id': current_id,
                 'msg_id': message.id,
                 'chat_id': message.chat.id,
-                'file_id': media.file_id
+                'file_id': media.file_id,
+                'file_unique_id': media.file_unique_id # ✅ Ye save karna zaruri hai check ke liye
             })
             
             search_docs.append({
@@ -103,19 +107,29 @@ class MediaDB:
         
         try:
             if data_docs:
-                # Ab error nahi aayega kyunki humne duplicates pehle hi hata diye
+                # ordered=False taaki agar ek fail ho to baaki ruken nahi
                 await self.data_col.insert_many(data_docs, ordered=False)
                 await self.search_col.insert_many(search_docs, ordered=False)
                 saved_count = len(data_docs)
         except Exception as e:
-            print(f"Bulk Save Error: {e}")
+            # Agar Unique Index ki wajah se error aaye
+            if "E11000" in str(e):
+                 # Ye rare case hai kyunki humne upar check kar liya tha, 
+                 # par safety ke liye handle kar rahe hain.
+                try:
+                    saved_count = e.details['nInserted']
+                    duplicate_count += (count - saved_count)
+                except:
+                    pass
+            else:
+                print(f"Bulk Save Error: {e}")
             
         return saved_count, duplicate_count
 
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    # Atlas Search Logic (Same as before)
+    # Atlas Search Logic (Typos + Smart Search)
     async def get_search_results(self, query):
         try:
             pipeline = [

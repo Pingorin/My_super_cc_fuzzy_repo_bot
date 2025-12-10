@@ -1,5 +1,6 @@
 import logging
-import time # ✅ Timer ke liye import
+import time
+import re # ✅ Regex import karna zaruri hai
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
@@ -17,34 +18,56 @@ def get_size(size):
 
 @Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index"]))
 async def auto_filter(client, message):
-    query = message.text
-    if len(query) < 2: return
+    
+    # 1. User ka text lo
+    raw_query = message.text
+    if len(raw_query) < 2: return
+
+    # --- 🧹 CLEANING LOGIC (Kachra Hatao) ---
+    # Ye regex in shabdon ko hatayega:
+    # - Please, pls, plzz, plz
+    # - Send, give, want, need, get
+    # - Movie, link, file, video
+    # - New, latest, full
+    
+    clean_regex = r"\b(pl(ea)?s[e\.]?|pl[sz]+|send|give|want|need|get|link|file|movie|series|video|new|latest|full)\b"
+    
+    # Replace junk with empty space
+    query = re.sub(clean_regex, "", raw_query, flags=re.IGNORECASE)
+    
+    # Extra spaces hatao (e.g. "  Avengers  " -> "Avengers")
+    query = re.sub(r"\s+", " ", query).strip()
+    
+    # Agar cleaning ke baad kuch bacha hi nahi (e.g. user ne sirf "Please send" likha tha)
+    # To original text hi use kar lo fallback ke liye
+    if len(query) < 2:
+        query = raw_query
+    # ----------------------------------------
 
     # ✅ Timer Start
     start_time = time.time()
 
     try:
+        # Ab hum 'clean query' pass karenge
         files = await Media.get_search_results(query)
         
-        # ✅ Timer End
         end_time = time.time()
-        time_taken = round(end_time - start_time, 2) # Seconds calculate kiye
+        time_taken = round(end_time - start_time, 2)
 
         if not files:
-            # Agar file nahi mili, to bhi time dikhayenge
             await message.reply_text(
                 f"⚡ **Hey {message.from_user.mention}!**\n"
-                f"❌ **No results found.**\n"
+                f"❌ **No results found for:** `{query}`\n"
                 f"⏳ **Time Taken:** {time_taken} seconds"
             )
             return
 
+        # Button parser me bhi clean query bhejo taaki smart logic kaam kare
         buttons = btn_parser(files, query)
         
-        # ✅ Aapka Custom Message Style
         msg_text = (
             f"⚡ **Hey {message.from_user.mention}!**\n"
-            f"👻 **Here are your results...**\n"
+            f"👻 **Here are your results for:** `{query}`\n"
             f"⏳ **Time Taken:** {time_taken} seconds"
         )
         
@@ -79,7 +102,6 @@ def btn_parser(files, query):
         btn_text = f"📂 {display_name} [{size_str}]"
         
         if link_id is not None:
-            # Deep Link URL
             url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             

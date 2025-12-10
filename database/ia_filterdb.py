@@ -17,9 +17,6 @@ class MediaDB:
         await self.search_col.create_index("file_name")
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
-        
-        # ✅ UNIQUE INDEX on file_unique_id
-        # Isse database khud duplicates ko rok dega
         await self.data_col.create_index("file_unique_id", unique=True)
 
     async def get_next_sequence_value(self, sequence_name, increment=1):
@@ -31,34 +28,32 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
-    # --- 🚀 GLOBAL DUPLICATE CHECK LOGIC ---
+    # --- 🚀 ROBUST SAVE BATCH ---
     async def save_batch(self, items):
         if not items: return 0, 0 
         
-        # 1. Sabke Unique IDs nikalo
-        # items structure: [(media, message), ...]
+        # 1. Global Duplicate Check (Unique ID)
         unique_ids = [media.file_unique_id for media, msg in items]
         
-        # 2. Database me check karo kon se Unique IDs pehle se hain
-        existing_docs = await self.data_col.find({
-            "file_unique_id": {"$in": unique_ids}
-        }).to_list(length=len(items))
-        
-        existing_unique_ids = set(doc['file_unique_id'] for doc in existing_docs)
-        
-        # 3. Sirf bilkul NAYI files filter karo
+        try:
+            existing_docs = await self.data_col.find({
+                "file_unique_id": {"$in": unique_ids}
+            }).to_list(length=len(items))
+            existing_unique_ids = set(doc['file_unique_id'] for doc in existing_docs)
+        except Exception as e:
+            print(f"Error checking duplicates: {e}")
+            existing_unique_ids = set()
+
         new_items = []
         for media, msg in items:
             if media.file_unique_id not in existing_unique_ids:
                 new_items.append((media, msg))
         
-        # Jo bachi hain wo duplicates hain
         duplicate_count = len(items) - len(new_items)
-        
         if not new_items:
             return 0, duplicate_count 
             
-        # 4. Ab Sirf New Files ke liye ID generate karo
+        # 2. ID Generation
         count = len(new_items)
         end_sequence = await self.get_next_sequence_value("file_id_counter", increment=count)
         start_sequence = end_sequence - count + 1
@@ -69,15 +64,18 @@ class MediaDB:
         
         for media, message in new_items:
             def clean_text(text):
-                if not text: return None
+                if not text: return ""
                 text = re.sub(r"\[@RunningMoviesHD\]", "", text, flags=re.IGNORECASE)
                 text = re.sub(r"@\w+", "", text)
                 text = re.sub(r"[-_]", " ", text)
                 return re.sub(r"\s+", " ", text).strip()
 
+            # ✅ Fix: File Name kabhi None nahi hona chahiye
             file_name = clean_text(media.file_name)
+            if not file_name:
+                file_name = "Unknown File"
+
             caption = message.caption.html if message.caption else None
-            
             if caption:
                 caption = clean_text(caption)
                 regex = r"(?i)(.*?)(\.mkv|\.mp4|\.avi|\.webm|\.m4v|\.flv)"
@@ -92,7 +90,7 @@ class MediaDB:
                 'msg_id': message.id,
                 'chat_id': message.chat.id,
                 'file_id': media.file_id,
-                'file_unique_id': media.file_unique_id # ✅ Ye save karna zaruri hai check ke liye
+                'file_unique_id': media.file_unique_id
             })
             
             search_docs.append({
@@ -105,31 +103,32 @@ class MediaDB:
 
         saved_count = 0
         
-        try:
-            if data_docs:
-                # ordered=False taaki agar ek fail ho to baaki ruken nahi
+        # 3. Insertion (Separated for Debugging)
+        if data_docs:
+            try:
+                # Step A: Insert into Data Collection
                 await self.data_col.insert_many(data_docs, ordered=False)
+            except Exception as e:
+                print(f"❌ Error Saving to FILES_DATA: {e}")
+                # Agar data save nahi hua to search bhi mat karo
+                return 0, count 
+
+            try:
+                # Step B: Insert into Search Collection
                 await self.search_col.insert_many(search_docs, ordered=False)
                 saved_count = len(data_docs)
-        except Exception as e:
-            # Agar Unique Index ki wajah se error aaye
-            if "E11000" in str(e):
-                 # Ye rare case hai kyunki humne upar check kar liya tha, 
-                 # par safety ke liye handle kar rahe hain.
-                try:
-                    saved_count = e.details['nInserted']
-                    duplicate_count += (count - saved_count)
-                except:
-                    pass
-            else:
-                print(f"Bulk Save Error: {e}")
-            
+            except Exception as e:
+                # ✅ Yahan Error pakda jayega
+                print(f"❌ CRITICAL ERROR Saving to FILES_SEARCH: {e}")
+                # Debugging ke liye print karo ki kya save karne ki koshish ki thi
+                print(f"Failed Doc Sample: {search_docs[0]}")
+                
         return saved_count, duplicate_count
 
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    # Atlas Search Logic (Typos + Smart Search)
+    # Atlas Search Logic
     async def get_search_results(self, query):
         try:
             pipeline = [

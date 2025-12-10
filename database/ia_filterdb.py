@@ -28,11 +28,9 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
-    # --- 🚀 ROBUST SAVE BATCH (Standard Caption) ---
     async def save_batch(self, items):
         if not items: return 0, 0 
         
-        # 1. Global Duplicate Check
         unique_ids = [media.file_unique_id for media, msg in items]
         try:
             existing_docs = await self.data_col.find({
@@ -48,10 +46,8 @@ class MediaDB:
                 new_items.append((media, msg))
         
         pre_duplicate_count = len(items) - len(new_items)
-        if not new_items:
-            return 0, pre_duplicate_count 
+        if not new_items: return 0, pre_duplicate_count 
             
-        # 2. ID Generation
         count = len(new_items)
         end_sequence = await self.get_next_sequence_value("file_id_counter", increment=count)
         start_sequence = end_sequence - count + 1
@@ -63,25 +59,21 @@ class MediaDB:
         for media, message in new_items:
             def clean_text(text):
                 if not text: return ""
-                # Sirf specific junk remove karega
                 text = re.sub(r"\[@RunningMoviesHD\]", "", text, flags=re.IGNORECASE)
-                text = re.sub(r"@\w+", "", text) # Username removal
-                text = re.sub(r"[-_]", " ", text) # Hyphen removal
+                text = re.sub(r"@\w+", "", text)
+                text = re.sub(r"[-_]", " ", text)
                 return re.sub(r"\s+", " ", text).strip()
 
             file_name = clean_text(media.file_name)
             if not file_name: file_name = "Unknown File"
 
-            # ✅ CAPTION LOGIC (Rich Caption maintained)
             caption = message.caption.html if message.caption else None
             if caption:
                 caption = clean_text(caption)
-                # Sirf extension ke baad ka hissa cut karega, baaki sab rakhega
                 regex = r"(?i)(.*?)(\.mkv|\.mp4|\.avi|\.webm|\.m4v|\.flv)"
                 match = re.search(regex, caption, re.DOTALL)
                 if match:
                     caption = match.group(1) + match.group(2)
-                    # HTML Tags fix
                     if "<b>" in caption and "</b>" not in caption: caption += "</b>"
                     if "<i>" in caption and "</i>" not in caption: caption += "</i>"
 
@@ -96,7 +88,7 @@ class MediaDB:
             search_docs.append({
                 'file_name': file_name,
                 'file_size': media.file_size, 
-                'caption': caption, # ✅ Full cleaned caption saved
+                'caption': caption,
                 'link_id': current_id
             })
             current_id += 1
@@ -104,31 +96,24 @@ class MediaDB:
         saved_count = 0
         failed_indices = []
         
-        # 3. Safe Insertion
         if data_docs:
             try:
-                # Step A: Files Data
                 await self.data_col.insert_many(data_docs, ordered=False)
                 saved_count = len(data_docs)
-                
             except BulkWriteError as bwe:
                 saved_count = bwe.details['nInserted']
                 for error in bwe.details['writeErrors']:
                     failed_indices.append(error['index'])
                 pre_duplicate_count += len(failed_indices)
-                print(f"⚠️ Partial Save: {saved_count} saved.")
-                
             except Exception as e:
                 print(f"❌ Critical Error Saving FILES_DATA: {e}")
                 return 0, count + pre_duplicate_count
 
-            # Step B: Files Search (Only Valid)
             if saved_count > 0:
                 valid_search_docs = []
                 for i, doc in enumerate(search_docs):
                     if i not in failed_indices:
                         valid_search_docs.append(doc)
-                
                 if valid_search_docs:
                     try:
                         await self.search_col.insert_many(valid_search_docs, ordered=False)
@@ -140,30 +125,53 @@ class MediaDB:
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    # Atlas Search Logic (Typos Allowed)
+    # 🚀 UPDATED SEARCH LOGIC (STRICTER) 🚀
     async def get_search_results(self, query):
         try:
-            pipeline = [
-                {
+            # Query ko shabdon me todo (Split by space)
+            words = query.split()
+            
+            # Agar 1 hi shabd hai, to purana logic use karo
+            if len(words) <= 1:
+                search_stage = {
                     "$search": {
                         "index": "default",
                         "text": {
                             "query": query,
                             "path": ["file_name", "caption"],
-                            "fuzzy": {
-                                "maxEdits": 2,
-                                "prefixLength": 0,
-                                "maxExpansions": 50
-                            }
+                            "fuzzy": {"maxEdits": 2, "prefixLength": 0, "maxExpansions": 50}
                         }
                     }
-                },
-                {"$limit": 10}
-            ]
+                }
+            else:
+                # Agar multiple words hain (e.g., "The Game")
+                # To hum "Compound" use karenge taki SAARE words match hona zaruri ho
+                must_clauses = []
+                for word in words:
+                    must_clauses.append({
+                        "text": {
+                            "query": word,
+                            "path": ["file_name", "caption"],
+                            "fuzzy": {"maxEdits": 1} # Strictness: Multi-word me typo tolerance kam rakha hai
+                        }
+                    })
+                
+                search_stage = {
+                    "$search": {
+                        "index": "default",
+                        "compound": {
+                            "must": must_clauses # ✅ 'must' means ALL words are required
+                        }
+                    }
+                }
+
+            pipeline = [search_stage, {"$limit": 10}]
             cursor = self.search_col.aggregate(pipeline)
             files = await cursor.to_list(length=10)
             return files
+            
         except Exception as e:
+            print(f"Atlas Search Error: {e}")
             regex = re.compile(query, re.IGNORECASE)
             cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})
             cursor.sort('$natural', -1)

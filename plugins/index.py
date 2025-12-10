@@ -14,18 +14,24 @@ async def delete_database_handler(bot, message):
         InlineKeyboardButton("✅ YES, Delete All", callback_data="confirm_delete"),
         InlineKeyboardButton("❌ Cancel", callback_data="cancel_index")
     ]]
-    await message.reply_text("⚠️ **WARNING:** Kya aap Saara Data Delete karna chahte hain?", reply_markup=InlineKeyboardMarkup(btn))
+    await message.reply_text("⚠️ **WARNING:** Kya aap Saara Data Delete karna chahte hain?\n(Index Safe rahega, sirf files jayengi)", reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex("^confirm_delete"))
 async def confirm_delete_handler(bot, query):
     if query.from_user.id not in ADMINS: return
-    await query.message.edit_text("⏳ **Deleting Database...**")
+    await query.message.edit_text("⏳ **Deleting Data (Keeping Index Safe)...**")
     try:
-        await Media.db.drop_collection("files_data")
-        await Media.db.drop_collection("files_search")
-        await Media.db.drop_collection("counters")
+        # ⚠️ OLD WAY (Danger): await Media.db.drop_collection("files_search")
+        
+        # ✅ NEW WAY (Safe): Sirf andar ka data uda do, Index mat chedo
+        await Media.search_col.delete_many({}) 
+        await Media.data_col.delete_many({})
+        await Media.counters.delete_many({})
+        
+        # Standard indexes refresh (Optional, but good)
         await Media.ensure_indexes()
-        await query.message.edit_text("✅ **Reset Successful!**")
+        
+        await query.message.edit_text("✅ **Reset Successful!**\nJSON Index abhi bhi safe hai. Aap turant /index kar sakte hain.")
     except Exception as e:
         await query.message.edit_text(f"❌ Error: {e}")
 
@@ -96,7 +102,6 @@ async def start_index(bot, query):
             ids_to_fetch = list(range(current, end))
             
             try:
-                # 1. Fetch
                 msgs = await bot.get_messages(chat_id, ids_to_fetch)
             except FloodWait as e:
                 await asyncio.sleep(e.value)
@@ -105,26 +110,23 @@ async def start_index(bot, query):
                 await query.message.edit(f"❌ Error fetching: {e}")
                 break
 
-            batch_tasks = [] # List for Bulk Save
+            batch_tasks = [] 
             
             for m in msgs:
                 stats['total'] += 1
                 if not m or m.empty: continue
                 
-                # Sirf Video/Docs
                 media = m.document or m.video 
                 if media:
                     batch_tasks.append((media, m))
                 else:
                     stats['skip'] += 1
 
-            # 2. BULK SAVE (Yahan Magic Hoga)
             if batch_tasks:
                 saved, dups = await Media.save_batch(batch_tasks)
                 stats['saved'] += saved
                 stats['dup'] += dups
 
-            # 3. Status Update
             try: 
                 msg_text = (
                     f"🚀 **Ultra-Fast Indexing...**\n"

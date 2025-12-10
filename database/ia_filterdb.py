@@ -98,7 +98,7 @@ class MediaDB:
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    # 🚀 ATLAS SEARCH LOGIC (LUCENE) 🚀
+    # 🚀 ATLAS SEARCH LOGIC (LUCENE - MAX POWER) 🚀
     async def get_search_results(self, query):
         try:
             # $search Aggregation Pipeline
@@ -110,7 +110,9 @@ class MediaDB:
                             "query": query,
                             "path": ["file_name", "caption"], # Kahan dhundna hai
                             "fuzzy": {
-                                "maxEdits": 1 # 1 letter ki galti maaf (Typo Tolerance)
+                                "maxEdits": 2,       # ✅ Max Limit (3 allowed nahi hai, 2 best hai)
+                                "prefixLength": 0,   # ✅ Pehla letter bhi galat ho sakta hai
+                                "maxExpansions": 50  # ✅ Zyada variations check karega
                             }
                         }
                     }

@@ -1,7 +1,7 @@
 import logging
 import re
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.errors import BulkWriteError # ✅ Specific Error Import
+from pymongo.errors import BulkWriteError
 from info import DATABASE_URI, DATABASE_NAME
 
 class MediaDB:
@@ -28,11 +28,11 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
-    # --- 🚀 BULK SAVE (FIXED FOR FALSE DUPLICATES) ---
+    # --- 🚀 PERFECT SAVE BATCH (No Mismatch) ---
     async def save_batch(self, items):
         if not items: return 0, 0 
         
-        # 1. Global Duplicate Check (DB se pucho)
+        # 1. Global Duplicate Check
         unique_ids = [media.file_unique_id for media, msg in items]
         try:
             existing_docs = await self.data_col.find({
@@ -47,9 +47,7 @@ class MediaDB:
             if media.file_unique_id not in existing_unique_ids:
                 new_items.append((media, msg))
         
-        # Pre-calculated duplicates
         pre_duplicate_count = len(items) - len(new_items)
-        
         if not new_items:
             return 0, pre_duplicate_count 
             
@@ -100,34 +98,42 @@ class MediaDB:
             current_id += 1
 
         saved_count = 0
+        failed_indices = [] # Track failed items
         
-        # 3. Insertion with Error Handling
+        # 3. Safe Insertion
         if data_docs:
             try:
-                # Step A: Insert FILES_DATA
+                # Step A: Files Data Save karo
                 await self.data_col.insert_many(data_docs, ordered=False)
-                # Agar sab sahi gaya
                 saved_count = len(data_docs)
                 
             except BulkWriteError as bwe:
-                # ✅ FIX: Agar kuch fail huye, to jo pass huye unhe count karo
                 saved_count = bwe.details['nInserted']
-                # Jo fail huye wo duplicates me add kar do
-                pre_duplicate_count += (len(data_docs) - saved_count)
-                print(f"⚠️ Bulk Write Error (Partial Save): Saved {saved_count}, Errors {len(data_docs) - saved_count}")
+                
+                # ✅ CRITICAL FIX: Jo fail huye, unka index note karo
+                for error in bwe.details['writeErrors']:
+                    failed_indices.append(error['index'])
+                
+                pre_duplicate_count += len(failed_indices)
+                print(f"⚠️ Partial Save: {saved_count} saved, {len(failed_indices)} failed.")
                 
             except Exception as e:
                 print(f"❌ Critical Error Saving FILES_DATA: {e}")
                 return 0, count + pre_duplicate_count
 
-            # Step B: Insert FILES_SEARCH (Sirf unka jo step A me pass huye)
-            # Yahan hum assume kar rahe hain ki IDs sync me rahenge.
-            # Atlas Search ke liye ye critical nahi hai agar ek-aad miss ho jaye.
+            # Step B: Files Search Save karo (Sirf Valid Wale)
             if saved_count > 0:
-                try:
-                    await self.search_col.insert_many(search_docs[:saved_count], ordered=False)
-                except Exception as e:
-                    print(f"⚠️ Search Index Error: {e}")
+                valid_search_docs = []
+                # Sirf unhi ko list me dalo jo fail nahi huye
+                for i, doc in enumerate(search_docs):
+                    if i not in failed_indices:
+                        valid_search_docs.append(doc)
+                
+                if valid_search_docs:
+                    try:
+                        await self.search_col.insert_many(valid_search_docs, ordered=False)
+                    except Exception as e:
+                        print(f"⚠️ Search Index Error: {e}")
                 
         return saved_count, pre_duplicate_count
 
@@ -158,7 +164,6 @@ class MediaDB:
             files = await cursor.to_list(length=10)
             return files
         except Exception as e:
-            # Fallback
             regex = re.compile(query, re.IGNORECASE)
             cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})
             cursor.sort('$natural', -1)

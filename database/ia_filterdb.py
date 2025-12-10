@@ -28,7 +28,7 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
-    # --- 🚀 PERFECT SAVE BATCH (No Mismatch) ---
+    # --- 🚀 ROBUST SAVE BATCH (Standard Caption) ---
     async def save_batch(self, items):
         if not items: return 0, 0 
         
@@ -63,21 +63,25 @@ class MediaDB:
         for media, message in new_items:
             def clean_text(text):
                 if not text: return ""
+                # Sirf specific junk remove karega
                 text = re.sub(r"\[@RunningMoviesHD\]", "", text, flags=re.IGNORECASE)
-                text = re.sub(r"@\w+", "", text)
-                text = re.sub(r"[-_]", " ", text)
+                text = re.sub(r"@\w+", "", text) # Username removal
+                text = re.sub(r"[-_]", " ", text) # Hyphen removal
                 return re.sub(r"\s+", " ", text).strip()
 
             file_name = clean_text(media.file_name)
             if not file_name: file_name = "Unknown File"
 
+            # ✅ CAPTION LOGIC (Rich Caption maintained)
             caption = message.caption.html if message.caption else None
             if caption:
                 caption = clean_text(caption)
+                # Sirf extension ke baad ka hissa cut karega, baaki sab rakhega
                 regex = r"(?i)(.*?)(\.mkv|\.mp4|\.avi|\.webm|\.m4v|\.flv)"
                 match = re.search(regex, caption, re.DOTALL)
                 if match:
                     caption = match.group(1) + match.group(2)
+                    # HTML Tags fix
                     if "<b>" in caption and "</b>" not in caption: caption += "</b>"
                     if "<i>" in caption and "</i>" not in caption: caption += "</i>"
 
@@ -92,39 +96,35 @@ class MediaDB:
             search_docs.append({
                 'file_name': file_name,
                 'file_size': media.file_size, 
-                'caption': caption,
+                'caption': caption, # ✅ Full cleaned caption saved
                 'link_id': current_id
             })
             current_id += 1
 
         saved_count = 0
-        failed_indices = [] # Track failed items
+        failed_indices = []
         
         # 3. Safe Insertion
         if data_docs:
             try:
-                # Step A: Files Data Save karo
+                # Step A: Files Data
                 await self.data_col.insert_many(data_docs, ordered=False)
                 saved_count = len(data_docs)
                 
             except BulkWriteError as bwe:
                 saved_count = bwe.details['nInserted']
-                
-                # ✅ CRITICAL FIX: Jo fail huye, unka index note karo
                 for error in bwe.details['writeErrors']:
                     failed_indices.append(error['index'])
-                
                 pre_duplicate_count += len(failed_indices)
-                print(f"⚠️ Partial Save: {saved_count} saved, {len(failed_indices)} failed.")
+                print(f"⚠️ Partial Save: {saved_count} saved.")
                 
             except Exception as e:
                 print(f"❌ Critical Error Saving FILES_DATA: {e}")
                 return 0, count + pre_duplicate_count
 
-            # Step B: Files Search Save karo (Sirf Valid Wale)
+            # Step B: Files Search (Only Valid)
             if saved_count > 0:
                 valid_search_docs = []
-                # Sirf unhi ko list me dalo jo fail nahi huye
                 for i, doc in enumerate(search_docs):
                     if i not in failed_indices:
                         valid_search_docs.append(doc)
@@ -140,7 +140,7 @@ class MediaDB:
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    # Atlas Search Logic
+    # Atlas Search Logic (Typos Allowed)
     async def get_search_results(self, query):
         try:
             pipeline = [

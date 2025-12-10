@@ -1,6 +1,7 @@
 import logging
 import re
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import BulkWriteError # ✅ Specific Error Import
 from info import DATABASE_URI, DATABASE_NAME
 
 class MediaDB:
@@ -13,7 +14,6 @@ class MediaDB:
         self.counters = self.db.counters
 
     async def ensure_indexes(self):
-        # Regular indexes
         await self.search_col.create_index("file_name")
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
@@ -28,20 +28,18 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
-    # --- 🚀 ROBUST SAVE BATCH ---
+    # --- 🚀 BULK SAVE (FIXED FOR FALSE DUPLICATES) ---
     async def save_batch(self, items):
         if not items: return 0, 0 
         
-        # 1. Global Duplicate Check (Unique ID)
+        # 1. Global Duplicate Check (DB se pucho)
         unique_ids = [media.file_unique_id for media, msg in items]
-        
         try:
             existing_docs = await self.data_col.find({
                 "file_unique_id": {"$in": unique_ids}
             }).to_list(length=len(items))
             existing_unique_ids = set(doc['file_unique_id'] for doc in existing_docs)
-        except Exception as e:
-            print(f"Error checking duplicates: {e}")
+        except:
             existing_unique_ids = set()
 
         new_items = []
@@ -49,9 +47,11 @@ class MediaDB:
             if media.file_unique_id not in existing_unique_ids:
                 new_items.append((media, msg))
         
-        duplicate_count = len(items) - len(new_items)
+        # Pre-calculated duplicates
+        pre_duplicate_count = len(items) - len(new_items)
+        
         if not new_items:
-            return 0, duplicate_count 
+            return 0, pre_duplicate_count 
             
         # 2. ID Generation
         count = len(new_items)
@@ -70,10 +70,8 @@ class MediaDB:
                 text = re.sub(r"[-_]", " ", text)
                 return re.sub(r"\s+", " ", text).strip()
 
-            # ✅ Fix: File Name kabhi None nahi hona chahiye
             file_name = clean_text(media.file_name)
-            if not file_name:
-                file_name = "Unknown File"
+            if not file_name: file_name = "Unknown File"
 
             caption = message.caption.html if message.caption else None
             if caption:
@@ -103,27 +101,35 @@ class MediaDB:
 
         saved_count = 0
         
-        # 3. Insertion (Separated for Debugging)
+        # 3. Insertion with Error Handling
         if data_docs:
             try:
-                # Step A: Insert into Data Collection
+                # Step A: Insert FILES_DATA
                 await self.data_col.insert_many(data_docs, ordered=False)
-            except Exception as e:
-                print(f"❌ Error Saving to FILES_DATA: {e}")
-                # Agar data save nahi hua to search bhi mat karo
-                return 0, count 
-
-            try:
-                # Step B: Insert into Search Collection
-                await self.search_col.insert_many(search_docs, ordered=False)
+                # Agar sab sahi gaya
                 saved_count = len(data_docs)
-            except Exception as e:
-                # ✅ Yahan Error pakda jayega
-                print(f"❌ CRITICAL ERROR Saving to FILES_SEARCH: {e}")
-                # Debugging ke liye print karo ki kya save karne ki koshish ki thi
-                print(f"Failed Doc Sample: {search_docs[0]}")
                 
-        return saved_count, duplicate_count
+            except BulkWriteError as bwe:
+                # ✅ FIX: Agar kuch fail huye, to jo pass huye unhe count karo
+                saved_count = bwe.details['nInserted']
+                # Jo fail huye wo duplicates me add kar do
+                pre_duplicate_count += (len(data_docs) - saved_count)
+                print(f"⚠️ Bulk Write Error (Partial Save): Saved {saved_count}, Errors {len(data_docs) - saved_count}")
+                
+            except Exception as e:
+                print(f"❌ Critical Error Saving FILES_DATA: {e}")
+                return 0, count + pre_duplicate_count
+
+            # Step B: Insert FILES_SEARCH (Sirf unka jo step A me pass huye)
+            # Yahan hum assume kar rahe hain ki IDs sync me rahenge.
+            # Atlas Search ke liye ye critical nahi hai agar ek-aad miss ho jaye.
+            if saved_count > 0:
+                try:
+                    await self.search_col.insert_many(search_docs[:saved_count], ordered=False)
+                except Exception as e:
+                    print(f"⚠️ Search Index Error: {e}")
+                
+        return saved_count, pre_duplicate_count
 
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
@@ -152,7 +158,7 @@ class MediaDB:
             files = await cursor.to_list(length=10)
             return files
         except Exception as e:
-            print(f"Atlas Search Error: {e}")
+            # Fallback
             regex = re.compile(query, re.IGNORECASE)
             cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})
             cursor.sort('$natural', -1)

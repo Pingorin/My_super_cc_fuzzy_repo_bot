@@ -1,8 +1,9 @@
 import logging
-from pyrogram import Client, filters
+import time # ✅ Timer ke liye import
+from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
-from utils import temp # ✅ Username ke liye zaruri hai
+from utils import temp 
 
 def get_size(size):
     if not size: return ""
@@ -19,16 +20,36 @@ async def auto_filter(client, message):
     query = message.text
     if len(query) < 2: return
 
+    # ✅ Timer Start
+    start_time = time.time()
+
     try:
         files = await Media.get_search_results(query)
+        
+        # ✅ Timer End
+        end_time = time.time()
+        time_taken = round(end_time - start_time, 2) # Seconds calculate kiye
+
         if not files:
-            await message.reply_text(f"❌ **No results found for:** `{query}`")
+            # Agar file nahi mili, to bhi time dikhayenge
+            await message.reply_text(
+                f"⚡ **Hey {message.from_user.mention}!**\n"
+                f"❌ **No results found.**\n"
+                f"⏳ **Time Taken:** {time_taken} seconds"
+            )
             return
 
         buttons = btn_parser(files, query)
         
+        # ✅ Aapka Custom Message Style
+        msg_text = (
+            f"⚡ **Hey {message.from_user.mention}!**\n"
+            f"👻 **Here are your results...**\n"
+            f"⏳ **Time Taken:** {time_taken} seconds"
+        )
+        
         await message.reply_text(
-            f"✅ **Found {len(files)} results for** `{query}`:",
+            text=msg_text,
             reply_markup=InlineKeyboardMarkup(buttons)
         )
         
@@ -58,12 +79,8 @@ def btn_parser(files, query):
         btn_text = f"📂 {display_name} [{size_str}]"
         
         if link_id is not None:
-            # ✅ YOUR CHANGE: Deep Linking URL
-            # Ab ye seedha PM me le jayega
+            # Deep Link URL
             url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     return buttons
-
-# ⚠️ Note: Yahan se 'get_file_handler' (Callback) HATA DIYA GAYA HAI.
-# Kyunki ab button click hone par seedha '/start' command chalega.

@@ -43,29 +43,28 @@ class UserChatDB:
     async def remove_ban(self, id, type="user"):
         await self.banned.delete_one({"id": int(id), "type": type})
 
-    # --- 🔒 3-LEVEL GROUP VERIFICATION SYSTEM ---
+    # --- 🔒 3-LEVEL GROUP VERIFICATION SYSTEM (FIXED) ---
     
     async def get_verify_status(self, user_id, chat_id, level):
         """
-        Check if a user is verified for a specific Group AND specific Level.
-        Structure: verify_status -> chat_id -> level -> timestamp
+        Check verification status safely handles legacy data.
         """
         user = await self.users.find_one({'id': int(user_id)})
         if user:
             all_verifications = user.get('verify_status', {})
 
-            # Agar purana format hai (not dict), to False return karo
-            if not isinstance(all_verifications, dict):
+            # 1. Agar root verify_status hi number hai (Legacy Data)
+            if isinstance(all_verifications, (int, float)):
                 return False
 
-            # Specific Chat ID ka data nikalo
+            # 2. Specific Chat ID ka data nikalo
             chat_verifications = all_verifications.get(str(chat_id), {})
 
-            # Agar chat verification purana format hai (int/float), to False return karo
+            # 3. Agar chat verification data number hai (Intermediate Legacy Data)
             if isinstance(chat_verifications, (int, float)):
                 return False
 
-            # Ab specific Level check karo (Default 0)
+            # 4. Ab specific Level check karo (Default 0)
             expiry = chat_verifications.get(str(level), 0)
             return expiry > time.time()
             
@@ -73,13 +72,34 @@ class UserChatDB:
 
     async def update_verify_status(self, user_id, chat_id, level):
         """
-        Update verification status for a specific Group AND Level.
+        Update verification status with Auto-Fix for legacy schema.
         """
         from info import VERIFY_EXPIRE
         expiry_date = time.time() + VERIFY_EXPIRE
         
-        # MongoDB Dot notation use karke specific level update karenge
-        # Key: verify_status.{chat_id}.{level}
+        # 1. Fetch user to check current schema state
+        user = await self.users.find_one({'id': int(user_id)})
+        
+        if user:
+            current_status = user.get('verify_status')
+            
+            # ⚠️ AUTO-FIX 1: Agar ROOT status purana (number) hai -> Reset to dict
+            if isinstance(current_status, (int, float)):
+                await self.users.update_one(
+                    {'id': int(user_id)},
+                    {'$set': {'verify_status': {}}}
+                )
+            
+            # ⚠️ AUTO-FIX 2: Agar ROOT dict hai, par CHAT data number hai -> Reset chat key
+            elif isinstance(current_status, dict):
+                chat_status = current_status.get(str(chat_id))
+                if isinstance(chat_status, (int, float)):
+                    await self.users.update_one(
+                        {'id': int(user_id)},
+                        {'$set': {f'verify_status.{str(chat_id)}': {}}}
+                    )
+
+        # 2. Safe Update using Dot Notation
         key_name = f"verify_status.{str(chat_id)}.{str(level)}"
         
         await self.users.update_one(

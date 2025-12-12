@@ -32,29 +32,32 @@ async def start_handler(client, message):
         await db.add_user(message.from_user.id)
 
     # ✅ CASE 1: Verification Return (Auto Send + Group Specific)
-    # Format: verify_USERID_CHATID_LINKID
+    # Format: /start verify_USERID_CHATID_LINKID
     if len(message.command) > 1 and message.command[1].startswith("verify_"):
         try:
+            # Command breakdown: verify, userid, chatid, linkid
             data = message.command[1].split("_")
             verify_id = data[1]
-            chat_id = data[2] # Target Group ID
+            chat_id = data[2] # The Group ID for which verification is done
             
+            # Security Check
             if str(verify_id) != str(message.from_user.id):
                 return await message.reply("❌ Ye link apke liye nahi hai.")
             
-            # 1. Database Update (Group Specific)
+            # 1. Update Database (Mark user as verified for this group)
             await db.update_verify_status(message.from_user.id, chat_id)
             
             await message.reply(
                 f"✅ **Verification Successful!**\n\n"
-                f"You are verified for **24 hours** in that group. 🚀"
+                f"You are verified for **24 hours** for that group. 🚀"
             )
 
             # 2. 🔥 AUTO SEND FILE LOGIC 🔥
+            # Check if LINKID exists in the command
             if len(data) > 3:
                 link_id = int(data[3])
                 
-                # Fetch File
+                # Fetch File Details
                 file_data = await Media.get_file_details(link_id)
                 search_data = await Media.search_col.find_one({'link_id': link_id})
                 
@@ -65,12 +68,14 @@ async def start_handler(client, message):
                 if not file_id:
                     return await message.reply("❌ Error: File ID missing.")
 
+                # Prepare Caption
                 db_caption = search_data.get('caption')
                 if not db_caption:
                     db_caption = f"📂 <b>{search_data.get('file_name')}</b>"
                 
                 final_caption = f"{db_caption}\n{script.CUSTOM_FOOTER}"
 
+                # Send File Immediately
                 try:
                     await client.send_cached_media(
                         chat_id=message.from_user.id,
@@ -93,17 +98,18 @@ async def start_handler(client, message):
             data = message.command[1].split("_")
             link_id = int(data[1])
             
-            # Agar link me Chat ID hai to use nikalo (Group se button click kiya)
-            # Agar nahi hai (Direct PM) to fallback current chat id
+            # Extract Chat ID (if present in link) to check specific group verification
+            # If coming from a direct link without group info, default to user's chat ID
             src_chat_id = data[2] if len(data) > 2 else str(message.chat.id)
             
             # --- 🔒 GROUP SPECIFIC VERIFICATION CHECK ---
             if IS_VERIFY:
-                # Check karo: Kya user 'src_chat_id' ke liye verified hai?
+                # Check if user is verified for 'src_chat_id'
                 is_verified = await db.get_verify_status(message.from_user.id, src_chat_id)
                 
                 if not is_verified:
-                    # Link generate karo: verify_USERID_CHATID_LINKID
+                    # Generate Link: verify_USERID_CHATID_LINKID
+                    # We embed 'link_id' so we can auto-send the file later
                     verify_url = f"https://t.me/{temp.U_NAME}?start=verify_{message.from_user.id}_{src_chat_id}_{link_id}"
                     
                     msg = await message.reply_text("Generating secure link... ⏳")
@@ -121,7 +127,7 @@ async def start_handler(client, message):
                     return 
             # -----------------------------
 
-            # Send File Code (Standard)
+            # Standard File Sending (If already verified)
             file_data = await Media.get_file_details(link_id)
             search_data = await Media.search_col.find_one({'link_id': link_id})
             

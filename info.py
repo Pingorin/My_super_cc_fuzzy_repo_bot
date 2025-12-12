@@ -19,5 +19,5 @@ CHANNELS = [-1003342421845]
 # --- VERIFICATION SYSTEM ---
 IS_VERIFY = True # Ise False karein agar verify system band karna ho
 VERIFY_EXPIRE = 24 * 60 * 60 # 24 Hours (Seconds me)
-SHORTLINK_URL = "softurl.in" # Default Website
-SHORTLINK_API = "613ce973446725bfe2bf909b320c7a1e84c4bdc8" # Default API Key
+SHORTLINK_URL = "shortxlinks.com" # Default Website
+SHORTLINK_API = "7c480930494be0edb7e546125c35d79840d5146b" # Default API Key

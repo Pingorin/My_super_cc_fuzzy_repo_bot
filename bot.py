@@ -15,7 +15,7 @@ from plugins.web_server import web_server
 import asyncio
 import time
 
-# Logging Setup (Error dekhne ke liye)
+# Logging Setup
 logging.config.fileConfig('logging.conf')
 logging.getLogger().setLevel(logging.INFO)
 logging.getLogger("pyrogram").setLevel(logging.ERROR)
@@ -40,7 +40,7 @@ class Bot(Client):
         
         me = await self.get_me()
         temp.ME = me.id
-        temp.U_NAME = me.username
+        temp.U_NAME = me.username # ✅ Ye verification link ke liye zaruri hai
         temp.B_NAME = me.first_name
         self.username = '@' + me.username
         

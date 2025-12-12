@@ -31,33 +31,64 @@ async def start_handler(client, message):
     if message.chat.type == "private":
         await db.add_user(message.from_user.id)
 
-    # ✅ CASE 1: Verification Return (Auto Send + Group Specific)
-    # Format: /start verify_USERID_CHATID_LINKID
+    # ✅ CASE 1: Verification Return (Handling 3 Levels + Group Specific)
+    # Format: verify_LEVEL_USERID_CHATID_LINKID
     if len(message.command) > 1 and message.command[1].startswith("verify_"):
         try:
-            # Command breakdown: verify, userid, chatid, linkid
             data = message.command[1].split("_")
-            verify_id = data[1]
-            chat_id = data[2] # The Group ID for which verification is done
+            # data structure: ['verify', 'level', 'userid', 'chatid', 'linkid']
+            level = int(data[1])
+            verify_id = data[2]
+            chat_id = data[3]
+            link_id = int(data[4]) if len(data) > 4 else 0
             
-            # Security Check
             if str(verify_id) != str(message.from_user.id):
                 return await message.reply("❌ Ye link apke liye nahi hai.")
             
-            # 1. Update Database (Mark user as verified for this group)
-            await db.update_verify_status(message.from_user.id, chat_id)
+            # 1. Update DB (Specific Level & Group)
+            await db.update_verify_status(message.from_user.id, chat_id, level)
+
+            # 2. Check Logic for Next Step
             
+            # --- LEVEL 1 DONE -> GO TO LEVEL 2 ---
+            if level == 1:
+                if not await db.get_verify_status(message.from_user.id, chat_id, 2):
+                    verify_url = f"https://t.me/{temp.U_NAME}?start=verify_2_{message.from_user.id}_{chat_id}_{link_id}"
+                    msg = await message.reply_text("✅ Level 1 Passed!\nGenerating Level 2 Link... ⏳")
+                    short_url = await get_shortlink(verify_url)
+                    await msg.delete()
+                    
+                    btn = [[InlineKeyboardButton("🚀 Verify Level 2", url=short_url)]]
+                    await message.reply_text(
+                        "🛑 **Second Verification Needed!**\n\nApne Level 1 paar kar liya hai. Ab Level 2 verify karein.",
+                        reply_markup=InlineKeyboardMarkup(btn)
+                    )
+                    return 
+            
+            # --- LEVEL 2 DONE -> GO TO LEVEL 3 ---
+            if level == 2:
+                if not await db.get_verify_status(message.from_user.id, chat_id, 3):
+                    verify_url = f"https://t.me/{temp.U_NAME}?start=verify_3_{message.from_user.id}_{chat_id}_{link_id}"
+                    msg = await message.reply_text("✅ Level 2 Passed!\nGenerating Final Level 3 Link... ⏳")
+                    short_url = await get_shortlink(verify_url)
+                    await msg.delete()
+                    
+                    btn = [[InlineKeyboardButton("🔥 Verify Level 3 (Final)", url=short_url)]]
+                    await message.reply_text(
+                        "🛑 **Final Verification!**\n\nBas ek step aur! Level 3 verify karte hi file mil jayegi.",
+                        reply_markup=InlineKeyboardMarkup(btn)
+                    )
+                    return 
+
+            # --- ALL LEVELS DONE ---
             await message.reply(
                 f"✅ **Verification Successful!**\n\n"
-                f"You are verified for **24 hours** for that group. 🚀"
+                f"You are verified for **24 hours** in this group. 🚀"
             )
 
-            # 2. 🔥 AUTO SEND FILE LOGIC 🔥
-            # Check if LINKID exists in the command
-            if len(data) > 3:
-                link_id = int(data[3])
-                
-                # Fetch File Details
+            # 3. 🔥 AUTO SEND FILE LOGIC 🔥
+            if link_id != 0:
+                # Fetch File
                 file_data = await Media.get_file_details(link_id)
                 search_data = await Media.search_col.find_one({'link_id': link_id})
                 
@@ -68,14 +99,12 @@ async def start_handler(client, message):
                 if not file_id:
                     return await message.reply("❌ Error: File ID missing.")
 
-                # Prepare Caption
                 db_caption = search_data.get('caption')
                 if not db_caption:
                     db_caption = f"📂 <b>{search_data.get('file_name')}</b>"
                 
                 final_caption = f"{db_caption}\n{script.CUSTOM_FOOTER}"
 
-                # Send File Immediately
                 try:
                     await client.send_cached_media(
                         chat_id=message.from_user.id,
@@ -98,36 +127,57 @@ async def start_handler(client, message):
             data = message.command[1].split("_")
             link_id = int(data[1])
             
-            # Extract Chat ID (if present in link) to check specific group verification
-            # If coming from a direct link without group info, default to user's chat ID
+            # Group ID nikalo (Button se aayi hai to hogi, nahi to current chat)
             src_chat_id = data[2] if len(data) > 2 else str(message.chat.id)
             
-            # --- 🔒 GROUP SPECIFIC VERIFICATION CHECK ---
+            # --- 🔒 3-LEVEL GROUP VERIFICATION CHECK ---
             if IS_VERIFY:
-                # Check if user is verified for 'src_chat_id'
-                is_verified = await db.get_verify_status(message.from_user.id, src_chat_id)
+                user_id = message.from_user.id
                 
-                if not is_verified:
-                    # Generate Link: verify_USERID_CHATID_LINKID
-                    # We embed 'link_id' so we can auto-send the file later
-                    verify_url = f"https://t.me/{temp.U_NAME}?start=verify_{message.from_user.id}_{src_chat_id}_{link_id}"
-                    
-                    msg = await message.reply_text("Generating secure link... ⏳")
+                # Check Level 1
+                if not await db.get_verify_status(user_id, src_chat_id, 1):
+                    verify_url = f"https://t.me/{temp.U_NAME}?start=verify_1_{user_id}_{src_chat_id}_{link_id}"
+                    msg = await message.reply_text("Generating Verification Link 1/3... ⏳")
                     short_url = await get_shortlink(verify_url)
                     await msg.delete()
                     
-                    btn = [[InlineKeyboardButton("✅ Click Here To Verify", url=short_url)]]
+                    btn = [[InlineKeyboardButton("Verify Level 1", url=short_url)]]
                     await message.reply_text(
-                        f"⚠️ **Verification Required!**\n\n"
-                        f"Aapne is Group ke liye verify nahi kiya hai.\n"
-                        f"File paane ke liye pehle verify karein.\n\n"
-                        f"_(Har group ka verification alag hai)_",
+                        f"⚠️ **Verification Required!**\n\nIs Group ke liye verification chahiye.\n**Step 1/3** complete karein.",
                         reply_markup=InlineKeyboardMarkup(btn)
                     )
-                    return 
+                    return
+
+                # Check Level 2
+                if not await db.get_verify_status(user_id, src_chat_id, 2):
+                    verify_url = f"https://t.me/{temp.U_NAME}?start=verify_2_{user_id}_{src_chat_id}_{link_id}"
+                    msg = await message.reply_text("Generating Verification Link 2/3... ⏳")
+                    short_url = await get_shortlink(verify_url)
+                    await msg.delete()
+                    
+                    btn = [[InlineKeyboardButton("Verify Level 2", url=short_url)]]
+                    await message.reply_text(
+                        f"⚠️ **Verification Required!**\n\n**Step 2/3** complete karein.",
+                        reply_markup=InlineKeyboardMarkup(btn)
+                    )
+                    return
+
+                # Check Level 3
+                if not await db.get_verify_status(user_id, src_chat_id, 3):
+                    verify_url = f"https://t.me/{temp.U_NAME}?start=verify_3_{user_id}_{src_chat_id}_{link_id}"
+                    msg = await message.reply_text("Generating Verification Link 3/3... ⏳")
+                    short_url = await get_shortlink(verify_url)
+                    await msg.delete()
+                    
+                    btn = [[InlineKeyboardButton("Verify Level 3", url=short_url)]]
+                    await message.reply_text(
+                        f"⚠️ **Verification Required!**\n\n**Final Step 3/3** complete karein.",
+                        reply_markup=InlineKeyboardMarkup(btn)
+                    )
+                    return
             # -----------------------------
 
-            # Standard File Sending (If already verified)
+            # Send File Code (Standard)
             file_data = await Media.get_file_details(link_id)
             search_data = await Media.search_col.find_one({'link_id': link_id})
             

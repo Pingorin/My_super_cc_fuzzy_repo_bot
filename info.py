@@ -16,8 +16,18 @@ PORT = int(os.environ.get("PORT", "8080"))
 # Channel ID jahan files upload hoti hain (Multiple IDs comma laga kar daal sakte hain)
 CHANNELS = [-1003342421845] 
 
-# --- VERIFICATION SYSTEM ---
-IS_VERIFY = True # Ise False karein agar verify system band karna ho
-VERIFY_EXPIRE = 24 * 60 * 60 # 24 Hours (Seconds me)
-SHORTLINK_URL = "shortxlinks.com" # Default Website
-SHORTLINK_API = "7c480930494be0edb7e546125c35d79840d5146b" # Default API Key
+# --- VERIFICATION SETTINGS ---
+IS_VERIFY = True
+VERIFY_EXPIRE = 24 * 60 * 60 # 24 Hours
+
+# LEVEL 1 (Mandatory if verify ON)
+SHORTLINK_URL_1 = "shortxlinks.com"
+SHORTLINK_API_1 = "7c480930494be0edb7e546125c35d79840d5146b"
+
+# LEVEL 2 (Optional - Leave empty to disable)
+SHORTLINK_URL_2 = "softurl.in"
+SHORTLINK_API_2 = "613ce973446725bfe2bf909b320c7a1e84c4bdc8"
+
+# LEVEL 3 (Optional - Leave empty to disable)
+SHORTLINK_URL_3 = "shortxlinks.com"
+SHORTLINK_API_3 = "7c480930494be0edb7e546125c35d79840d5146b"

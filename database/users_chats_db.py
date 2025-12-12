@@ -1,4 +1,5 @@
 import motor.motor_asyncio
+import time # ✅ Time module add kiya
 from info import DATABASE_URI, DATABASE_NAME
 
 class UserChatDB:
@@ -42,5 +43,29 @@ class UserChatDB:
 
     async def remove_ban(self, id, type="user"):
         await self.banned.delete_one({"id": int(id), "type": type})
+
+    # --- 🔒 VERIFICATION SYSTEM FUNCTIONS (NEW) ---
+    
+    async def get_verify_status(self, user_id):
+        # User ko database me dhundo
+        user = await self.users.find_one({'id': int(user_id)})
+        if user:
+            # Check karo: 'verify_status' ka time abhi ke time se bada hai ya nahi
+            # Agar verify_status key nahi hai to default 0 milega (yani Not Verified)
+            return user.get('verify_status', 0) > time.time()
+        return False
+
+    async def update_verify_status(self, user_id):
+        from info import VERIFY_EXPIRE # Circular import se bachne ke liye yahan import kiya
+        
+        # Abhi ka time + Expire Time (e.g. 24 hours)
+        expiry_date = time.time() + VERIFY_EXPIRE
+        
+        # Database update karo
+        await self.users.update_one(
+            {'id': int(user_id)},
+            {'$set': {'verify_status': expiry_date}},
+            upsert=True # Agar user nahi hai to create kar dega
+        )
 
 db = UserChatDB(DATABASE_URI, DATABASE_NAME)

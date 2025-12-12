@@ -41,7 +41,7 @@ async def get_shortlink(link):
         logger.error(f"Shortlink Exception: {e}")
         return link
 
-# 3. ✅ Button Parser (Deep Links के साथ)
+# 3. ✅ Button Parser (Deep Links ke sath)
 def btn_parser(files, query=None):
     buttons = []
     for file in files:
@@ -65,10 +65,8 @@ def btn_parser(files, query=None):
         # Button Text
         btn_text = f"📂 {display_name} [{f_size}]"
         
-        # ✅ Deep Link Logic (Callback Data ki jagah URL)
-        # Kyunki File ID callback data limit (64 bytes) se badi hoti hai
+        # ✅ Deep Link Logic
         if link_id is not None:
-            # Ye link user ko bot ke start me bhejega: /start get_123
             url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             

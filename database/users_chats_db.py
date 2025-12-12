@@ -43,30 +43,44 @@ class UserChatDB:
     async def remove_ban(self, id, type="user"):
         await self.banned.delete_one({"id": int(id), "type": type})
 
-    # --- 🔒 GROUP SPECIFIC VERIFICATION (UPDATED) ---
+    # --- 🔒 3-LEVEL GROUP VERIFICATION SYSTEM ---
     
-    async def get_verify_status(self, user_id, chat_id):
+    async def get_verify_status(self, user_id, chat_id, level):
+        """
+        Check if a user is verified for a specific Group AND specific Level.
+        Structure: verify_status -> chat_id -> level -> timestamp
+        """
         user = await self.users.find_one({'id': int(user_id)})
         if user:
-            # Ab hum 'verify_status' ke andar specific Group ID check karenge
-            # Database structure: verify_status: { '-100123...': expiry_time, '-100456...': expiry_time }
             all_verifications = user.get('verify_status', {})
+
+            # Agar purana format hai (not dict), to False return karo
+            if not isinstance(all_verifications, dict):
+                return False
+
+            # Specific Chat ID ka data nikalo
+            chat_verifications = all_verifications.get(str(chat_id), {})
+
+            # Agar chat verification purana format hai (int/float), to False return karo
+            if isinstance(chat_verifications, (int, float)):
+                return False
+
+            # Ab specific Level check karo (Default 0)
+            expiry = chat_verifications.get(str(level), 0)
+            return expiry > time.time()
             
-            # Agar purana data (single timestamp) hai to use handle karo
-            if isinstance(all_verifications, (int, float)):
-                return all_verifications > time.time()
-                
-            # Specific Group ka check
-            return all_verifications.get(str(chat_id), 0) > time.time()
         return False
 
-    async def update_verify_status(self, user_id, chat_id):
+    async def update_verify_status(self, user_id, chat_id, level):
+        """
+        Update verification status for a specific Group AND Level.
+        """
         from info import VERIFY_EXPIRE
         expiry_date = time.time() + VERIFY_EXPIRE
         
-        # Specific Group ID ke liye update karo
-        # MongoDB Dot notation use karke nested object update karenge
-        key_name = f"verify_status.{str(chat_id)}"
+        # MongoDB Dot notation use karke specific level update karenge
+        # Key: verify_status.{chat_id}.{level}
+        key_name = f"verify_status.{str(chat_id)}.{str(level)}"
         
         await self.users.update_one(
             {'id': int(user_id)},

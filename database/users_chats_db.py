@@ -1,5 +1,5 @@
 import motor.motor_asyncio
-import time # ✅ Time module add kiya
+import time
 from info import DATABASE_URI, DATABASE_NAME
 
 class UserChatDB:
@@ -8,7 +8,6 @@ class UserChatDB:
         self.db = self._client[database_name]
         self.users = self.db.users
         self.groups = self.db.groups
-        # Collection for banned users/chats
         self.banned = self.db.banned 
 
     async def add_user(self, id):
@@ -44,28 +43,35 @@ class UserChatDB:
     async def remove_ban(self, id, type="user"):
         await self.banned.delete_one({"id": int(id), "type": type})
 
-    # --- 🔒 VERIFICATION SYSTEM FUNCTIONS (NEW) ---
+    # --- 🔒 GROUP SPECIFIC VERIFICATION (UPDATED) ---
     
-    async def get_verify_status(self, user_id):
-        # User ko database me dhundo
+    async def get_verify_status(self, user_id, chat_id):
         user = await self.users.find_one({'id': int(user_id)})
         if user:
-            # Check karo: 'verify_status' ka time abhi ke time se bada hai ya nahi
-            # Agar verify_status key nahi hai to default 0 milega (yani Not Verified)
-            return user.get('verify_status', 0) > time.time()
+            # Ab hum 'verify_status' ke andar specific Group ID check karenge
+            # Database structure: verify_status: { '-100123...': expiry_time, '-100456...': expiry_time }
+            all_verifications = user.get('verify_status', {})
+            
+            # Agar purana data (single timestamp) hai to use handle karo
+            if isinstance(all_verifications, (int, float)):
+                return all_verifications > time.time()
+                
+            # Specific Group ka check
+            return all_verifications.get(str(chat_id), 0) > time.time()
         return False
 
-    async def update_verify_status(self, user_id):
-        from info import VERIFY_EXPIRE # Circular import se bachne ke liye yahan import kiya
-        
-        # Abhi ka time + Expire Time (e.g. 24 hours)
+    async def update_verify_status(self, user_id, chat_id):
+        from info import VERIFY_EXPIRE
         expiry_date = time.time() + VERIFY_EXPIRE
         
-        # Database update karo
+        # Specific Group ID ke liye update karo
+        # MongoDB Dot notation use karke nested object update karenge
+        key_name = f"verify_status.{str(chat_id)}"
+        
         await self.users.update_one(
             {'id': int(user_id)},
-            {'$set': {'verify_status': expiry_date}},
-            upsert=True # Agar user nahi hai to create kar dega
+            {'$set': {key_name: expiry_date}},
+            upsert=True
         )
 
 db = UserChatDB(DATABASE_URI, DATABASE_NAME)

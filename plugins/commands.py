@@ -31,19 +31,18 @@ async def start_handler(client, message):
     if message.chat.type == "private":
         await db.add_user(message.from_user.id)
 
-    # ✅ CASE 1: Verification Return
-    # New Format: /start verify_USERID_CHATID_LINKID
+    # ✅ CASE 1: Verification Return (Auto Send + Group Specific)
+    # Format: verify_USERID_CHATID_LINKID
     if len(message.command) > 1 and message.command[1].startswith("verify_"):
         try:
-            # Data split karo: verify_123_ -100999_ 555
             data = message.command[1].split("_")
             verify_id = data[1]
-            chat_id = data[2] # Ye wo Group ID hai jiske liye verify karna hai
+            chat_id = data[2] # Target Group ID
             
             if str(verify_id) != str(message.from_user.id):
                 return await message.reply("❌ Ye link apke liye nahi hai.")
             
-            # 1. Update DB (Sirf us specific Chat ID ke liye)
+            # 1. Database Update (Group Specific)
             await db.update_verify_status(message.from_user.id, chat_id)
             
             await message.reply(
@@ -51,11 +50,11 @@ async def start_handler(client, message):
                 f"You are verified for **24 hours** in that group. 🚀"
             )
 
-            # 2. Auto Send File
+            # 2. 🔥 AUTO SEND FILE LOGIC 🔥
             if len(data) > 3:
                 link_id = int(data[3])
                 
-                # --- (Send File Logic) ---
+                # Fetch File
                 file_data = await Media.get_file_details(link_id)
                 search_data = await Media.search_col.find_one({'link_id': link_id})
                 
@@ -86,22 +85,26 @@ async def start_handler(client, message):
         except Exception as e:
             return await message.reply(f"❌ Verification Error: {e}")
 
-    # ✅ CASE 2: File Request (Deep Link: /start get_123)
+    # ✅ CASE 2: File Request (Deep Link with Chat ID)
+    # Format: /start get_LINKID_CHATID
     if len(message.command) > 1 and message.command[1].startswith("get_"):
         
         try:
-            link_id = int(message.command[1].split("_")[1])
+            data = message.command[1].split("_")
+            link_id = int(data[1])
+            
+            # Agar link me Chat ID hai to use nikalo (Group se button click kiya)
+            # Agar nahi hai (Direct PM) to fallback current chat id
+            src_chat_id = data[2] if len(data) > 2 else str(message.chat.id)
             
             # --- 🔒 GROUP SPECIFIC VERIFICATION CHECK ---
             if IS_VERIFY:
-                # Ab hum Chat ID bhi bhej rahe hain check karne ke liye
-                # message.chat.id wahi ID hogi jahan command chali (Group ya Private)
-                is_verified = await db.get_verify_status(message.from_user.id, message.chat.id)
+                # Check karo: Kya user 'src_chat_id' ke liye verified hai?
+                is_verified = await db.get_verify_status(message.from_user.id, src_chat_id)
                 
                 if not is_verified:
-                    # ✅ CHANGE: Link me Chat ID bhi encode karo
-                    # Format: verify_USERID_CHATID_LINKID
-                    verify_url = f"https://t.me/{temp.U_NAME}?start=verify_{message.from_user.id}_{message.chat.id}_{link_id}"
+                    # Link generate karo: verify_USERID_CHATID_LINKID
+                    verify_url = f"https://t.me/{temp.U_NAME}?start=verify_{message.from_user.id}_{src_chat_id}_{link_id}"
                     
                     msg = await message.reply_text("Generating secure link... ⏳")
                     short_url = await get_shortlink(verify_url)
@@ -110,14 +113,15 @@ async def start_handler(client, message):
                     btn = [[InlineKeyboardButton("✅ Click Here To Verify", url=short_url)]]
                     await message.reply_text(
                         f"⚠️ **Verification Required!**\n\n"
-                        f"Is Group/Chat ke liye apka token expire ho gaya hai.\n"
-                        f"File paane ke liye verify karein.\n\n"
-                        f"_(Har group ka alag verification hai)_",
+                        f"Aapne is Group ke liye verify nahi kiya hai.\n"
+                        f"File paane ke liye pehle verify karein.\n\n"
+                        f"_(Har group ka verification alag hai)_",
                         reply_markup=InlineKeyboardMarkup(btn)
                     )
                     return 
             # -----------------------------
 
+            # Send File Code (Standard)
             file_data = await Media.get_file_details(link_id)
             search_data = await Media.search_col.find_one({'link_id': link_id})
             

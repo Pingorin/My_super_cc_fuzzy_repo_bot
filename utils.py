@@ -6,14 +6,11 @@ from info import SHORTLINK_URL, SHORTLINK_API
 
 logger = logging.getLogger(__name__)
 
-# ✅ 1. Temp Class (Jo pehle alag file me thi, ab yahan hai)
 class temp(object):
     U_NAME = None
 
-# ✅ 2. File Size Formatter
 def get_size(size):
-    if not size:
-        return ""
+    if not size: return ""
     power = 2**10
     n = 0
     power_labels = {0 : '', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
@@ -22,11 +19,9 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-# ✅ 3. Shortlink Generator
 async def get_shortlink(link):
     url = f'https://{SHORTLINK_URL}/api'
     params = {'api': SHORTLINK_API, 'url': link}
-    
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params, raise_for_status=True) as response:
@@ -40,8 +35,8 @@ async def get_shortlink(link):
         logger.error(f"Shortlink Exception: {e}")
         return link
 
-# ✅ 4. Button Parser
-def btn_parser(files, query=None):
+# ✅ MODIFIED: Added 'chat_id' argument
+def btn_parser(files, chat_id, query=None):
     buttons = []
     for file in files:
         f_name = file['file_name']
@@ -62,7 +57,9 @@ def btn_parser(files, query=None):
         btn_text = f"📂 {display_name} [{f_size}]"
         
         if link_id is not None:
-            url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}"
+            # ✅ NEW FORMAT: get_LINKID_CHATID
+            # Hum Group ID ko link me chupakar bhej rahe hain
+            url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     return buttons

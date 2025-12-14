@@ -29,5 +29,5 @@ SHORTLINK_URL_2 = "softurl.in"
 SHORTLINK_API_2 = "613ce973446725bfe2bf909b320c7a1e84c4bdc8"
 
 # LEVEL 3 (Optional - Leave empty to disable)
-SHORTLINK_URL_3 = "shortxlinks.com"
-SHORTLINK_API_3 = "7c480930494be0edb7e546125c35d79840d5146b"
+SHORTLINK_URL_3 = ""
+SHORTLINK_API_3 = ""

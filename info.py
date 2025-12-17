@@ -18,7 +18,15 @@ CHANNELS = [-1003342421845]
 
 # --- VERIFICATION SETTINGS ---
 IS_VERIFY = True
-VERIFY_EXPIRE = 24 * 60 * 60 # 24 Hours
+
+# ✅ Verification Time (Full Access Kitne time ke liye milega)
+# Default: 24 Hours (Seconds me)
+VERIFY_TIME = 10 * 60 
+
+# ✅ Time Gaps (Ek step ke baad dusre step me kitna wait karna hai)
+# Value seconds me hai (Ex: 300 = 5 Minutes)
+VERIFY_GAP1 = 2 * 60  # Gap between V1 -> V2
+VERIFY_GAP2 = 2 * 60  # Gap between V2 -> V3
 
 # LEVEL 1 (Mandatory if verify ON)
 SHORTLINK_URL_1 = "shortxlinks.com"
@@ -29,5 +37,5 @@ SHORTLINK_URL_2 = "softurl.in"
 SHORTLINK_API_2 = "613ce973446725bfe2bf909b320c7a1e84c4bdc8"
 
 # LEVEL 3 (Optional - Leave empty to disable)
-SHORTLINK_URL_3 = ""
-SHORTLINK_API_3 = ""
+SHORTLINK_URL_3 = "softurl.in"
+SHORTLINK_API_3 = "613ce973446725bfe2bf909b320c7a1e84c4bdc8"

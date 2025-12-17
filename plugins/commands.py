@@ -1,12 +1,13 @@
 import os
 import logging
+import time
 import asyncio
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
 from database.ia_filterdb import Media
 import info 
-from info import ADMINS # ✅ Admin Import Fixed
+from info import ADMINS, IS_VERIFY, VERIFY_TIME, VERIFY_GAP1, VERIFY_GAP2
 from utils import temp, get_shortlink 
 from Script import script 
 
@@ -23,70 +24,92 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-# --- HELPER: DYNAMIC VERIFICATION CHECK ---
-# Ye function check karega ki info.py me kitne shortener set hain
-# Aur user ne kitne complete kar liye hain.
+# --- 🧠 SMART WATERFALL VERIFICATION LOGIC ---
 async def check_verification(client, user_id, chat_id, link_id, message_obj):
-    if not info.IS_VERIFY:
-        return True # System OFF
+    if not IS_VERIFY:
+        return True 
 
-    # --- LEVEL 1 ---
+    # 1. Check if user already has Final Full Access (Level 0)
+    if await db.get_verify_status(user_id, chat_id):
+        return True 
+
+    current_time = time.time()
+
+    # --- LEVEL 1 CHECK ---
     if info.SHORTLINK_URL_1 and info.SHORTLINK_API_1:
-        if not await db.get_verify_status(user_id, chat_id, 1):
+        v1_time = await db.get_level_time(user_id, chat_id, 1)
+        
+        # Scenario A: Level 1 Not Done -> Send Link
+        if v1_time == 0:
             verify_url = f"https://t.me/{temp.U_NAME}?start=verify_1_{user_id}_{chat_id}_{link_id}"
-            
-            # User ko wait karvao
-            msg = await message_obj.reply_text("🔎 Checking Verification Level 1... ⏳")
+            msg = await message_obj.reply_text("Generating Level 1 Link... ⏳")
             short_url = await get_shortlink(verify_url, info.SHORTLINK_URL_1, info.SHORTLINK_API_1)
             await msg.delete()
             
             btn = [[InlineKeyboardButton("🚀 Verify Level 1", url=short_url)]]
             await message_obj.reply_text(
-                f"⚠️ **Verification Required (1/?)**\n\n"
-                f"Is Group ke liye verification zaroori hai.\n"
-                f"Pehle Level 1 complete karein.",
+                "⚠️ **Verification Required (1/?)**\n\nFile paane ke liye Step 1 complete karein.",
                 reply_markup=InlineKeyboardMarkup(btn)
             )
-            return False # Verification incomplete
+            return False
+        
+        # Scenario B: Level 1 Done. Check if V2 exists.
+        if info.SHORTLINK_URL_2 and info.SHORTLINK_API_2:
+            gap_left = (v1_time + VERIFY_GAP1) - current_time
+            if gap_left > 0:
+                return True # Gap Valid -> Access Granted
+        else:
+            await db.update_verify_status(user_id, chat_id, 0, VERIFY_TIME)
+            return True
 
-    # --- LEVEL 2 ---
+    # --- LEVEL 2 CHECK ---
     if info.SHORTLINK_URL_2 and info.SHORTLINK_API_2:
-        if not await db.get_verify_status(user_id, chat_id, 2):
+        v2_time = await db.get_level_time(user_id, chat_id, 2)
+        
+        if v2_time == 0:
             verify_url = f"https://t.me/{temp.U_NAME}?start=verify_2_{user_id}_{chat_id}_{link_id}"
-            
-            msg = await message_obj.reply_text("🔎 Checking Verification Level 2... ⏳")
+            msg = await message_obj.reply_text("Generating Level 2 Link... ⏳")
             short_url = await get_shortlink(verify_url, info.SHORTLINK_URL_2, info.SHORTLINK_API_2)
             await msg.delete()
             
             btn = [[InlineKeyboardButton("🚀 Verify Level 2", url=short_url)]]
             await message_obj.reply_text(
-                f"⚠️ **Verification Required (2/?)**\n\n"
-                f"✅ Level 1 Passed!\n"
-                f"Ab Level 2 complete karein.",
+                "⚠️ **Verification Expired!**\n\nLevel 1 ka time khatam.\nAb Level 2 verify karein file paane ke liye.",
                 reply_markup=InlineKeyboardMarkup(btn)
             )
             return False
+        
+        if info.SHORTLINK_URL_3 and info.SHORTLINK_API_3:
+            gap_left = (v2_time + VERIFY_GAP2) - current_time
+            if gap_left > 0:
+                return True
+        else:
+            await db.update_verify_status(user_id, chat_id, 0, VERIFY_TIME)
+            return True
 
-    # --- LEVEL 3 ---
+    # --- LEVEL 3 CHECK ---
     if info.SHORTLINK_URL_3 and info.SHORTLINK_API_3:
-        if not await db.get_verify_status(user_id, chat_id, 3):
+        v3_time = await db.get_level_time(user_id, chat_id, 3)
+        
+        if v3_time == 0:
             verify_url = f"https://t.me/{temp.U_NAME}?start=verify_3_{user_id}_{chat_id}_{link_id}"
-            
-            msg = await message_obj.reply_text("🔎 Checking Verification Level 3... ⏳")
+            msg = await message_obj.reply_text("Generating Final Link... ⏳")
             short_url = await get_shortlink(verify_url, info.SHORTLINK_URL_3, info.SHORTLINK_API_3)
             await msg.delete()
             
-            btn = [[InlineKeyboardButton("🔥 Verify Level 3 (Final)", url=short_url)]]
+            btn = [[InlineKeyboardButton("🔥 Verify Final Level", url=short_url)]]
             await message_obj.reply_text(
-                f"⚠️ **Final Verification (3/3)**\n\n"
-                f"✅ Level 2 Passed!\n"
-                f"Ye aakhri step hai, fir file milegi.",
+                "⚠️ **Final Verification**\n\nLevel 2 ka time khatam.\nYe aakhri step hai, fir Full Access milega.",
                 reply_markup=InlineKeyboardMarkup(btn)
             )
             return False
 
-    return True # Sab levels clear hain!
+    # --- ALL STEPS DONE ---
+    await db.update_verify_status(user_id, chat_id, 0, VERIFY_TIME)
+    return True
 
+
+# --- HANDLERS ---
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start_handler(client, message):
@@ -94,7 +117,6 @@ async def start_handler(client, message):
         await db.add_user(message.from_user.id)
 
     # ✅ CASE 1: Verification Return
-    # Format: verify_LEVEL_USERID_CHATID_LINKID
     if len(message.command) > 1 and message.command[1].startswith("verify_"):
         try:
             data = message.command[1].split("_")
@@ -106,84 +128,56 @@ async def start_handler(client, message):
             if str(verify_id) != str(message.from_user.id):
                 return await message.reply("❌ Ye link apke liye nahi hai.")
             
-            # 1. Update DB (Current Level ke liye)
+            # Update Database
             await db.update_verify_status(message.from_user.id, chat_id, level)
 
-            # 2. Check Next Step (Smart Check)
-            # Ye function dekhega ki kya koi aur level baki hai?
+            # Check Next Step
             is_all_clear = await check_verification(client, message.from_user.id, chat_id, link_id, message)
             
             if is_all_clear:
-                await message.reply(
-                    f"✅ **Verification Complete!**\n\n"
-                    f"You are verified for **24 hours** in this group. 🚀"
-                )
-
-                # 3. Auto Send File
+                await message.reply(f"✅ **Verification Successful!**\n\nAapko file access mil gaya hai. 📂")
+                
+                # Auto Send File
                 if link_id != 0:
                     file_data = await Media.get_file_details(link_id)
                     search_data = await Media.search_col.find_one({'link_id': link_id})
-                    
-                    if not file_data:
-                        return await message.reply("❌ File Database se delete ho gayi hai.")
-                    
-                    file_id = file_data.get('file_id')
-                    if not file_id:
-                        return await message.reply("❌ Error: File ID missing.")
-
-                    db_caption = search_data.get('caption')
-                    if not db_caption:
-                        db_caption = f"📂 <b>{search_data.get('file_name')}</b>"
-                    
-                    final_caption = f"{db_caption}\n{script.CUSTOM_FOOTER}"
-
-                    try:
-                        await client.send_cached_media(
-                            chat_id=message.from_user.id,
-                            file_id=file_id, 
-                            caption=final_caption,
-                            parse_mode=enums.ParseMode.HTML
-                        )
-                    except Exception as e:
-                        await message.reply(f"❌ Failed to send file automatically.\nError: `{e}`")
-            
+                    if file_data and file_data.get('file_id'):
+                        db_caption = search_data.get('caption', f"📂 <b>{search_data.get('file_name')}</b>")
+                        final_caption = f"{db_caption}\n{script.CUSTOM_FOOTER}"
+                        try:
+                            await client.send_cached_media(
+                                chat_id=message.from_user.id,
+                                file_id=file_data.get('file_id'), 
+                                caption=final_caption,
+                                parse_mode=enums.ParseMode.HTML
+                            )
+                        except Exception as e:
+                            await message.reply(f"❌ Error: `{e}`")
             return
         except Exception as e:
             return await message.reply(f"❌ Verification Error: {e}")
 
-    # ✅ CASE 2: File Request (Get File)
-    # Format: /start get_LINKID_CHATID
+    # ✅ CASE 2: File Request
     if len(message.command) > 1 and message.command[1].startswith("get_"):
-        
         try:
             data = message.command[1].split("_")
             link_id = int(data[1])
-            
-            # Group ID nikalo
             src_chat_id = data[2] if len(data) > 2 else str(message.chat.id)
             
-            # --- SMART VERIFICATION CHECK ---
+            # Smart Check
             is_all_clear = await check_verification(client, message.from_user.id, src_chat_id, link_id, message)
             
             if not is_all_clear:
-                return # Agar verify baki hai to yahi ruk jao
+                return 
 
-            # --- SEND FILE (Agar sab clear hai) ---
+            # Send File
             file_data = await Media.get_file_details(link_id)
             search_data = await Media.search_col.find_one({'link_id': link_id})
-            
-            if not file_data:
-                return await message.reply("❌ File Database se delete ho gayi hai.")
-            
+            if not file_data: return await message.reply("❌ File Database se delete ho gayi hai.")
             file_id = file_data.get('file_id')
-            
-            if not file_id:
-                return await message.reply("❌ Error: Is file ki ID database me nahi hai.")
+            if not file_id: return await message.reply("❌ Error: File ID missing.")
 
-            db_caption = search_data.get('caption')
-            if not db_caption:
-                db_caption = f"📂 <b>{search_data.get('file_name')}</b>"
-            
+            db_caption = search_data.get('caption', f"📂 <b>{search_data.get('file_name')}</b>")
             final_caption = f"{db_caption}\n{script.CUSTOM_FOOTER}"
 
             try:
@@ -194,13 +188,12 @@ async def start_handler(client, message):
                     parse_mode=enums.ParseMode.HTML
                 )
             except Exception as e:
-                await message.reply(f"❌ Failed to send file.\nError: `{e}`")
-                    
+                await message.reply(f"❌ Error: `{e}`")
         except Exception as e:
             await message.reply(f"❌ Error: {e}")
         return
 
-    # ✅ CASE 3: Normal Start
+    # ✅ CASE 3: Normal Start (Welcome Message)
     text = f"""Hello {message.from_user.mention} 👋,
 
 Main ek **Auto Filter Bot** hu. 
@@ -224,39 +217,15 @@ Niche diye gaye buttons check karein 👇"""
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-# --- New Group Handler ---
-@Client.on_message(filters.new_chat_members)
-async def new_chat(client, message):
-    try:
-        bot_id = (await client.get_me()).id
-        if bot_id in [u.id for u in message.new_chat_members]:
-            await db.add_group(message.chat.id)
-            await message.reply_text("Thanks for adding me! Admin bana do please.")
-    except: pass
-
-# --- Stats ---
-@Client.on_message(filters.command("stats") & filters.user(ADMINS))
-async def stats_handler(client, message):
-    msg = await message.reply_text("📊 Fetching...")
-    try:
-        users = await db.total_users_count()
-        groups = await db.total_groups_count()
-        files = await Media.total_files_count()
-        size = get_size(await Media.get_db_size())
-        await msg.edit_text(f"📊 **STATS**\nUsers: {users}\nGroups: {groups}\nFiles: {files}\nDB Size: {size}")
-    except Exception as e:
-        await msg.edit_text(f"Error: {e}")
-
-# --- ADMIN COMMAND: Set Specific Shortener ---
+# --- ADMIN COMMANDS ---
 @Client.on_message(filters.command("set_shortner") & filters.user(ADMINS))
 async def set_shortner_dynamic(client, message):
     if len(message.command) < 4:
         return await message.reply("❌ **Usage:** `/set_shortner <1/2/3> website.com api_key`")
-    
     level = message.command[1]
     site = message.command[2]
     api = message.command[3]
-
+    
     if level == "1":
         info.SHORTLINK_URL_1 = site
         info.SHORTLINK_API_1 = api
@@ -268,5 +237,26 @@ async def set_shortner_dynamic(client, message):
         info.SHORTLINK_API_3 = api
     else:
         return await message.reply("❌ Level must be 1, 2, or 3.")
-    
-    await message.reply(f"✅ **Level {level} Shortener Updated!**\nSite: `{site}`")
+    await message.reply(f"✅ **Level {level} Updated!**\nSite: `{site}`")
+
+# --- GROUP HANDLER ---
+@Client.on_message(filters.new_chat_members)
+async def new_chat(client, message):
+    try:
+        bot_id = (await client.get_me()).id
+        if bot_id in [u.id for u in message.new_chat_members]:
+            await db.add_group(message.chat.id)
+            await message.reply_text("Thanks for adding me! Please make me Admin.")
+    except: pass
+
+# --- STATS HANDLER ---
+@Client.on_message(filters.command("stats") & filters.user(ADMINS))
+async def stats_handler(client, message):
+    try:
+        users = await db.total_users_count()
+        groups = await db.total_groups_count()
+        files = await Media.total_files_count()
+        size = get_size(await Media.get_db_size())
+        await message.reply_text(f"📊 **STATS**\nUsers: {users}\nGroups: {groups}\nFiles: {files}\nDB Size: {size}")
+    except Exception as e:
+        await message.reply_text(f"Error: {e}")

@@ -24,22 +24,32 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-# --- 🧠 SMART WATERFALL VERIFICATION LOGIC ---
+# --- 🧠 SMART WATERFALL & RESET LOGIC ---
 async def check_verification(client, user_id, chat_id, link_id, message_obj):
     if not IS_VERIFY:
         return True 
 
-    # 1. Check if user already has Final Full Access (Level 0)
+    # 1. Check if user currently has Valid Full Access (Level 0)
     if await db.get_verify_status(user_id, chat_id):
         return True 
+    
+    # Agar hum yahan aaye hain, iska matlab Full Access EXPIRE ho chuka hai.
+    # Ab humein purane levels ko bhi expire manna padega.
 
     current_time = time.time()
 
     # --- LEVEL 1 CHECK ---
     if info.SHORTLINK_URL_1 and info.SHORTLINK_API_1:
+        
         v1_time = await db.get_level_time(user_id, chat_id, 1)
         
-        # Scenario A: Level 1 Not Done -> Send Link
+        # 🔄 AUTO RESET LOGIC:
+        # Agar V1 kiye hue 'Verify Time' (24h) se zyada ho gaya hai, to use 0 kar do.
+        # Taaki cycle wapis start ho sake.
+        if (current_time - v1_time) > VERIFY_TIME:
+            v1_time = 0
+
+        # Scenario A: Level 1 Not Done (or Reset) -> Send Link
         if v1_time == 0:
             verify_url = f"https://t.me/{temp.U_NAME}?start=verify_1_{user_id}_{chat_id}_{link_id}"
             msg = await message_obj.reply_text("Generating Level 1 Link... ⏳")
@@ -48,24 +58,31 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
             
             btn = [[InlineKeyboardButton("🚀 Verify Level 1", url=short_url)]]
             await message_obj.reply_text(
-                "⚠️ **Verification Required (1/?)**\n\nFile paane ke liye Step 1 complete karein.",
+                "⚠️ **Verification Cycle Reset!**\n\nApka purana access khatam ho gaya hai.\nShuru se Step 1 complete karein.",
                 reply_markup=InlineKeyboardMarkup(btn)
             )
             return False
         
-        # Scenario B: Level 1 Done. Check if V2 exists.
+        # Scenario B: Level 1 Done. Check V2.
         if info.SHORTLINK_URL_2 and info.SHORTLINK_API_2:
             gap_left = (v1_time + VERIFY_GAP1) - current_time
             if gap_left > 0:
-                return True # Gap Valid -> Access Granted
+                return True # Gap Valid -> Grant Access
         else:
+            # V2 nahi hai -> Grant Full Access
             await db.update_verify_status(user_id, chat_id, 0, VERIFY_TIME)
             return True
 
     # --- LEVEL 2 CHECK ---
     if info.SHORTLINK_URL_2 and info.SHORTLINK_API_2:
+        
         v2_time = await db.get_level_time(user_id, chat_id, 2)
         
+        # 🔄 AUTO RESET LOGIC FOR V2
+        if (current_time - v2_time) > VERIFY_TIME:
+            v2_time = 0
+
+        # Scenario A: Level 2 Not Done -> Send Link
         if v2_time == 0:
             verify_url = f"https://t.me/{temp.U_NAME}?start=verify_2_{user_id}_{chat_id}_{link_id}"
             msg = await message_obj.reply_text("Generating Level 2 Link... ⏳")
@@ -74,11 +91,12 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
             
             btn = [[InlineKeyboardButton("🚀 Verify Level 2", url=short_url)]]
             await message_obj.reply_text(
-                "⚠️ **Verification Expired!**\n\nLevel 1 ka time khatam.\nAb Level 2 verify karein file paane ke liye.",
+                "⚠️ **Verification Expired!**\n\nLevel 1 gap khatam.\nAb Level 2 verify karein.",
                 reply_markup=InlineKeyboardMarkup(btn)
             )
             return False
         
+        # Scenario B: Level 2 Done. Check V3.
         if info.SHORTLINK_URL_3 and info.SHORTLINK_API_3:
             gap_left = (v2_time + VERIFY_GAP2) - current_time
             if gap_left > 0:
@@ -89,7 +107,12 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
 
     # --- LEVEL 3 CHECK ---
     if info.SHORTLINK_URL_3 and info.SHORTLINK_API_3:
+        
         v3_time = await db.get_level_time(user_id, chat_id, 3)
+
+        # 🔄 AUTO RESET LOGIC FOR V3
+        if (current_time - v3_time) > VERIFY_TIME:
+            v3_time = 0
         
         if v3_time == 0:
             verify_url = f"https://t.me/{temp.U_NAME}?start=verify_3_{user_id}_{chat_id}_{link_id}"
@@ -99,7 +122,7 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
             
             btn = [[InlineKeyboardButton("🔥 Verify Final Level", url=short_url)]]
             await message_obj.reply_text(
-                "⚠️ **Final Verification**\n\nLevel 2 ka time khatam.\nYe aakhri step hai, fir Full Access milega.",
+                "⚠️ **Final Verification**\n\nLevel 2 gap khatam.\nYe aakhri step hai.",
                 reply_markup=InlineKeyboardMarkup(btn)
             )
             return False
@@ -193,7 +216,7 @@ async def start_handler(client, message):
             await message.reply(f"❌ Error: {e}")
         return
 
-    # ✅ CASE 3: Normal Start (Welcome Message)
+    # ✅ CASE 3: Normal Start
     text = f"""Hello {message.from_user.mention} 👋,
 
 Main ek **Auto Filter Bot** hu. 

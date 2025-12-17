@@ -43,7 +43,7 @@ class UserChatDB:
     async def remove_ban(self, id, type="user"):
         await self.banned.delete_one({"id": int(id), "type": type})
 
-    # --- 🔒 ADVANCED VERIFICATION SYSTEM (WATERFALL SUPPORT) ---
+    # --- 🔒 ADVANCED VERIFICATION SYSTEM (AUTO-RESET LOOP SUPPORT) ---
     
     async def get_verify_status(self, user_id, chat_id):
         """
@@ -87,16 +87,20 @@ class UserChatDB:
             return chat_data.get(str(level), 0)
         return 0
 
-    async def update_verify_status(self, user_id, chat_id, level, duration=0):
+    # ✅ MODIFIED: Added 'is_reset' parameter for Auto-Loop Logic
+    async def update_verify_status(self, user_id, chat_id, level, duration=0, is_reset=False):
         """
         Updates verification status.
+        - If is_reset=True: Sets value to 0 (To restart cycle).
         - If duration > 0: Sets Expiry (For Full Access).
         - If duration == 0: Sets Current Time (For marking level completion).
         """
         current_time = time.time()
         
         # Calculate Value to Save
-        if duration > 0:
+        if is_reset:
+            value = 0 # Reset logic (Cycle restart karne ke liye)
+        elif duration > 0:
             value = current_time + duration # Expiry Timestamp
         else:
             value = current_time # Completion Timestamp

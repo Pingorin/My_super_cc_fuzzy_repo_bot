@@ -24,32 +24,32 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-# --- 🧠 SMART WATERFALL & RESET LOGIC ---
+# --- 🧠 HELPER: GRANT ACCESS & RESET LOOP ---
+async def grant_full_access(user_id, chat_id):
+    # 1. Give Full Access (Level 0) for 24 Hours
+    await db.update_verify_status(user_id, chat_id, 0, VERIFY_TIME)
+    
+    # 2. 🔥 RESET LEVELS 1, 2, 3 🔥
+    # Taki jab 24 ghante baad Level 0 expire ho, to Bot wapis V1 se shuru kare
+    await db.update_verify_status(user_id, chat_id, 1, is_reset=True)
+    await db.update_verify_status(user_id, chat_id, 2, is_reset=True)
+    await db.update_verify_status(user_id, chat_id, 3, is_reset=True)
+
+# --- 🧠 SMART WATERFALL LOGIC ---
 async def check_verification(client, user_id, chat_id, link_id, message_obj):
     if not IS_VERIFY:
         return True 
 
-    # 1. Check if user currently has Valid Full Access (Level 0)
+    # 1. Check Full Access (Level 0)
     if await db.get_verify_status(user_id, chat_id):
         return True 
-    
-    # Agar hum yahan aaye hain, iska matlab Full Access EXPIRE ho chuka hai.
-    # Ab humein purane levels ko bhi expire manna padega.
 
     current_time = time.time()
 
     # --- LEVEL 1 CHECK ---
     if info.SHORTLINK_URL_1 and info.SHORTLINK_API_1:
-        
         v1_time = await db.get_level_time(user_id, chat_id, 1)
         
-        # 🔄 AUTO RESET LOGIC:
-        # Agar V1 kiye hue 'Verify Time' (24h) se zyada ho gaya hai, to use 0 kar do.
-        # Taaki cycle wapis start ho sake.
-        if (current_time - v1_time) > VERIFY_TIME:
-            v1_time = 0
-
-        # Scenario A: Level 1 Not Done (or Reset) -> Send Link
         if v1_time == 0:
             verify_url = f"https://t.me/{temp.U_NAME}?start=verify_1_{user_id}_{chat_id}_{link_id}"
             msg = await message_obj.reply_text("Generating Level 1 Link... ⏳")
@@ -58,31 +58,23 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
             
             btn = [[InlineKeyboardButton("🚀 Verify Level 1", url=short_url)]]
             await message_obj.reply_text(
-                "⚠️ **Verification Cycle Reset!**\n\nApka purana access khatam ho gaya hai.\nShuru se Step 1 complete karein.",
+                "⚠️ **Verification Required (1/?)**\n\nFile paane ke liye Step 1 complete karein.",
                 reply_markup=InlineKeyboardMarkup(btn)
             )
             return False
         
-        # Scenario B: Level 1 Done. Check V2.
+        # Level 1 Done. Check V2.
         if info.SHORTLINK_URL_2 and info.SHORTLINK_API_2:
             gap_left = (v1_time + VERIFY_GAP1) - current_time
-            if gap_left > 0:
-                return True # Gap Valid -> Grant Access
+            if gap_left > 0: return True 
         else:
-            # V2 nahi hai -> Grant Full Access
-            await db.update_verify_status(user_id, chat_id, 0, VERIFY_TIME)
+            await grant_full_access(user_id, chat_id)
             return True
 
     # --- LEVEL 2 CHECK ---
     if info.SHORTLINK_URL_2 and info.SHORTLINK_API_2:
-        
         v2_time = await db.get_level_time(user_id, chat_id, 2)
         
-        # 🔄 AUTO RESET LOGIC FOR V2
-        if (current_time - v2_time) > VERIFY_TIME:
-            v2_time = 0
-
-        # Scenario A: Level 2 Not Done -> Send Link
         if v2_time == 0:
             verify_url = f"https://t.me/{temp.U_NAME}?start=verify_2_{user_id}_{chat_id}_{link_id}"
             msg = await message_obj.reply_text("Generating Level 2 Link... ⏳")
@@ -91,28 +83,22 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
             
             btn = [[InlineKeyboardButton("🚀 Verify Level 2", url=short_url)]]
             await message_obj.reply_text(
-                "⚠️ **Verification Expired!**\n\nLevel 1 gap khatam.\nAb Level 2 verify karein.",
+                "⚠️ **Verification Expired!**\n\nLevel 1 ka time khatam.\nAb Level 2 verify karein file paane ke liye.",
                 reply_markup=InlineKeyboardMarkup(btn)
             )
             return False
         
-        # Scenario B: Level 2 Done. Check V3.
+        # Level 2 Done. Check V3.
         if info.SHORTLINK_URL_3 and info.SHORTLINK_API_3:
             gap_left = (v2_time + VERIFY_GAP2) - current_time
-            if gap_left > 0:
-                return True
+            if gap_left > 0: return True
         else:
-            await db.update_verify_status(user_id, chat_id, 0, VERIFY_TIME)
+            await grant_full_access(user_id, chat_id)
             return True
 
     # --- LEVEL 3 CHECK ---
     if info.SHORTLINK_URL_3 and info.SHORTLINK_API_3:
-        
         v3_time = await db.get_level_time(user_id, chat_id, 3)
-
-        # 🔄 AUTO RESET LOGIC FOR V3
-        if (current_time - v3_time) > VERIFY_TIME:
-            v3_time = 0
         
         if v3_time == 0:
             verify_url = f"https://t.me/{temp.U_NAME}?start=verify_3_{user_id}_{chat_id}_{link_id}"
@@ -122,13 +108,13 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
             
             btn = [[InlineKeyboardButton("🔥 Verify Final Level", url=short_url)]]
             await message_obj.reply_text(
-                "⚠️ **Final Verification**\n\nLevel 2 gap khatam.\nYe aakhri step hai.",
+                "⚠️ **Final Verification**\n\nLevel 2 ka time khatam.\nYe aakhri step hai, fir Full Access milega.",
                 reply_markup=InlineKeyboardMarkup(btn)
             )
             return False
 
     # --- ALL STEPS DONE ---
-    await db.update_verify_status(user_id, chat_id, 0, VERIFY_TIME)
+    await grant_full_access(user_id, chat_id)
     return True
 
 
@@ -262,7 +248,7 @@ async def set_shortner_dynamic(client, message):
         return await message.reply("❌ Level must be 1, 2, or 3.")
     await message.reply(f"✅ **Level {level} Updated!**\nSite: `{site}`")
 
-# --- GROUP HANDLER ---
+# --- GROUP & STATS HANDLERS ---
 @Client.on_message(filters.new_chat_members)
 async def new_chat(client, message):
     try:
@@ -272,7 +258,6 @@ async def new_chat(client, message):
             await message.reply_text("Thanks for adding me! Please make me Admin.")
     except: pass
 
-# --- STATS HANDLER ---
 @Client.on_message(filters.command("stats") & filters.user(ADMINS))
 async def stats_handler(client, message):
     try:

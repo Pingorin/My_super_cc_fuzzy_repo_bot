@@ -21,12 +21,12 @@ IS_VERIFY = True
 
 # ✅ Verification Time (Full Access Kitne time ke liye milega)
 # Default: 24 Hours (Seconds me)
-VERIFY_TIME = 10 * 60 
+VERIFY_TIME = 20 * 60 
 
 # ✅ Time Gaps (Ek step ke baad dusre step me kitna wait karna hai)
 # Value seconds me hai (Ex: 300 = 5 Minutes)
-VERIFY_GAP1 = 2 * 60  # Gap between V1 -> V2
-VERIFY_GAP2 = 2 * 60  # Gap between V2 -> V3
+VERIFY_GAP1 = 5 * 60  # Gap between V1 -> V2
+VERIFY_GAP2 = 5 * 60  # Gap between V2 -> V3
 
 # LEVEL 1 (Mandatory if verify ON)
 SHORTLINK_URL_1 = "shortxlinks.com"

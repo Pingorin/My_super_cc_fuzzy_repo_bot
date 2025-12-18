@@ -122,8 +122,11 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start_handler(client, message):
-    if message.chat.type == "private":
+    # ✅ CASE 0: Register User or Group
+    if message.chat.type == enums.ChatType.PRIVATE:
         await db.add_user(message.from_user.id)
+    elif message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+        await db.add_group(message.chat.id)
 
     # ✅ CASE 1: Verification Return
     if len(message.command) > 1 and message.command[1].startswith("verify_"):
@@ -202,31 +205,73 @@ async def start_handler(client, message):
             await message.reply(f"❌ Error: {e}")
         return
 
-    # ✅ CASE 3: Normal Start
-    text = f"""Hello {message.from_user.mention} 👋,
+    # ✅ CASE 3: Normal Start (Welcome Message)
+    if message.chat.type == enums.ChatType.PRIVATE:
+        text = f"""Hello {message.from_user.mention} 👋,
 
 Main ek **Auto Filter Bot** hu. 
 Muje apne group me add karo movies aur series provide karne ke liye.
 
 Niche diye gaye buttons check karein 👇"""
 
-    buttons = [[
-        InlineKeyboardButton('⇆ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘs ⇆', url=f'http://t.me/{temp.U_NAME}?startgroup=start')
-    ],[
-        InlineKeyboardButton('⚙ ꜰᴇᴀᴛᴜʀᴇs', callback_data='features'),
-        InlineKeyboardButton('💸 ᴘʀᴇᴍɪᴜᴍ', callback_data='buy_premium')
-    ],[
-        InlineKeyboardButton('🚫 ᴇᴀʀɴ ᴍᴏɴᴇʏ ᴡɪᴛʜ ʙᴏᴛ 🚫', callback_data='earn'),
-        InlineKeyboardButton('🤝 ʀᴇꜰᴇʀʀᴀʟ 🤝', callback_data='refer')
-    ]]
-    
-    await message.reply_photo(
-        photo=START_IMG,
-        caption=text,
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
+        buttons = [[
+            InlineKeyboardButton('⇆ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘs ⇆', url=f'http://t.me/{temp.U_NAME}?startgroup=start')
+        ],[
+            InlineKeyboardButton('⚙ ꜰᴇᴀᴛᴜʀᴇs', callback_data='features'),
+            InlineKeyboardButton('💸 ᴘʀᴇᴍɪᴜᴍ', callback_data='buy_premium')
+        ],[
+            InlineKeyboardButton('🚫 ᴇᴀʀɴ ᴍᴏɴᴇʏ ᴡɪᴛʜ ʙᴏᴛ 🚫', callback_data='earn'),
+            InlineKeyboardButton('🤝 ʀᴇꜰᴇʀʀᴀʟ 🤝', callback_data='refer')
+        ]]
+        
+        await message.reply_photo(
+            photo=START_IMG,
+            caption=text,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+    else:
+        # Group Alive Msg
+        await message.reply("✅ Bot is Alive & Settings Saved!")
 
-# --- ADMIN COMMANDS ---
+# --- 2. CONNECT COMMAND ---
+@Client.on_message(filters.command("connect") & filters.group)
+async def connect_handler(client, message):
+    try:
+        user_id = message.from_user.id
+        member = await client.get_chat_member(message.chat.id, user_id)
+        if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
+            return await message.reply("❌ **Only Group Admins can use this command!**")
+
+        await db.add_group(message.chat.id)
+
+        chat_title = message.chat.title
+        await message.reply_text(
+            f"✅ **Successfully Connected!**\n\n"
+            f"I am now fully operational in **{chat_title}**.\n\n"
+            f"You can now configure my settings via the `/settings` command in my PM.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⚙️ Configure Settings", url=f"https://t.me/{temp.U_NAME}")]
+            ])
+        )
+    except Exception as e:
+        await message.reply(f"❌ Error: {e}")
+
+# --- 3. NEW GROUP ADDED HANDLER ---
+@Client.on_message(filters.new_chat_members)
+async def new_chat(client, message):
+    try:
+        bot_id = (await client.get_me()).id
+        for member in message.new_chat_members:
+            if member.id == bot_id:
+                await message.reply_text(
+                    "✅ **Thank you for adding me!**\n\n"
+                    "To get started, please **promote me to an administrator**, "
+                    "then type `/connect` to activate me."
+                )
+    except Exception as e:
+        logger.error(f"Error in new_chat: {e}")
+
+# --- ADMIN COMMANDS & STATS ---
 @Client.on_message(filters.command("set_shortner") & filters.user(ADMINS))
 async def set_shortner_dynamic(client, message):
     if len(message.command) < 4:
@@ -247,16 +292,6 @@ async def set_shortner_dynamic(client, message):
     else:
         return await message.reply("❌ Level must be 1, 2, or 3.")
     await message.reply(f"✅ **Level {level} Updated!**\nSite: `{site}`")
-
-# --- GROUP & STATS HANDLERS ---
-@Client.on_message(filters.new_chat_members)
-async def new_chat(client, message):
-    try:
-        bot_id = (await client.get_me()).id
-        if bot_id in [u.id for u in message.new_chat_members]:
-            await db.add_group(message.chat.id)
-            await message.reply_text("Thanks for adding me! Please make me Admin.")
-    except: pass
 
 @Client.on_message(filters.command("stats") & filters.user(ADMINS))
 async def stats_handler(client, message):

@@ -1,3 +1,4 @@
+import pyromod.listen
 import logging
 import logging.config
 from pyrogram import Client, __version__

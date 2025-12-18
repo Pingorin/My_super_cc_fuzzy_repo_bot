@@ -16,7 +16,7 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-@Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index", "set_shortner", "settings"]))
+@Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index", "set_shortner", "settings", "connect"]))
 async def auto_filter(client, message):
     
     raw_query = message.text

@@ -69,7 +69,6 @@ async def earning_settings(client, query):
     group_data = await db.get_group_settings(chat_id)
     
     if not group_data:
-        # Agar group data nahi mila, to default create karo
         await db.add_group(chat_id)
         group_data = await db.get_group_settings(chat_id)
 
@@ -203,46 +202,69 @@ async def toggle_activation(client, query):
 async def alert_requirements(client, query):
     await query.answer("❌ Requirements not met!\nAdd FSub channel & get 100+ members.", show_alert=True)
 
-# --- 7. CONFIGURE SHORTENERS (SLOTS) ---
+# --- 7. CONFIGURE SHORTENERS (UPDATED UI) ---
 @Client.on_callback_query(filters.regex(r"^set_slots#"))
 async def configure_slots(client, query):
     chat_id = int(query.data.split("#")[1])
     group_data = await db.get_group_settings(chat_id)
     shorteners = group_data.get('shorteners', {})
     
+    # Current Mode Capitalize (Dynamic, Together, Smart)
     current_mode = group_data.get('shortener_mode', 'dynamic').capitalize()
     
-    help_text_map = {
-        'Dynamic': "How Dynamic mode works",
-        'Together': "How Together mode works",
-        'Smart': "How Smart mode works"
-    }
-    help_text = help_text_map.get(current_mode, "How it works")
+    # Calculate Interval in Hours
+    interval_hours = int(info.VERIFY_TIME / 3600)
 
-    text = f"⚙️ **Configure Shorteners**\nSelect a slot to Edit or Add."
-    
-    slots_btns = []
-    for i in range(1, 4): 
+    # --- BUILD STATUS LIST ---
+    status_text = ""
+    for i in range(1, 4):
         s_data = shorteners.get(str(i))
         if s_data:
-            btn_text = f"✏️ Edit Slot {i} ({s_data['site']})"
-            cb = f"edit_slot#{chat_id}#{i}"
+            site_name = s_data['site']
+            status_text += f"✅ Shortener {i}: {site_name}\n"
         else:
-            btn_text = f"➕ Add Slot {i}"
-            cb = f"add_slot#{chat_id}#{i}"
-        slots_btns.append([InlineKeyboardButton(btn_text, callback_data=cb)])
-        
-        if s_data:
-             slots_btns.append([InlineKeyboardButton(f"🗑️ Clear Slot {i}", callback_data=f"del_slot#{chat_id}#{i}")])
+            status_text += f"❌ Shortener {i}: Not Set\n"
 
+    # --- BUILD DESCRIPTION ---
+    text = (
+        f"🛠️ **Configuring {current_mode} Type for:** `{chat_id}`\n\n"
+        f"**Verification Interval:** {interval_hours} hours\n\n"
+        f"**Your Setup:**\n"
+        f"{status_text}"
+    )
+    
+    # --- BUILD BUTTONS ---
+    buttons = []
+    
+    # Slot Buttons Logic
+    for i in range(1, 4):
+        s_data = shorteners.get(str(i))
+        if s_data:
+            # Agar Slot Set hai -> Edit aur Reset button dikhao
+            buttons.append([
+                InlineKeyboardButton(f"✏️ Edit Shortener {i}", callback_data=f"edit_slot#{chat_id}#{i}"),
+                InlineKeyboardButton(f"🗑️ Reset Slot {i}", callback_data=f"del_slot#{chat_id}#{i}")
+            ])
+        else:
+            # Agar Slot Empty hai -> Set button dikhao
+            buttons.append([
+                InlineKeyboardButton(f"➕ Set Shortener {i}", callback_data=f"add_slot#{chat_id}#{i}")
+            ])
+
+    # Dynamic Help Button Text
+    help_text_btn = f"How {current_mode} mode works"
+
+    # Footer Buttons
     footer_btns = [
         [InlineKeyboardButton("🧪 Test connected Shorteners", callback_data=f"test_sl#{chat_id}")],
-        [InlineKeyboardButton("📘 How to connect shortener", url="https://t.me/YourChannel")], 
-        [InlineKeyboardButton(f"ℹ️ {help_text}", url="https://t.me/YourChannel")],
+        [InlineKeyboardButton("📘 How to connect shortener", url="https://t.me/YourChannel")], # Replace Link
+        [InlineKeyboardButton(f"ℹ️ {help_text_btn}", url="https://t.me/YourChannel")],      # Replace Link
         [InlineKeyboardButton("🔙 Back to shortener settings", callback_data=f"set_smode#{chat_id}")]
     ]
     
-    final_markup = InlineKeyboardMarkup(slots_btns + footer_btns)
+    # Combine Buttons
+    final_markup = InlineKeyboardMarkup(buttons + footer_btns)
+    
     await query.message.edit_text(text, reply_markup=final_markup)
 
 # --- 8. ADD/EDIT SLOT HANDLER ---

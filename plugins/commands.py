@@ -7,7 +7,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
 from database.ia_filterdb import Media
 import info 
-from info import ADMINS, IS_VERIFY, VERIFY_TIME, VERIFY_GAP1, VERIFY_GAP2
+from info import ADMINS, IS_VERIFY
 from utils import temp, get_shortlink 
 from Script import script 
 
@@ -54,8 +54,21 @@ async def get_active_shorteners(chat_id):
 
 # --- 🧠 HELPER: GRANT ACCESS & RESET LOOP ---
 async def grant_full_access(user_id, chat_id):
+    """
+    Grants access based on the configured Time Mode and Resets levels for the next loop.
+    """
+    group_settings = await db.get_group_settings(chat_id)
+    mode = group_settings.get('shortener_mode', 'dynamic') if group_settings else 'dynamic'
+    
+    # Decide Duration based on Mode
+    if mode == 'smart':
+        duration = group_settings.get('time_smart', 86400) # Default 24h
+    else:
+        # Dynamic & Together use this time
+        duration = group_settings.get('time_dynamic', 86400) 
+
     # 1. Give Full Access (Level 0)
-    await db.update_verify_status(user_id, chat_id, 0, VERIFY_TIME)
+    await db.update_verify_status(user_id, chat_id, 0, duration)
     
     # 2. 🔥 RESET LEVELS 1, 2, 3 🔥
     # Taki jab cycle expire ho, to Bot wapis V1 se shuru kare
@@ -63,7 +76,7 @@ async def grant_full_access(user_id, chat_id):
     await db.update_verify_status(user_id, chat_id, 2, is_reset=True)
     await db.update_verify_status(user_id, chat_id, 3, is_reset=True)
 
-# --- 🧠 SMART VERIFICATION LOGIC (WITH PRIORITY) ---
+# --- 🧠 MASTER VERIFICATION LOGIC ---
 async def check_verification(client, user_id, chat_id, link_id, message_obj):
     if not IS_VERIFY:
         return True 
@@ -72,91 +85,102 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
     if await db.get_verify_status(user_id, chat_id):
         return True 
 
-    # 🔥 Get Active Shorteners (Group vs Default)
+    # 🔥 Get Settings & Active Shorteners
+    group_settings = await db.get_group_settings(chat_id)
+    mode = group_settings.get('shortener_mode', 'dynamic') if group_settings else 'dynamic'
     active_slots = await get_active_shorteners(chat_id)
     current_time = time.time()
 
-    
+    # ==================================================================
+    # 🌟 MODE 1: SMART (Waterfall with Gaps)
+    # ==================================================================
+    if mode == 'smart':
+        gap1 = group_settings.get('time_gap1', 300) # Default 5 mins
+        gap2 = group_settings.get('time_gap2', 300)
 
-    # --- LEVEL 1 CHECK ---
-    if active_slots.get('1'):
-        site = active_slots['1']['site']
-        api = active_slots['1']['api']
-        
-        v1_time = await db.get_level_time(user_id, chat_id, 1)
-        
-        if v1_time == 0:
-            verify_url = f"https://t.me/{temp.U_NAME}?start=verify_1_{user_id}_{chat_id}_{link_id}"
-            msg = await message_obj.reply_text("Generating Level 1 Link... ⏳")
-            short_url = await get_shortlink(verify_url, site, api) # ✅ Use Dynamic API
-            await msg.delete()
+        # -- Slot 1 --
+        if active_slots.get('1'):
+            v1_time = await db.get_level_time(user_id, chat_id, 1)
+            if v1_time == 0:
+                await send_verification_link(user_id, chat_id, link_id, message_obj, 1, active_slots['1'])
+                return False
             
-            btn = [[InlineKeyboardButton("🚀 Verify Level 1", url=short_url)]]
-            await message_obj.reply_text(
-                f"⚠️ **Verification Required (1/?)**\n\n**Shortener:** {site}\nFile paane ke liye Step 1 complete karein.",
-                reply_markup=InlineKeyboardMarkup(btn)
-            )
-            return False
-        
-        # Level 1 Done. Check V2.
+            # Check Gap 1 (If Slot 2 exists)
+            if active_slots.get('2'):
+                if (v1_time + gap1) > current_time: return True # Gap Valid -> Access
+            else:
+                await grant_full_access(user_id, chat_id)
+                return True
+
+        # -- Slot 2 --
         if active_slots.get('2'):
-            gap_left = (v1_time + VERIFY_GAP1) - current_time
-            if gap_left > 0: return True # Gap Valid -> Access Granted
-        else:
-            await grant_full_access(user_id, chat_id)
-            return True
-
-    # --- LEVEL 2 CHECK ---
-    if active_slots.get('2'):
-        site = active_slots['2']['site']
-        api = active_slots['2']['api']
-        
-        v2_time = await db.get_level_time(user_id, chat_id, 2)
-        
-        if v2_time == 0:
-            verify_url = f"https://t.me/{temp.U_NAME}?start=verify_2_{user_id}_{chat_id}_{link_id}"
-            msg = await message_obj.reply_text("Generating Level 2 Link... ⏳")
-            short_url = await get_shortlink(verify_url, site, api)
-            await msg.delete()
+            v2_time = await db.get_level_time(user_id, chat_id, 2)
+            if v2_time == 0:
+                await send_verification_link(user_id, chat_id, link_id, message_obj, 2, active_slots['2'])
+                return False
             
-            btn = [[InlineKeyboardButton("🚀 Verify Level 2", url=short_url)]]
-            await message_obj.reply_text(
-                f"⚠️ **Verification Expired!**\n\n**Shortener:** {site}\nLevel 1 ka time khatam.\nAb Level 2 verify karein.",
-                reply_markup=InlineKeyboardMarkup(btn)
-            )
-            return False
-        
-        # Level 2 Done. Check V3.
+            # Check Gap 2 (If Slot 3 exists)
+            if active_slots.get('3'):
+                if (v2_time + gap2) > current_time: return True # Gap Valid -> Access
+            else:
+                await grant_full_access(user_id, chat_id)
+                return True
+
+        # -- Slot 3 --
         if active_slots.get('3'):
-            gap_left = (v2_time + VERIFY_GAP2) - current_time
-            if gap_left > 0: return True
-        else:
-            await grant_full_access(user_id, chat_id)
-            return True
+            v3_time = await db.get_level_time(user_id, chat_id, 3)
+            if v3_time == 0:
+                await send_verification_link(user_id, chat_id, link_id, message_obj, 3, active_slots['3'])
+                return False
 
-    # --- LEVEL 3 CHECK ---
-    if active_slots.get('3'):
-        site = active_slots['3']['site']
-        api = active_slots['3']['api']
+    # ==================================================================
+    # 🚀 MODE 2: DYNAMIC (Sequential - No Gaps)
+    # 1 -> verify -> 2 -> verify -> 3 -> verify -> Access
+    # ==================================================================
+    else: 
+        # -- Slot 1 --
+        if active_slots.get('1'):
+            if await db.get_level_time(user_id, chat_id, 1) == 0:
+                await send_verification_link(user_id, chat_id, link_id, message_obj, 1, active_slots['1'])
+                return False
         
-        v3_time = await db.get_level_time(user_id, chat_id, 3)
-        
-        if v3_time == 0:
-            verify_url = f"https://t.me/{temp.U_NAME}?start=verify_3_{user_id}_{chat_id}_{link_id}"
-            msg = await message_obj.reply_text("Generating Final Link... ⏳")
-            short_url = await get_shortlink(verify_url, site, api)
-            await msg.delete()
-            
-            btn = [[InlineKeyboardButton("🔥 Verify Final Level", url=short_url)]]
-            await message_obj.reply_text(
-                f"⚠️ **Final Verification**\n\n**Shortener:** {site}\nYe aakhri step hai.",
-                reply_markup=InlineKeyboardMarkup(btn)
-            )
-            return False
+        # -- Slot 2 --
+        if active_slots.get('2'):
+            if await db.get_level_time(user_id, chat_id, 2) == 0:
+                await send_verification_link(user_id, chat_id, link_id, message_obj, 2, active_slots['2'])
+                return False
+
+        # -- Slot 3 --
+        if active_slots.get('3'):
+            if await db.get_level_time(user_id, chat_id, 3) == 0:
+                await send_verification_link(user_id, chat_id, link_id, message_obj, 3, active_slots['3'])
+                return False
 
     # --- ALL STEPS DONE ---
     await grant_full_access(user_id, chat_id)
     return True
+
+# --- HELPER: SEND LINK MESSAGE ---
+async def send_verification_link(user_id, chat_id, link_id, message_obj, level, slot_data):
+    site = slot_data['site']
+    api = slot_data['api']
+    
+    verify_url = f"https://t.me/{temp.U_NAME}?start=verify_{level}_{user_id}_{chat_id}_{link_id}"
+    msg = await message_obj.reply_text(f"Generating Verification Link {level}... ⏳")
+    short_url = await get_shortlink(verify_url, site, api)
+    await msg.delete()
+    
+    btn = [[InlineKeyboardButton(f"🚀 Verify Level {level}", url=short_url)]]
+    
+    # Custom Texts based on level
+    if level == 1:
+        text = f"⚠️ **Verification Required (1/?)**\n\n**Shortener:** {site}\nFile paane ke liye Step 1 complete karein."
+    elif level == 2:
+        text = f"⚠️ **Level 1 Verified! ✅**\n\n**Shortener:** {site}\nAb Level 2 complete karein (Sequential Mode)."
+    else:
+        text = f"⚠️ **Final Step (3/3)**\n\n**Shortener:** {site}\nYe aakhri step hai, fir Full Access milega."
+
+    await message_obj.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
 
 
 # --- HANDLERS ---
@@ -283,15 +307,10 @@ async def connect_handler(client, message):
             return await message.reply("❌ **Only Group Admins can use this command!**")
 
         await db.add_group(message.chat.id)
-        
         chat_title = message.chat.title
         await message.reply_text(
-            f"✅ **Successfully Connected!**\n\n"
-            f"I am now fully operational in **{chat_title}**.\n\n"
-            f"You can now configure my settings via the `/settings` command in my PM.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⚙️ Configure Settings", url=f"https://t.me/{temp.U_NAME}")]
-            ])
+            f"✅ **Successfully Connected!**\n\nI am now operational in **{chat_title}**.\nConfigure me in PM using /settings",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Settings", url=f"https://t.me/{temp.U_NAME}")]])
         )
     except Exception as e:
         await message.reply(f"❌ Error: {e}")
@@ -302,15 +321,9 @@ async def new_chat(client, message):
         bot_id = (await client.get_me()).id
         for member in message.new_chat_members:
             if member.id == bot_id:
-                await message.reply_text(
-                    "✅ **Thank you for adding me!**\n\n"
-                    "To get started, please **promote me to an administrator**, "
-                    "then type `/connect` to activate me."
-                )
-    except Exception as e:
-        logger.error(f"Error in new_chat: {e}")
+                await message.reply_text("Thanks for adding me! Promote me & type /connect")
+    except: pass
 
-# --- ADMIN COMMANDS ---
 @Client.on_message(filters.command("set_shortner") & filters.user(ADMINS))
 async def set_shortner_dynamic(client, message):
     await message.reply("⚠️ Note: Use /settings in PM for Group-Specific Settings.")

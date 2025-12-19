@@ -1,4 +1,5 @@
 import asyncio
+import aiohttp
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from database.users_chats_db import db
@@ -12,6 +13,20 @@ def seconds_to_str(seconds):
     if seconds < 3600: return f"{int(seconds/60)}min"
     if seconds < 86400: return f"{int(seconds/3600)}hr"
     return f"{int(seconds/86400)}days"
+
+# --- HELPER: Check Shortener Connection ---
+async def check_shortener_link(domain, api):
+    test_url = "https://google.com"
+    api_url = f"https://{domain}/api?api={api}&url={test_url}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("status") == "success" or data.get("shortenedUrl"):
+                        return True
+    except: pass
+    return False
 
 # --- /settings COMMAND (PM ONLY) ---
 @Client.on_message(filters.command("settings") & filters.private)
@@ -77,17 +92,14 @@ async def shortlink_config(client, query):
     chat_id = int(query.data.split("#")[1])
     group_data = await db.get_group_settings(chat_id)
     
-    # Get Current Mode (Default: dynamic)
     mode = group_data.get('shortener_mode', 'dynamic').lower()
     
-    # Get Stored Times (Defaults)
-    t_dynamic = group_data.get('time_dynamic', 86400) # 24h
-    t_smart_gap1 = group_data.get('time_gap1', 300)   # 5m
-    t_smart_gap2 = group_data.get('time_gap2', 300)   # 5m
-    t_smart_full = group_data.get('time_smart', 86400)# 24h
-    t_together_final = group_data.get('time_together', 43200) # 12h (Default)
+    t_dynamic = group_data.get('time_dynamic', 86400)
+    t_smart_gap1 = group_data.get('time_gap1', 300)
+    t_smart_gap2 = group_data.get('time_gap2', 300)
+    t_smart_full = group_data.get('time_smart', 86400)
+    t_together_final = group_data.get('time_together', 43200)
     
-    # Mode Buttons (Add ✅)
     d_tick = "✅ " if mode == 'dynamic' else ""
     t_tick = "✅ " if mode == 'together' else ""
     s_tick = "✅ " if mode == 'smart' else ""
@@ -98,7 +110,6 @@ async def shortlink_config(client, query):
         InlineKeyboardButton(f"{s_tick}Smart", callback_data=f"set_type#{chat_id}#smart")
     ]
 
-    # --- DYNAMIC CUSTOMIZATION ---
     custom_btns = []
     desc = ""
     
@@ -106,7 +117,6 @@ async def shortlink_config(client, query):
         desc = f"**Dynamic Mode:** Checks slots 1->2->3.\n⏱ Full Access: `{seconds_to_str(t_dynamic)}`"
         custom_btns.append([InlineKeyboardButton("⏰ Set Access Time", callback_data=f"time_ui#{chat_id}#time_dynamic")])
 
-    # --- TOGETHER CUSTOMIZATION ---
     elif mode == 'together':
         desc = (f"**Together Mode:**\n"
                 f"• 1 Link: `{seconds_to_str(t_together_final)}` Access\n"
@@ -114,18 +124,15 @@ async def shortlink_config(client, query):
                 f"• 3 Links: Link 1 (1hr) -> Link 2 (6hr) -> Link 3 (24hr)")
         custom_btns.append([InlineKeyboardButton("⚙️ Customize Base Time", callback_data=f"time_ui#{chat_id}#time_together")])
 
-    # --- SMART CUSTOMIZATION ---
     elif mode == 'smart':
         desc = (f"**Smart Mode:** Waterfall Logic.\n"
                 f"• Gap 1: `{seconds_to_str(t_smart_gap1)}`\n"
                 f"• Gap 2: `{seconds_to_str(t_smart_gap2)}`\n"
                 f"• Full Access: `{seconds_to_str(t_smart_full)}`")
-        
         custom_btns.append([InlineKeyboardButton("⏳ Set Gap 1", callback_data=f"time_ui#{chat_id}#time_gap1"),
                             InlineKeyboardButton("⏳ Set Gap 2", callback_data=f"time_ui#{chat_id}#time_gap2")])
         custom_btns.append([InlineKeyboardButton("⏰ Set Full Access", callback_data=f"time_ui#{chat_id}#time_smart")])
 
-    # Footer
     footer_btns = [
         [InlineKeyboardButton("⚙️ Configure Shorteners", callback_data=f"set_slots#{chat_id}")],
         [InlineKeyboardButton("🔙 Back", callback_data=f"set_earn#{chat_id}")]
@@ -136,19 +143,17 @@ async def shortlink_config(client, query):
         reply_markup=InlineKeyboardMarkup([mode_btns] + custom_btns + footer_btns)
     )
 
-# --- MODE CHANGER HANDLER ---
 @Client.on_callback_query(filters.regex(r"^set_type#"))
 async def set_mode_handler(client, query):
     _, chat_id, mode = query.data.split("#")
     await db.update_group_settings(chat_id, {'shortener_mode': mode})
-    await shortlink_config(client, query) # Refresh UI
+    await shortlink_config(client, query)
 
 # --- ⏰ TIME PICKER UI ---
 @Client.on_callback_query(filters.regex(r"^time_ui#"))
 async def time_picker_ui(client, query):
     _, chat_id, key = query.data.split("#")
     
-    # Mapping friendly names
     names = {
         'time_dynamic': "Dynamic Full Access",
         'time_gap1': "Smart Gap 1",
@@ -160,7 +165,6 @@ async def time_picker_ui(client, query):
 
     text = f"⏱ **Set Time for {name}**\n\nChoose a duration:"
     
-    # Time Options (Value in Seconds)
     if "gap" in key:
         buttons = [
             [InlineKeyboardButton("5 Mins", callback_data=f"save_time#{chat_id}#{key}#{5*60}"),
@@ -180,13 +184,12 @@ async def time_picker_ui(client, query):
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"set_smode#{chat_id}")])
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-# --- SAVE TIME HANDLER ---
 @Client.on_callback_query(filters.regex(r"^save_time#"))
 async def save_time_handler(client, query):
     _, chat_id, key, seconds = query.data.split("#")
     await db.update_group_settings(chat_id, {key: int(seconds)})
     await query.answer("✅ Time Updated!", show_alert=True)
-    await shortlink_config(client, query) # Return to Main Config
+    await shortlink_config(client, query)
 
 # --- 7. CONFIGURE SHORTENERS (STATUS DASHBOARD) ---
 @Client.on_callback_query(filters.regex(r"^set_slots#"))
@@ -196,44 +199,31 @@ async def configure_slots(client, query):
     shorteners = group_data.get('shorteners', {})
     
     current_mode = group_data.get('shortener_mode', 'dynamic').capitalize()
-    
-    # Interval Display
     interval = group_data.get('time_dynamic', 86400) if current_mode == 'Dynamic' else group_data.get('time_smart', 86400)
     interval_hours = int(interval / 3600)
 
-    # --- BUILD STATUS LIST ---
     status_text = ""
     for i in range(1, 4):
         s_data = shorteners.get(str(i))
-        if s_data:
-            site_name = s_data['site']
-            status_text += f"✅ Shortener {i}: {site_name}\n"
-        else:
-            status_text += f"❌ Shortener {i}: Not Set\n"
+        status_text += f"✅ Shortener {i}: {s_data['site']}\n" if s_data else f"❌ Shortener {i}: Not Set\n"
 
     text = (
         f"🛠️ **Configuring {current_mode} Type for:** `{chat_id}`\n\n"
         f"**Verification Interval:** {interval_hours} hours\n\n"
-        f"**Your Setup:**\n"
-        f"{status_text}"
+        f"**Your Setup:**\n{status_text}"
     )
     
-    # --- BUILD BUTTONS ---
     buttons = []
     for i in range(1, 4):
-        s_data = shorteners.get(str(i))
-        if s_data:
+        if shorteners.get(str(i)):
             buttons.append([
                 InlineKeyboardButton(f"✏️ Edit Shortener {i}", callback_data=f"edit_slot#{chat_id}#{i}"),
                 InlineKeyboardButton(f"🗑️ Reset Slot {i}", callback_data=f"del_slot#{chat_id}#{i}")
             ])
         else:
-            buttons.append([
-                InlineKeyboardButton(f"➕ Set Shortener {i}", callback_data=f"add_slot#{chat_id}#{i}")
-            ])
+            buttons.append([InlineKeyboardButton(f"➕ Set Shortener {i}", callback_data=f"add_slot#{chat_id}#{i}")])
 
     help_text_btn = f"How {current_mode} mode works"
-
     footer_btns = [
         [InlineKeyboardButton("🧪 Test connected Shorteners", callback_data=f"test_sl#{chat_id}")],
         [InlineKeyboardButton("📘 How to connect shortener", url="https://t.me/YourChannel")],
@@ -248,49 +238,38 @@ async def configure_slots(client, query):
 async def input_slot_req(client, query):
     _, chat_id, slot = query.data.split("#")
     chat_id = int(chat_id)
-    
     cancel_btn = [[InlineKeyboardButton("❌ Cancel", callback_data=f"set_slots#{chat_id}")]]
 
-    # --- STEP 1: ASK FOR DOMAIN ---
+    # Step 1: Ask Domain
     await query.message.edit_text(
-        f"Please send the **Domain** for **Shortener {slot}**.\n\n"
-        f"(e.g., `earn4link.in`, `shareus.in`)",
+        f"Please send the **Domain** for **Shortener {slot}**.\n\n(e.g., `earn4link.in`)",
         reply_markup=InlineKeyboardMarkup(cancel_btn)
     )
     
     try:
         domain_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
-        if not domain_msg.text:
-            return await query.message.edit_text("❌ Input must be text.", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        if not domain_msg.text: return await query.message.edit_text("❌ Text only!", reply_markup=InlineKeyboardMarkup(cancel_btn))
         domain = domain_msg.text.strip()
         await domain_msg.delete()
-    except asyncio.TimeoutError:
-        return await query.message.edit_text("❌ Timeout!", reply_markup=InlineKeyboardMarkup(cancel_btn))
-    except Exception: return
+    except: return await query.message.edit_text("❌ Timeout!", reply_markup=InlineKeyboardMarkup(cancel_btn))
 
-    # --- STEP 2: ASK FOR API KEY ---
+    # Step 2: Ask API
     await query.message.edit_text(
-        f"✅ **Domain for slot {slot} has been updated.**\n"
-        f"Now, please send the **API Key** for the same slot.",
+        f"✅ **Domain for slot {slot} has been updated.**\nNow, please send the **API Key**.",
         reply_markup=InlineKeyboardMarkup(cancel_btn)
     )
 
     try:
         api_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
-        if not api_msg.text:
-            return await query.message.edit_text("❌ Input must be text.", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        if not api_msg.text: return await query.message.edit_text("❌ Text only!", reply_markup=InlineKeyboardMarkup(cancel_btn))
         api = api_msg.text.strip()
         await api_msg.delete()
-    except asyncio.TimeoutError:
-        return await query.message.edit_text("❌ Timeout!", reply_markup=InlineKeyboardMarkup(cancel_btn))
-    except Exception: return
+    except: return await query.message.edit_text("❌ Timeout!", reply_markup=InlineKeyboardMarkup(cancel_btn))
 
-    # --- STEP 3: SAVE ---
+    # Step 3: Save & Return
     await db.add_shortener(chat_id, slot, domain, api)
     await query.message.edit_text(f"✅ **Api for slot {slot} has been updated.**")
-    await asyncio.sleep(2)
-    
-    # --- STEP 4: RETURN ---
+    await asyncio.sleep(1.5)
     query.data = f"set_slots#{chat_id}"
     await configure_slots(client, query)
 
@@ -301,9 +280,34 @@ async def delete_slot(client, query):
     await query.answer(f"🗑️ Slot {slot} Cleared!", show_alert=True)
     await configure_slots(client, query)
 
+# --- 9. TEST CONNECTED SHORTENERS ---
 @Client.on_callback_query(filters.regex(r"^test_sl#"))
 async def test_shorteners(client, query):
-    await query.answer("🧪 Testing connections... (Feature in progress)", show_alert=True)
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    shorteners = group_data.get('shorteners', {})
+
+    if not shorteners: return await query.answer("⚠️ No shorteners connected!", show_alert=True)
+    await query.message.edit_text("🧪 **Testing connections...**")
+
+    results = []
+    all_success = True
+    for i in range(1, 4):
+        s_data = shorteners.get(str(i))
+        if s_data:
+            domain, api = s_data['site'], s_data['api']
+            is_working = await check_shortener_link(domain, api)
+            if is_working: results.append(f" - {domain}: ✅ Success")
+            else:
+                results.append(f" - {domain}: ❌ Failed")
+                all_success = False
+
+    back_btn = [[InlineKeyboardButton("🔙 Back", callback_data=f"set_slots#{chat_id}")]]
+    if all_success:
+        await query.message.edit_text("🎉 **Congratulations!**\n\nAll shorteners are working perfectly.", reply_markup=InlineKeyboardMarkup(back_btn))
+    else:
+        fail_btns = [[InlineKeyboardButton("📘 How to connect", url="https://t.me/YourChannel")], back_btn[0]]
+        await query.message.edit_text(f"📊 **Test Results:**\n\n" + "\n".join(results) + "\n\nOne or more failed.", reply_markup=InlineKeyboardMarkup(fail_btns))
 
 # --- BACK HOME ---
 @Client.on_callback_query(filters.regex(r"^set_back_home"))
@@ -315,51 +319,38 @@ async def back_home(client, query):
 async def disable_shortlink_menu(client, query):
     chat_id = int(query.data.split("#")[1])
     group_data = await db.get_group_settings(chat_id)
-    
     is_active = not group_data.get('is_shortlink_active', True)
     status_icon = "✅ ACTIVE" if is_active else "❌ INACTIVE"
     
     try: count = await client.get_chat_members_count(chat_id)
     except: count = 0
-    req_members = count >= 100
-    icon_mem = "✅" if req_members else "❌"
     
     fsub_list = group_data.get('fsub_channels', [])
+    req_mem = count >= 100
     req_fsub = len(fsub_list) > 0
-    icon_fsub = "✅" if req_fsub else "❌"
 
     text = (
-        f"🚫 **Disable Shortlink for:** `{chat_id}`\n\n"
-        f"**Status:** {status_icon}\n\n"
-        f"This feature bypasses shorteners, requiring users to join your Fsub channel(s) instead.\n\n"
-        f"**Requirements to Activate:**\n"
-        f"{icon_fsub} 1. Configure at least one Fsub channel.\n"
-        f"{icon_mem} 2. Group must have over 100 members (Currently: {count})."
+        f"🚫 **Disable Shortlink for:** `{chat_id}`\n\n**Status:** {status_icon}\n\n"
+        f"**Requirements:**\n"
+        f"{'✅' if req_fsub else '❌'} 1. Configure Fsub.\n"
+        f"{'✅' if req_mem else '❌'} 2. 100+ Members (Cur: {count})."
     )
     
-    btn_text = "🔴 Disable Shortlinks Now" if not is_active else "🟢 Enable Shortlinks Back"
     cb_data = f"act_toggle#{chat_id}#off" if not is_active else f"act_toggle#{chat_id}#on"
-    
-    if not is_active and (not req_members or not req_fsub):
-        cb_data = "alert_req"
+    if not is_active and (not req_mem or not req_fsub): cb_data = "alert_req"
 
     buttons = [
-        [InlineKeyboardButton(btn_text, callback_data=cb_data)],
-        [InlineKeyboardButton("🔙 Back to Earning Method", callback_data=f"set_earn#{chat_id}")]
+        [InlineKeyboardButton("🔴 Disable" if not is_active else "🟢 Enable", callback_data=cb_data)],
+        [InlineKeyboardButton("🔙 Back", callback_data=f"set_earn#{chat_id}")]
     ]
-    
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 @Client.on_callback_query(filters.regex(r"^act_toggle#"))
 async def toggle_activation(client, query):
     _, chat_id, action = query.data.split("#")
     chat_id = int(chat_id)
-    if action == "off":
-        await db.update_group_settings(chat_id, {'is_shortlink_active': False})
-        await query.answer("🚫 Shortlink Mode Deactivated!", show_alert=True)
-    else:
-        await db.update_group_settings(chat_id, {'is_shortlink_active': True})
-        await query.answer("✅ Shortlink Mode Activated!", show_alert=True)
+    await db.update_group_settings(chat_id, {'is_shortlink_active': (action == "on")})
+    await query.answer(f"✅ Shortlink Mode {'Activated' if action == 'on' else 'Deactivated'}!", show_alert=True)
     await earning_settings(client, query)
 
 @Client.on_callback_query(filters.regex(r"^alert_req"))

@@ -1,3 +1,4 @@
+import asyncio
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from database.users_chats_db import db
@@ -187,7 +188,7 @@ async def save_time_handler(client, query):
     await query.answer("✅ Time Updated!", show_alert=True)
     await shortlink_config(client, query) # Return to Main Config
 
-# --- 7. CONFIGURE SHORTENERS (SLOT UI) ---
+# --- 7. CONFIGURE SHORTENERS (STATUS DASHBOARD) ---
 @Client.on_callback_query(filters.regex(r"^set_slots#"))
 async def configure_slots(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -196,7 +197,7 @@ async def configure_slots(client, query):
     
     current_mode = group_data.get('shortener_mode', 'dynamic').capitalize()
     
-    # Calculate Interval in Hours
+    # Interval Display
     interval = group_data.get('time_dynamic', 86400) if current_mode == 'Dynamic' else group_data.get('time_smart', 86400)
     interval_hours = int(interval / 3600)
 
@@ -210,7 +211,6 @@ async def configure_slots(client, query):
         else:
             status_text += f"❌ Shortener {i}: Not Set\n"
 
-    # --- BUILD DESCRIPTION ---
     text = (
         f"🛠️ **Configuring {current_mode} Type for:** `{chat_id}`\n\n"
         f"**Verification Interval:** {interval_hours} hours\n\n"
@@ -243,36 +243,56 @@ async def configure_slots(client, query):
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons + footer_btns))
 
-# --- 8. ADD/EDIT SLOT HANDLER ---
+# --- 8. STEP-BY-STEP ADD/EDIT SLOT HANDLER ---
 @Client.on_callback_query(filters.regex(r"^add_slot#") | filters.regex(r"^edit_slot#"))
 async def input_slot_req(client, query):
     _, chat_id, slot = query.data.split("#")
+    chat_id = int(chat_id)
     
+    cancel_btn = [[InlineKeyboardButton("❌ Cancel", callback_data=f"set_slots#{chat_id}")]]
+
+    # --- STEP 1: ASK FOR DOMAIN ---
     await query.message.edit_text(
-        f"📝 **Configuring Slot {slot}**\n\n"
-        f"Send the Website and API Key in this format:\n"
-        f"`website.com your_api_key`\n\n"
-        f"Example: `gplinks.com 12345abcdef`\n\n"
-        f"👇 Reply to this message within 60 seconds.",
+        f"Please send the **Domain** for **Shortener {slot}**.\n\n"
+        f"(e.g., `earn4link.in`, `shareus.in`)",
+        reply_markup=InlineKeyboardMarkup(cancel_btn)
     )
     
     try:
-        reply = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
-        if reply.text:
-            try:
-                parts = reply.text.strip().split(" ", 1)
-                site = parts[0]
-                api = parts[1]
-                
-                await db.add_shortener(chat_id, slot, site, api)
-                await reply.reply_text(f"✅ **Slot {slot} Updated!**\nSite: {site}")
-                await configure_slots(client, query)
-            except:
-                await reply.reply_text("❌ Invalid Format! Try again.")
-                await configure_slots(client, query)
-    except Exception as e:
-        await query.message.reply_text("❌ Timeout! Please try again.")
-        await configure_slots(client, query)
+        domain_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if not domain_msg.text:
+            return await query.message.edit_text("❌ Input must be text.", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        domain = domain_msg.text.strip()
+        await domain_msg.delete()
+    except asyncio.TimeoutError:
+        return await query.message.edit_text("❌ Timeout!", reply_markup=InlineKeyboardMarkup(cancel_btn))
+    except Exception: return
+
+    # --- STEP 2: ASK FOR API KEY ---
+    await query.message.edit_text(
+        f"✅ **Domain for slot {slot} has been updated.**\n"
+        f"Now, please send the **API Key** for the same slot.",
+        reply_markup=InlineKeyboardMarkup(cancel_btn)
+    )
+
+    try:
+        api_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if not api_msg.text:
+            return await query.message.edit_text("❌ Input must be text.", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        api = api_msg.text.strip()
+        await api_msg.delete()
+    except asyncio.TimeoutError:
+        return await query.message.edit_text("❌ Timeout!", reply_markup=InlineKeyboardMarkup(cancel_btn))
+    except Exception: return
+
+    # --- STEP 3: SAVE ---
+    await db.add_shortener(chat_id, slot, domain, api)
+    await query.message.edit_text(f"✅ **Api for slot {slot} has been updated.**")
+    await asyncio.sleep(2)
+    
+    # --- STEP 4: RETURN ---
+    query.data = f"set_slots#{chat_id}"
+    await configure_slots(client, query)
 
 @Client.on_callback_query(filters.regex(r"^del_slot#"))
 async def delete_slot(client, query):

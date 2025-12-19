@@ -3,16 +3,13 @@ import math
 import aiohttp
 from pyrogram.types import InlineKeyboardButton
 
-# ❌ Is line ko humne hata diya hai: from info import SHORTLINK_URL, SHORTLINK_API
-# Kyunki ab hum URL aur API function ke andar pass karenge
-
 logger = logging.getLogger(__name__)
 
 class temp(object):
     U_NAME = None
 
 def get_size(size):
-    if not size: return ""
+    if not size: return "0 B"
     power = 2**10
     n = 0
     power_labels = {0 : '', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
@@ -21,23 +18,29 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-# ✅ UPDATED: Ab ye function 'site' aur 'api' arguments leta hai
-async def get_shortlink(link, site, api):
+# ✅ UPDATED: Arguments matched with commands.py (site, api, link)
+# ✅ FAIL-SAFE: Returns None if error (triggers Auto-Skip)
+async def get_shortlink(site, api, link):
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}
     
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, raise_for_status=True) as response:
-                data = await response.json()
-                if "shortenedUrl" in data:
-                    return data["shortenedUrl"]
-                else:
-                    logger.error(f"Shortener Error: {data}")
-                    return link
+            async with session.get(url, params=params, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if "shortenedUrl" in data:
+                        return data["shortenedUrl"]
+                    elif "status" in data and data["status"] == "success" and "shortenedUrl" in data:
+                        return data["shortenedUrl"]
+                
+                # Agar status 200 nahi hai ya JSON me link nahi hai
+                logger.error(f"Shortener Failed ({site}): Status {response.status}")
+                return None 
+
     except Exception as e:
-        logger.error(f"Shortlink Exception: {e}")
-        return link
+        logger.error(f"Shortlink Exception ({site}): {e}")
+        return None # Return None taaki Commands.py isko Skip karke next try kare
 
 def btn_parser(files, chat_id, query=None):
     buttons = []
@@ -61,7 +64,8 @@ def btn_parser(files, chat_id, query=None):
         
         if link_id is not None:
             # Format: get_LINKID_CHATID
+            # Hum yahan user ki request ID aur Chat ID bhej rahe hain
             url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
-    return buttons
+    return buttons # ✅ Fixed NameError (button -> buttons)

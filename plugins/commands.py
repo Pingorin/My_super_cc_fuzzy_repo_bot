@@ -25,35 +25,42 @@ def get_size(size):
     return f"{size:.2f} {power_labels[n]}B"
 
 # --- 🛠️ AUTO-SAVE GROUP (GROUP OBSERVER) ---
-# Ye bahut jaruri hai: Isse Bot restart hone ke baad bhi group ko yaad rakhega
+# Ensures bot remembers groups even after restart
 @Client.on_message(filters.group, group=-1)
 async def auto_save_group_handler(client, message):
     try:
         await db.add_group(message.chat.id)
     except: pass
 
-# --- 🚨 HELPER: SEND ALERT TO ADMIN ---
+# --- 🚨 HELPER: SEND ALERT TO ADMIN (EXACT FORMAT) ---
 async def send_shortener_alert(client, chat_id, site_domain):
     try:
+        # Fetch Group Details (Works for Public & Private)
         try:
             chat = await client.get_chat(chat_id)
             group_name = chat.title
             group_id = chat.id
         except:
-            group_name = "Unknown Group"
+            # Fallback if bot can't access chat details
+            group_name = "Private/Unknown Group"
             group_id = chat_id
 
+        # The Exact Alert Message You Requested
         msg = (
             f"⚠️ **Shortener Alert** ⚠️\n\n"
-            f"Error in group: **{group_name}** (`{group_id}`).\n"
-            f"Shortener **{site_domain}** is Down or Slow.\n"
-            f"**Action:** Please check your configuration."
+            f"There was an error generating a shortlink for your group: **{group_name}** (`{group_id}`).\n\n"
+            f"The shortener **{site_domain}** failed to respond correctly.\n\n"
+            f"**Action Required:** Please make sure you have configured your shortener correctly, or contact your shortener's support."
         )
+
+        # Send to All Bot Admins
         for admin_id in ADMINS:
             try:
                 await client.send_message(chat_id=int(admin_id), text=msg)
-            except: pass
-    except: pass
+            except Exception as e:
+                logger.warning(f"Failed to send alert to admin {admin_id}: {e}")
+    except Exception as e:
+        logger.error(f"Error in alert system: {e}")
 
 # --- 🧠 PRIORITY LOGIC ---
 async def get_active_shorteners(chat_id):
@@ -137,6 +144,7 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
     await grant_full_access(user_id, chat_id)
     return True
 
+# --- HELPER: ATTEMPT SEND LINK ---
 async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, level, slot_data):
     site = slot_data['site']
     api = slot_data['api']
@@ -147,6 +155,7 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
     await wait_msg.delete()
     
     if short_url:
+        # ✅ SUCCESS
         btn = [[InlineKeyboardButton(f"🚀 Verify Level {level}", url=short_url)]]
         
         if level == 1:
@@ -155,12 +164,13 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
             text = f"⚠️ **Level 1 Verified! ✅**\n\n**Shortener:** {site}\nAb Level 2 complete karein."
         else:
             text = f"⚠️ **Final Step (3/3)**\n\n**Shortener:** {site}\nYe aakhri step hai."
-
+            
         await message_obj.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
         return "SENT"
     else:
+        # ❌ FAILED (ALERT ADMIN & SKIP)
         await send_shortener_alert(client, chat_id, site)
-        await message_obj.reply_text(f"⚠️ **Alert:** {site} is down. Skipping... ⏩")
+        await message_obj.reply_text(f"⚠️ **Alert:** {site} is down or invalid. Skipping this step... ⏩")
         return "SKIP"
 
 # --- HANDLERS ---

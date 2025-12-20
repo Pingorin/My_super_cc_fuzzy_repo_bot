@@ -18,23 +18,25 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-# ✅ UPDATED: Arguments matched with commands.py (site, api, link)
-# ✅ FAIL-SAFE: Returns None if error (triggers Auto-Skip)
+# --- SHORTLINK GENERATOR (WITH 20s TIMEOUT) ---
 async def get_shortlink(site, api, link):
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}
     
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, timeout=10) as response:
+            # ✅ UPDATED: Timeout set to 20 Seconds
+            async with session.get(url, params=params, timeout=20) as response:
                 if response.status == 200:
                     data = await response.json()
+                    
+                    # Standard API Response Check
                     if "shortenedUrl" in data:
                         return data["shortenedUrl"]
                     elif "status" in data and data["status"] == "success" and "shortenedUrl" in data:
                         return data["shortenedUrl"]
                 
-                # Agar status 200 nahi hai ya JSON me link nahi hai
+                # Agar valid response nahi mila
                 logger.error(f"Shortener Failed ({site}): Status {response.status}")
                 return None 
 
@@ -64,8 +66,8 @@ def btn_parser(files, chat_id, query=None):
         
         if link_id is not None:
             # Format: get_LINKID_CHATID
-            # Hum yahan user ki request ID aur Chat ID bhej rahe hain
+            # Link ID ke sath Chat ID bhejna zaroori hai group settings fetch karne ke liye
             url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
-    return buttons # ✅ Fixed NameError (button -> buttons)
+    return buttons

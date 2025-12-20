@@ -242,6 +242,9 @@ async def start_handler(client, message):
         await db.add_user(message.from_user.id)
     elif message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         await db.add_group(message.chat.id)
+        # Check if message text is JUST /start (without args)
+        if len(message.command) == 1:
+             return await message.reply("✅ Bot is Alive & Settings Saved!")
 
     # ✅ CASE 1: Verification Return
     if len(message.command) > 1 and message.command[1].startswith("verify_"):

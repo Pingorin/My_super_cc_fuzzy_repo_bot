@@ -25,27 +25,28 @@ def get_size(size):
     return f"{size:.2f} {power_labels[n]}B"
 
 # --- 🛠️ AUTO-SAVE GROUP (GROUP OBSERVER) ---
-# Ensures bot remembers groups even after restart
 @Client.on_message(filters.group, group=-1)
 async def auto_save_group_handler(client, message):
     try:
         await db.add_group(message.chat.id)
     except: pass
 
-# --- 🚨 HELPER: SEND ALERT TO ADMIN (EXACT FORMAT) ---
+# --- 🚨 HELPER: SEND ALERT TO ADMIN (FIXED & ROBUST) ---
 async def send_shortener_alert(client, chat_id, site_domain):
     try:
-        # Fetch Group Details (Works for Public & Private)
+        # 1. Try to get Group Details
         try:
-            chat = await client.get_chat(chat_id)
+            # Convert to int to avoid peer errors
+            chat_id_int = int(str(chat_id)) 
+            chat = await client.get_chat(chat_id_int)
             group_name = chat.title
             group_id = chat.id
         except:
             # Fallback if bot can't access chat details
-            group_name = "Private/Unknown Group"
+            group_name = "Unknown/Private Group"
             group_id = chat_id
 
-        # The Exact Alert Message You Requested
+        # 2. Exact Alert Message Format
         msg = (
             f"⚠️ **Shortener Alert** ⚠️\n\n"
             f"There was an error generating a shortlink for your group: **{group_name}** (`{group_id}`).\n\n"
@@ -53,7 +54,7 @@ async def send_shortener_alert(client, chat_id, site_domain):
             f"**Action Required:** Please make sure you have configured your shortener correctly, or contact your shortener's support."
         )
 
-        # Send to All Bot Admins
+        # 3. Send to All Bot Admins
         for admin_id in ADMINS:
             try:
                 await client.send_message(chat_id=int(admin_id), text=msg)
@@ -202,7 +203,6 @@ async def start_handler(client, message):
             
             if is_all_clear:
                 await message.reply(f"✅ **Verification Successful!**\n\nAapko file access mil gaya hai. 📂")
-                
                 if link_id != 0:
                     file_data = await Media.get_file_details(link_id)
                     search_data = await Media.search_col.find_one({'link_id': link_id})

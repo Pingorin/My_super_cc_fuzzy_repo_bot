@@ -101,37 +101,37 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
         # -- Slot 1 --
         if active_slots.get('1'):
             v1_time = await db.get_level_time(user_id, chat_id, 1)
-            if v1_time == 0:
-                await send_verification_link(user_id, chat_id, link_id, message_obj, 1, active_slots['1'])
-                return False
             
-            # Check Gap 1 (If Slot 2 exists)
-            if active_slots.get('2'):
+            if v1_time == 0:
+                # Try Generating Link
+                res = await attempt_send_link(user_id, chat_id, link_id, message_obj, 1, active_slots['1'])
+                if res == "SENT": return False
+                # If res == "SKIP", code continues to Slot 2
+            
+            # Check Gap 1 (Only if Slot 2 exists)
+            elif active_slots.get('2'):
                 if (v1_time + gap1) > current_time: return True # Gap Valid -> Access
-            else:
-                await grant_full_access(user_id, chat_id)
-                return True
 
         # -- Slot 2 --
         if active_slots.get('2'):
             v2_time = await db.get_level_time(user_id, chat_id, 2)
-            if v2_time == 0:
-                await send_verification_link(user_id, chat_id, link_id, message_obj, 2, active_slots['2'])
-                return False
             
-            # Check Gap 2 (If Slot 3 exists)
-            if active_slots.get('3'):
+            if v2_time == 0:
+                res = await attempt_send_link(user_id, chat_id, link_id, message_obj, 2, active_slots['2'])
+                if res == "SENT": return False
+                # If res == "SKIP", code continues to Slot 3
+            
+            # Check Gap 2 (Only if Slot 3 exists)
+            elif active_slots.get('3'):
                 if (v2_time + gap2) > current_time: return True # Gap Valid -> Access
-            else:
-                await grant_full_access(user_id, chat_id)
-                return True
 
         # -- Slot 3 --
         if active_slots.get('3'):
             v3_time = await db.get_level_time(user_id, chat_id, 3)
+            
             if v3_time == 0:
-                await send_verification_link(user_id, chat_id, link_id, message_obj, 3, active_slots['3'])
-                return False
+                res = await attempt_send_link(user_id, chat_id, link_id, message_obj, 3, active_slots['3'])
+                if res == "SENT": return False
 
     # ==================================================================
     # 🚀 MODE 2: DYNAMIC (Sequential - No Gaps)
@@ -140,47 +140,65 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
     else: 
         # -- Slot 1 --
         if active_slots.get('1'):
+            # Only check if not verified yet
             if await db.get_level_time(user_id, chat_id, 1) == 0:
-                await send_verification_link(user_id, chat_id, link_id, message_obj, 1, active_slots['1'])
-                return False
-        
+                res = await attempt_send_link(user_id, chat_id, link_id, message_obj, 1, active_slots['1'])
+                if res == "SENT": return False 
+                # If res == "SKIP", it falls through immediately to Slot 2
+
         # -- Slot 2 --
         if active_slots.get('2'):
             if await db.get_level_time(user_id, chat_id, 2) == 0:
-                await send_verification_link(user_id, chat_id, link_id, message_obj, 2, active_slots['2'])
-                return False
+                res = await attempt_send_link(user_id, chat_id, link_id, message_obj, 2, active_slots['2'])
+                if res == "SENT": return False 
 
         # -- Slot 3 --
         if active_slots.get('3'):
             if await db.get_level_time(user_id, chat_id, 3) == 0:
-                await send_verification_link(user_id, chat_id, link_id, message_obj, 3, active_slots['3'])
-                return False
+                res = await attempt_send_link(user_id, chat_id, link_id, message_obj, 3, active_slots['3'])
+                if res == "SENT": return False 
 
     # --- ALL STEPS DONE ---
     await grant_full_access(user_id, chat_id)
     return True
 
-# --- HELPER: SEND LINK MESSAGE ---
-async def send_verification_link(user_id, chat_id, link_id, message_obj, level, slot_data):
+# --- HELPER: ATTEMPT TO SEND LINK (WITH AUTO-SKIP) ---
+async def attempt_send_link(user_id, chat_id, link_id, message_obj, level, slot_data):
+    """
+    Tries to generate a link.
+    Returns: "SENT" if successful, "SKIP" if site is down.
+    """
     site = slot_data['site']
     api = slot_data['api']
     
     verify_url = f"https://t.me/{temp.U_NAME}?start=verify_{level}_{user_id}_{chat_id}_{link_id}"
-    msg = await message_obj.reply_text(f"Generating Verification Link {level}... ⏳")
-    short_url = await get_shortlink(verify_url, site, api)
-    await msg.delete()
     
-    btn = [[InlineKeyboardButton(f"🚀 Verify Level {level}", url=short_url)]]
+    # Send "Checking" message
+    wait_msg = await message_obj.reply_text(f"Generating Verification Link {level}... ⏳")
     
-    # Custom Texts based on level
-    if level == 1:
-        text = f"⚠️ **Verification Required (1/?)**\n\n**Shortener:** {site}\nFile paane ke liye Step 1 complete karein."
-    elif level == 2:
-        text = f"⚠️ **Level 1 Verified! ✅**\n\n**Shortener:** {site}\nAb Level 2 complete karein (Sequential Mode)."
-    else:
-        text = f"⚠️ **Final Step (3/3)**\n\n**Shortener:** {site}\nYe aakhri step hai, fir Full Access milega."
+    # Try Generating
+    short_url = await get_shortlink(site, api, verify_url)
+    await wait_msg.delete()
+    
+    if short_url:
+        # ✅ SUCCESS
+        btn = [[InlineKeyboardButton(f"🚀 Verify Level {level}", url=short_url)]]
+        
+        # Custom Texts
+        if level == 1:
+            text = f"⚠️ **Verification Required (1/?)**\n\n**Shortener:** {site}\nFile paane ke liye Step 1 complete karein."
+        elif level == 2:
+            text = f"⚠️ **Level 1 Verified! ✅**\n\n**Shortener:** {site}\nAb Level 2 complete karein."
+        else:
+            text = f"⚠️ **Final Step (3/3)**\n\n**Shortener:** {site}\nYe aakhri step hai."
 
-    await message_obj.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
+        await message_obj.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
+        return "SENT"
+    
+    else:
+        # ❌ FAIL (AUTO-SKIP)
+        await message_obj.reply_text(f"⚠️ **Alert:** {site} is down or invalid. Skipping this step...")
+        return "SKIP"
 
 
 # --- HANDLERS ---

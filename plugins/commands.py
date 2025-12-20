@@ -24,6 +24,38 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
+# --- 🚨 HELPER: SEND ALERT TO ADMIN ---
+async def send_shortener_alert(client, chat_id, site_domain):
+    """
+    Sends a PM to Bot Admins when a shortener fails in a group.
+    """
+    try:
+        # Get Group Name
+        try:
+            chat = await client.get_chat(chat_id)
+            group_name = chat.title
+            group_id = chat.id
+        except:
+            group_name = "Unknown Group"
+            group_id = chat_id
+
+        # Alert Message Format
+        msg = (
+            f"⚠️ **Shortener Alert** ⚠️\n\n"
+            f"There was an error generating a shortlink for your group: **{group_name}** (`{group_id}`).\n\n"
+            f"The shortener **{site_domain}** failed to respond correctly (Slow or Down).\n\n"
+            f"**Action Required:** Please make sure you have configured your shortener correctly, or contact your shortener's support."
+        )
+
+        # Send to All Bot Admins (Owners)
+        for admin_id in ADMINS:
+            try:
+                await client.send_message(chat_id=int(admin_id), text=msg)
+            except Exception as e:
+                logger.warning(f"Failed to send alert to admin {admin_id}: {e}")
+    except Exception as e:
+        logger.error(f"Error in alert system: {e}")
+
 # --- 🧠 PRIORITY LOGIC HELPER ---
 async def get_active_shorteners(chat_id):
     """
@@ -71,7 +103,6 @@ async def grant_full_access(user_id, chat_id):
     await db.update_verify_status(user_id, chat_id, 0, duration)
     
     # 2. 🔥 RESET LEVELS 1, 2, 3 🔥
-    # Taki jab cycle expire ho, to Bot wapis V1 se shuru kare
     await db.update_verify_status(user_id, chat_id, 1, is_reset=True)
     await db.update_verify_status(user_id, chat_id, 2, is_reset=True)
     await db.update_verify_status(user_id, chat_id, 3, is_reset=True)
@@ -103,8 +134,7 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
             v1_time = await db.get_level_time(user_id, chat_id, 1)
             
             if v1_time == 0:
-                # Try Generating Link
-                res = await attempt_send_link(user_id, chat_id, link_id, message_obj, 1, active_slots['1'])
+                res = await attempt_send_link(client, user_id, chat_id, link_id, message_obj, 1, active_slots['1'])
                 if res == "SENT": return False
                 # If res == "SKIP", code continues to Slot 2
             
@@ -117,9 +147,8 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
             v2_time = await db.get_level_time(user_id, chat_id, 2)
             
             if v2_time == 0:
-                res = await attempt_send_link(user_id, chat_id, link_id, message_obj, 2, active_slots['2'])
+                res = await attempt_send_link(client, user_id, chat_id, link_id, message_obj, 2, active_slots['2'])
                 if res == "SENT": return False
-                # If res == "SKIP", code continues to Slot 3
             
             # Check Gap 2 (Only if Slot 3 exists)
             elif active_slots.get('3'):
@@ -130,40 +159,38 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
             v3_time = await db.get_level_time(user_id, chat_id, 3)
             
             if v3_time == 0:
-                res = await attempt_send_link(user_id, chat_id, link_id, message_obj, 3, active_slots['3'])
+                res = await attempt_send_link(client, user_id, chat_id, link_id, message_obj, 3, active_slots['3'])
                 if res == "SENT": return False
 
     # ==================================================================
     # 🚀 MODE 2: DYNAMIC (Sequential - No Gaps)
-    # 1 -> verify -> 2 -> verify -> 3 -> verify -> Access
     # ==================================================================
     else: 
         # -- Slot 1 --
         if active_slots.get('1'):
-            # Only check if not verified yet
             if await db.get_level_time(user_id, chat_id, 1) == 0:
-                res = await attempt_send_link(user_id, chat_id, link_id, message_obj, 1, active_slots['1'])
+                res = await attempt_send_link(client, user_id, chat_id, link_id, message_obj, 1, active_slots['1'])
                 if res == "SENT": return False 
                 # If res == "SKIP", it falls through immediately to Slot 2
 
         # -- Slot 2 --
         if active_slots.get('2'):
             if await db.get_level_time(user_id, chat_id, 2) == 0:
-                res = await attempt_send_link(user_id, chat_id, link_id, message_obj, 2, active_slots['2'])
+                res = await attempt_send_link(client, user_id, chat_id, link_id, message_obj, 2, active_slots['2'])
                 if res == "SENT": return False 
 
         # -- Slot 3 --
         if active_slots.get('3'):
             if await db.get_level_time(user_id, chat_id, 3) == 0:
-                res = await attempt_send_link(user_id, chat_id, link_id, message_obj, 3, active_slots['3'])
+                res = await attempt_send_link(client, user_id, chat_id, link_id, message_obj, 3, active_slots['3'])
                 if res == "SENT": return False 
 
     # --- ALL STEPS DONE ---
     await grant_full_access(user_id, chat_id)
     return True
 
-# --- HELPER: ATTEMPT TO SEND LINK (WITH AUTO-SKIP) ---
-async def attempt_send_link(user_id, chat_id, link_id, message_obj, level, slot_data):
+# --- HELPER: ATTEMPT TO SEND LINK (WITH AUTO-SKIP & ADMIN ALERT) ---
+async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, level, slot_data):
     """
     Tries to generate a link.
     Returns: "SENT" if successful, "SKIP" if site is down.
@@ -196,8 +223,13 @@ async def attempt_send_link(user_id, chat_id, link_id, message_obj, level, slot_
         return "SENT"
     
     else:
-        # ❌ FAIL (AUTO-SKIP)
-        await message_obj.reply_text(f"⚠️ **Alert:** {site} is down or invalid. Skipping this step...")
+        # ❌ FAIL (AUTO-SKIP & ALERT)
+        
+        # 1. Send Alert to Admin
+        await send_shortener_alert(client, chat_id, site)
+        
+        # 2. Notify User and Skip
+        await message_obj.reply_text(f"⚠️ **Alert:** {site} is down or invalid. Skipping this step... ⏩")
         return "SKIP"
 
 

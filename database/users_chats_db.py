@@ -25,7 +25,7 @@ class UserChatDB:
                 'earning_method': 'shortlink', # shortlink or fsub
                 'shortener_mode': 'dynamic',   # dynamic, together, smart
                 'shorteners': {},              # { '1': {'site': '...', 'api': '...'} }
-                'fsub_channels': {},           # ✅ Changed to Dict for Slot Support { '1': -100xx }
+                'fsub_channels': {},           # ✅ Dict for Slots { '1': -100xx }
                 'is_shortlink_active': True,
                 # Time Defaults
                 'time_dynamic': 86400,

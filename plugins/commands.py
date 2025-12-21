@@ -30,7 +30,7 @@ async def auto_save_group_handler(client, message):
     try: await db.add_group(message.chat.id)
     except: pass
 
-# --- 🚨 HELPER: SEND ALERT TO ADMIN ---
+# --- 🚨 HELPER: SEND ALERT TO ADMIN (ROBUST) ---
 async def send_shortener_alert(client, chat_id, site_domain):
     try:
         try:
@@ -217,8 +217,10 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
     
     if short_url:
         btn = [[InlineKeyboardButton(f"🚀 Verify Level {level}", url=short_url)]]
+        
         text = f"⚠️ **Verification Required ({level}/?)**\n\n**Shortener:** {site}"
         if level == 3: text = f"⚠️ **Final Step (3/3)**\n\n**Shortener:** {site}"
+
         await message_obj.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
         return "SENT"
     else:
@@ -226,8 +228,9 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(f"⚠️ **Alert:** {site} is down. Skipping... ⏩")
         return "SKIP"
 
-# --- 🔥 FSUB CHECK LOGIC (UPDATED: FORCE REQUEST LINK) 🔥 ---
+# --- 🔥 MULTI-SLOT FSUB CHECK 🔥 ---
 async def check_fsub(client, user_id, message_obj):
+    # 1. Identify Source Group
     src_chat_id = None
     if len(message_obj.command) > 1:
         try:
@@ -238,50 +241,63 @@ async def check_fsub(client, user_id, message_obj):
     
     if not src_chat_id: return True 
 
+    # 2. Get Settings
     group_settings = await db.get_group_settings(src_chat_id)
     if not group_settings: return True
     
     fsub_channels = group_settings.get('fsub_channels', {})
-    if not fsub_channels: return True 
+    if not fsub_channels: return True # No channels set
+
+    # 3. Check All Slots
+    missing_slots = [] # List to store slots user hasn't joined
 
     for slot, channel_id in fsub_channels.items():
         channel_id = int(channel_id)
         
-        # A. Member?
+        # A. Check Member
+        is_member = False
         try:
             member = await client.get_chat_member(channel_id, user_id)
             if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
-                continue 
+                is_member = True
         except: pass 
 
-        # B. Pending?
-        if await db.is_user_pending(user_id, channel_id):
-            continue 
+        # B. Check Pending
+        is_pending = False
+        if not is_member:
+            if await db.is_user_pending(user_id, channel_id):
+                is_pending = True
 
-        # C. Block & Send Request Link
-        try:
-            # 🔥 KEY CHANGE: Create link specifically for JOIN REQUEST
-            # creates_join_request=True ensure karta hai ki user join na ho paye, sirf request bhej paye
-            link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=True)
-            link = link_obj.invite_link
-            
-            btn = [[InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=link)]]
-            original_param = message_obj.command[1] if len(message_obj.command) > 1 else "start"
-            btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")])
+        # If neither, add to missing
+        if not is_member and not is_pending:
+            missing_slots.append((slot, channel_id))
 
-            await message_obj.reply_text(
-                f"⚠️ **Access Denied!**\n\n"
-                f"You must request to join our channel (Slot {slot}) to access this file.\n"
-                f"**Note:** Click 'Request to Join', then click 'Try Again'.",
-                reply_markup=InlineKeyboardMarkup(btn)
-            )
-            return False 
+    # 4. If Missing Slots Exist -> BLOCK & SHOW BUTTONS
+    if missing_slots:
+        buttons = []
+        for slot, channel_id in missing_slots:
+            try:
+                # Generate "Request to Join" link for each missing channel
+                # creates_join_request=True is CRITICAL for Request mode
+                link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=True)
+                link = link_obj.invite_link
+                buttons.append([InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=link)])
+            except Exception as e:
+                print(f"Error generating link for {channel_id}: {e}")
+        
+        # Add Try Again Button
+        original_param = message_obj.command[1] if len(message_obj.command) > 1 else "start"
+        buttons.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")])
 
-        except Exception as e:
-            print(f"Fsub Link Gen Error: {e}")
-            continue
+        await message_obj.reply_text(
+            f"⚠️ **Access Denied!**\n\n"
+            f"You must request to join the following channel(s) to access this file.\n"
+            f"**Note:** Click 'Request to Join', then click 'Try Again'.",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        return False # Access Denied
 
-    return True
+    return True # Access Granted (Joined all)
 
 # --- HANDLERS ---
 
@@ -290,7 +306,7 @@ async def start_handler(client, message):
     if message.chat.type == enums.ChatType.PRIVATE:
         await db.add_user(message.from_user.id)
         
-        # 🛑 FSUB CHECK
+        # 🛑 FSUB CHECK (First Priority)
         if len(message.command) > 1:
             is_allowed = await check_fsub(client, message.from_user.id, message)
             if not is_allowed: return 

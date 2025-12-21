@@ -17,6 +17,7 @@ def seconds_to_str(seconds):
 # --- HELPER: Check Shortener Connection ---
 async def check_shortener_link(domain, api):
     test_url = "https://google.com"
+    # Standard AdLinkFly API format
     api_url = f"https://{domain}/api?api={api}&url={test_url}"
     try:
         async with aiohttp.ClientSession() as session:
@@ -94,12 +95,17 @@ async def shortlink_config(client, query):
     
     mode = group_data.get('shortener_mode', 'dynamic').lower()
     
+    # Fetch Times from DB (Defaults handled here)
     t_dynamic = group_data.get('time_dynamic', 86400)
     t_smart_gap1 = group_data.get('time_gap1', 300)
     t_smart_gap2 = group_data.get('time_gap2', 300)
     t_smart_full = group_data.get('time_smart', 86400)
-    t_together_final = group_data.get('time_together', 43200)
     
+    # Together Mode Times
+    t_together_base = group_data.get('time_together', 604800) # Default 7 Days (for 1 or 2 links)
+    t_together_3 = group_data.get('time_together_3', 86400)   # Default 24 Hours (for 3 links)
+    
+    # Checkmarks
     d_tick = "✅ " if mode == 'dynamic' else ""
     t_tick = "✅ " if mode == 'together' else ""
     s_tick = "✅ " if mode == 'smart' else ""
@@ -113,17 +119,22 @@ async def shortlink_config(client, query):
     custom_btns = []
     desc = ""
     
+    # --- DYNAMIC UI ---
     if mode == 'dynamic':
         desc = f"**Dynamic Mode:** Checks slots 1->2->3.\n⏱ Full Access: `{seconds_to_str(t_dynamic)}`"
         custom_btns.append([InlineKeyboardButton("⏰ Set Access Time", callback_data=f"time_ui#{chat_id}#time_dynamic")])
 
+    # --- TOGETHER UI (UPDATED) ---
     elif mode == 'together':
-        desc = (f"**Together Mode:**\n"
-                f"• 1 Link: `{seconds_to_str(t_together_final)}` Access\n"
-                f"• 2 Links: Link 1 (1hr) -> Link 2 ({seconds_to_str(t_together_final)})\n"
-                f"• 3 Links: Link 1 (1hr) -> Link 2 (6hr) -> Link 3 (24hr)")
-        custom_btns.append([InlineKeyboardButton("⚙️ Customize Base Time", callback_data=f"time_ui#{chat_id}#time_together")])
+        desc = (f"**Together Mode Logic:**\n"
+                f"• 1 Link Verified: `{seconds_to_str(t_together_base)}` Access\n"
+                f"• 2 Links Verified: Link 1 (1hr) -> Link 2 (`{seconds_to_str(t_together_base)}`)\n"
+                f"• 3 Links Verified: Link 1 (1hr) -> Link 2 (6hr) -> Link 3 (`{seconds_to_str(t_together_3)}`)")
+        
+        custom_btns.append([InlineKeyboardButton("⏰ Set Base Time (1 or 2 Links)", callback_data=f"time_ui#{chat_id}#time_together")])
+        custom_btns.append([InlineKeyboardButton("⏰ Set 3-Link Final Time", callback_data=f"time_ui#{chat_id}#time_together_3")])
 
+    # --- SMART UI ---
     elif mode == 'smart':
         desc = (f"**Smart Mode:** Waterfall Logic.\n"
                 f"• Gap 1: `{seconds_to_str(t_smart_gap1)}`\n"
@@ -159,7 +170,8 @@ async def time_picker_ui(client, query):
         'time_gap1': "Smart Gap 1",
         'time_gap2': "Smart Gap 2",
         'time_smart': "Smart Full Access",
-        'time_together': "Together Base Access"
+        'time_together': "Together Base Access (1-2 Links)",
+        'time_together_3': "Together 3-Link Final Access"
     }
     name = names.get(key, "Time")
 
@@ -248,7 +260,7 @@ async def input_slot_req(client, query):
     
     try:
         domain_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
-        if not domain_msg.text: return await query.message.edit_text("❌ Text only!", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        if not domain_msg.text: return await query.message.edit_text("❌ Input must be text.", reply_markup=InlineKeyboardMarkup(cancel_btn))
         domain = domain_msg.text.strip()
         await domain_msg.delete()
     except: return await query.message.edit_text("❌ Timeout!", reply_markup=InlineKeyboardMarkup(cancel_btn))

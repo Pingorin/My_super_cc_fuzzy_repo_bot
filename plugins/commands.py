@@ -72,6 +72,7 @@ async def get_active_shorteners(chat_id):
     group_settings = await db.get_group_settings(chat_id)
     if group_settings:
         group_shorteners = group_settings.get('shorteners', {})
+        # Agar Group me EK BHI shortener set hai (Slot 1, 2, ya 3)
         if group_shorteners and (group_shorteners.get('1') or group_shorteners.get('2') or group_shorteners.get('3')):
             return group_shorteners 
 
@@ -89,10 +90,23 @@ async def grant_full_access(user_id, chat_id):
     group_settings = await db.get_group_settings(chat_id)
     mode = group_settings.get('shortener_mode', 'dynamic') if group_settings else 'dynamic'
     
-    # Set Duration based on Mode
-    if mode == 'smart': duration = group_settings.get('time_smart', 86400)
-    elif mode == 'together': duration = group_settings.get('time_together', 43200) # Default 12h for Together
-    else: duration = group_settings.get('time_dynamic', 86400) 
+    # Check Active Slots Count for Together Mode Logic
+    active_slots = await get_active_shorteners(chat_id)
+    count = len(active_slots)
+
+    # Decide Duration based on Mode
+    if mode == 'smart': 
+        duration = group_settings.get('time_smart', 86400)
+    
+    elif mode == 'together': 
+        # Logic: If 3 links -> Use 3-Link Time (Customizable), else Base Time (7 Days)
+        if count >= 3:
+            duration = group_settings.get('time_together_3', 86400) 
+        else:
+            duration = group_settings.get('time_together', 604800)
+            
+    else: 
+        duration = group_settings.get('time_dynamic', 86400) 
 
     await db.update_verify_status(user_id, chat_id, 0, duration)
     # Reset Levels
@@ -125,7 +139,7 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
                 buttons.append([InlineKeyboardButton(f"🔗 Verify Link 1 ({active_slots['1']['site']})", url=link)])
                 info_text += f"\n1️⃣ **Step 1:** Remaining"
             else:
-                # Site Down -> Auto Verify this level
+                # Site Down -> Auto Verify this level (Skip)
                 await db.update_verify_status(user_id, chat_id, 1, is_reset=False) 
                 info_text += f"\n1️⃣ **Step 1:** ✅ Auto-Skipped (Server Error)"
 
@@ -244,15 +258,17 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
         return "SENT"
     else:
-        # ❌ FAILED (ALERT ADMIN & SKIP)
+        # ❌ FAIL (AUTO-SKIP & ALERT)
         await send_shortener_alert(client, chat_id, site)
         await message_obj.reply_text(f"⚠️ **Alert:** {site} is down or invalid. Skipping this step... ⏩")
         return "SKIP"
+
 
 # --- HANDLERS ---
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start_handler(client, message):
+    # ✅ CASE 0: Register
     if message.chat.type == enums.ChatType.PRIVATE:
         await db.add_user(message.from_user.id)
     elif message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
@@ -260,7 +276,7 @@ async def start_handler(client, message):
         if len(message.command) == 1:
             return await message.reply("✅ Bot is Alive & Settings Saved!")
 
-    # ✅ VERIFY RETURN
+    # ✅ CASE 1: Verification Return
     if len(message.command) > 1 and message.command[1].startswith("verify_"):
         try:
             data = message.command[1].split("_")
@@ -272,14 +288,16 @@ async def start_handler(client, message):
             if str(verify_id) != str(message.from_user.id):
                 return await message.reply("❌ Ye link apke liye nahi hai.")
             
-            # Update Status
+            # Update Database
             await db.update_verify_status(message.from_user.id, chat_id, level)
 
-            # Re-Check Logic
+            # Check Next Step
             is_all_clear = await check_verification(client, message.from_user.id, chat_id, link_id, message)
             
             if is_all_clear:
                 await message.reply(f"✅ **Verification Successful!**\n\nAapko file access mil gaya hai. 📂")
+                
+                # Auto Send File
                 if link_id != 0:
                     file_data = await Media.get_file_details(link_id)
                     search_data = await Media.search_col.find_one({'link_id': link_id})
@@ -299,22 +317,25 @@ async def start_handler(client, message):
         except Exception as e:
             return await message.reply(f"❌ Verification Error: {e}")
 
-    # ✅ FILE REQUEST
+    # ✅ CASE 2: File Request
     if len(message.command) > 1 and message.command[1].startswith("get_"):
         try:
             data = message.command[1].split("_")
             link_id = int(data[1])
             src_chat_id = data[2] if len(data) > 2 else str(message.chat.id)
             
+            # Smart Check
             is_all_clear = await check_verification(client, message.from_user.id, src_chat_id, link_id, message)
             
             if not is_all_clear:
                 return 
 
+            # Send File
             file_data = await Media.get_file_details(link_id)
             search_data = await Media.search_col.find_one({'link_id': link_id})
             if not file_data: return await message.reply("❌ File Database se delete ho gayi hai.")
             file_id = file_data.get('file_id')
+            if not file_id: return await message.reply("❌ Error: File ID missing.")
 
             db_caption = search_data.get('caption', f"📂 <b>{search_data.get('file_name')}</b>")
             final_caption = f"{db_caption}\n{script.CUSTOM_FOOTER}"
@@ -332,7 +353,7 @@ async def start_handler(client, message):
             await message.reply(f"❌ Error: {e}")
         return
 
-    # ✅ START MSG
+    # ✅ CASE 3: Start Message
     if message.chat.type == enums.ChatType.PRIVATE:
         text = f"""Hello {message.from_user.mention} 👋,
 
@@ -365,9 +386,13 @@ async def connect_handler(client, message):
         member = await client.get_chat_member(message.chat.id, user_id)
         if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
             return await message.reply("❌ **Only Group Admins can use this command!**")
+
         await db.add_group(message.chat.id)
         chat_title = message.chat.title
-        await message.reply_text(f"✅ **Successfully Connected to {chat_title}!**")
+        await message.reply_text(
+            f"✅ **Successfully Connected to {chat_title}!**\n\nI am now operational.\nConfigure me in PM using /settings",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Settings", url=f"https://t.me/{temp.U_NAME}")]])
+        )
     except Exception as e:
         await message.reply(f"❌ Error: {e}")
 
@@ -382,7 +407,7 @@ async def new_chat(client, message):
 
 @Client.on_message(filters.command("set_shortner") & filters.user(ADMINS))
 async def set_shortner_dynamic(client, message):
-    await message.reply("⚠️ Use /settings in PM.")
+    await message.reply("⚠️ Note: Use /settings in PM for Group-Specific Settings.")
 
 @Client.on_message(filters.command("stats") & filters.user(ADMINS))
 async def stats_handler(client, message):

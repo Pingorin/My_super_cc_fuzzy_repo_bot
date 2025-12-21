@@ -9,13 +9,14 @@ class UserChatDB:
         self.users = self.db.users
         self.groups = self.db.groups
         self.banned = self.db.banned 
+        self.fsub_pending = self.db.fsub_pending # ✅ New Collection for Join Requests
 
     async def add_user(self, id):
         user = await self.users.find_one({'id': int(id)})
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ UPDATED: Add Group with Default Settings
+    # ✅ Add Group with Default Settings
     async def add_group(self, id):
         group = await self.groups.find_one({'id': int(id)})
         if not group:
@@ -29,7 +30,7 @@ class UserChatDB:
             }
             await self.groups.insert_one(default_settings)
 
-    # --- ⚙️ GROUP SETTINGS HELPERS (NEW) ---
+    # --- ⚙️ GROUP SETTINGS HELPERS ---
     
     async def get_group_settings(self, id):
         return await self.groups.find_one({'id': int(id)})
@@ -51,7 +52,7 @@ class UserChatDB:
             {'$unset': {key: ""}}
         )
 
-    # --- STATS & BAN LOGIC ---
+    # --- 📊 STATS & BAN LOGIC ---
 
     async def total_users_count(self):
         return await self.users.count_documents({})
@@ -76,7 +77,7 @@ class UserChatDB:
     async def remove_ban(self, id, type="user"):
         await self.banned.delete_one({"id": int(id), "type": type})
 
-    # --- 🔒 ADVANCED VERIFICATION SYSTEM (WATERFALL & AUTO-RESET) ---
+    # --- 🔒 ADVANCED VERIFICATION SYSTEM ---
     
     async def get_verify_status(self, user_id, chat_id):
         """
@@ -85,16 +86,10 @@ class UserChatDB:
         user = await self.users.find_one({'id': int(user_id)})
         if user:
             all_verifications = user.get('verify_status', {})
-
-            # Legacy Check 1
-            if isinstance(all_verifications, (int, float)):
-                return False
+            if isinstance(all_verifications, (int, float)): return False
 
             chat_data = all_verifications.get(str(chat_id), {})
-
-            # Legacy Check 2
-            if isinstance(chat_data, (int, float)):
-                return False
+            if isinstance(chat_data, (int, float)): return False
 
             # Check Level 0 (Full Access Token) Expiry
             return chat_data.get('0', 0) > time.time()
@@ -122,7 +117,6 @@ class UserChatDB:
         """
         current_time = time.time()
         
-        # Calculate Value
         if is_reset:
             value = 0 # Reset logic
         elif duration > 0:
@@ -130,7 +124,7 @@ class UserChatDB:
         else:
             value = current_time # Completion Timestamp
 
-        # --- AUTO-FIX LOGIC ---
+        # Auto-Fix Logic for Corrupt Data
         user = await self.users.find_one({'id': int(user_id)})
         if user:
             current_status = user.get('verify_status')
@@ -141,12 +135,39 @@ class UserChatDB:
                 if isinstance(chat_status, (int, float)):
                     await self.users.update_one({'id': int(user_id)}, {'$set': {f'verify_status.{str(chat_id)}': {}}})
 
-        # Safe Update
         key_name = f"verify_status.{str(chat_id)}.{str(level)}"
         await self.users.update_one(
             {'id': int(user_id)},
             {'$set': {key_name: value}},
             upsert=True
         )
+
+    # --- 🔥 NEW: ADVANCED FSUB PENDING LOGIC 🔥 ---
+    
+    async def add_pending_request(self, user_id, channel_id):
+        """Adds a user to the pending join request list."""
+        try:
+            await self.fsub_pending.update_one(
+                {'_id': f"{user_id}_{channel_id}"},
+                {'$set': {'user_id': int(user_id), 'chat_id': int(channel_id)}},
+                upsert=True
+            )
+        except Exception as e:
+            print(f"Error adding pending request: {e}")
+
+    async def remove_pending_request(self, user_id, channel_id):
+        """Removes a user from the pending list (When joined/left/approved)."""
+        try:
+            await self.fsub_pending.delete_one({'_id': f"{user_id}_{channel_id}"})
+        except Exception as e:
+            print(f"Error removing pending request: {e}")
+
+    async def is_user_pending(self, user_id, channel_id):
+        """Checks if a user has a pending join request."""
+        try:
+            found = await self.fsub_pending.find_one({'_id': f"{user_id}_{channel_id}"})
+            return bool(found)
+        except:
+            return False
 
 db = UserChatDB(DATABASE_URI, DATABASE_NAME)

@@ -44,82 +44,36 @@ async def send_shortener_alert(client, chat_id, site_domain):
 
         msg = (
             f"⚠️ **Shortener Alert** ⚠️\n\n"
-            f"Error in group: **{group_name}** (`{group_id}`).\n"
-            f"The shortener **{site_domain}** failed to respond correctly.\n\n"
-            f"**Action Required:** Please check configuration."
+            f"Group: **{group_name}** (`{group_id}`).\n"
+            f"Shortener **{site_domain}** failed to respond.\n"
+            f"**Action:** Check configuration."
         )
         for admin_id in ADMINS:
             try: await client.send_message(chat_id=int(admin_id), text=msg)
             except: pass
     except: pass
 
-# --- 🔥 FSUB CHECK LOGIC (FORCE REQUEST) ---
-async def check_fsub(client, user_id, message_obj):
-    # 1. Check if FSUB is Enabled in info.py
-    if not info.FSUB_CHANNEL_ID: return True
-    
-    target_channel_id = info.FSUB_CHANNEL_ID
-
-    try:
-        # 2. Check if Member (Case 1)
-        member = await client.get_chat_member(target_channel_id, user_id)
-        if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
-            return True 
-    except Exception:
-        pass # Not a member
-
-    # 3. Check if Pending (Case 2: Database Check)
-    if await db.is_user_pending(user_id, target_channel_id):
-        return True 
-
-    # 4. Access Denied -> Show Join Button (Case 3)
-    try:
-        chat_info = await client.get_chat(target_channel_id)
-        link = chat_info.invite_link or await client.export_chat_invite_link(target_channel_id)
-        
-        btn = [[InlineKeyboardButton("📢 Request to Join Channel", url=link)]]
-        
-        # Try Again Button Logic
-        if len(message_obj.command) > 1:
-            start_arg = message_obj.command[1]
-            btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={start_arg}")])
-        else:
-            btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start=start")])
-
-        await message_obj.reply_text(
-            "⚠️ **Access Denied!**\n\n"
-            "Please request to join our update channel to get this file.\n"
-            "**Note:** Click 'Request to Join', then click 'Try Again'. You don't need to wait for approval!",
-            reply_markup=InlineKeyboardMarkup(btn)
-        )
-        return False
-
-    except Exception as e:
-        print(f"Fsub Error: {e}")
-        return True # Fail-safe: Error aayi to allow kar do
-
 # --- 🧠 PRIORITY LOGIC ---
 async def get_active_shorteners(chat_id):
     group_settings = await db.get_group_settings(chat_id)
     if group_settings:
         group_shorteners = group_settings.get('shorteners', {})
-        if group_shorteners and (group_shorteners.get('1') or group_shorteners.get('2') or group_shorteners.get('3')):
-            return group_shorteners 
+        active = {}
+        if group_shorteners.get('1'): active['1'] = group_shorteners['1']
+        if group_shorteners.get('2'): active['2'] = group_shorteners['2']
+        if group_shorteners.get('3'): active['3'] = group_shorteners['3']
+        if active: return active
 
     default_shorteners = {}
-    if info.SHORTLINK_URL_1 and info.SHORTLINK_API_1:
-        default_shorteners['1'] = {'site': info.SHORTLINK_URL_1, 'api': info.SHORTLINK_API_1}
-    if info.SHORTLINK_URL_2 and info.SHORTLINK_API_2:
-        default_shorteners['2'] = {'site': info.SHORTLINK_URL_2, 'api': info.SHORTLINK_API_2}
-    if info.SHORTLINK_URL_3 and info.SHORTLINK_API_3:
-        default_shorteners['3'] = {'site': info.SHORTLINK_URL_3, 'api': info.SHORTLINK_API_3}
+    if info.SHORTLINK_URL_1 and info.SHORTLINK_API_1: default_shorteners['1'] = {'site': info.SHORTLINK_URL_1, 'api': info.SHORTLINK_API_1}
+    if info.SHORTLINK_URL_2 and info.SHORTLINK_API_2: default_shorteners['2'] = {'site': info.SHORTLINK_URL_2, 'api': info.SHORTLINK_API_2}
+    if info.SHORTLINK_URL_3 and info.SHORTLINK_API_3: default_shorteners['3'] = {'site': info.SHORTLINK_URL_3, 'api': info.SHORTLINK_API_3}
     return default_shorteners
 
-# --- 🧠 HELPER: GRANT ACCESS ---
+# --- 🧠 GRANT ACCESS ---
 async def grant_full_access(user_id, chat_id):
     group_settings = await db.get_group_settings(chat_id)
     mode = group_settings.get('shortener_mode', 'dynamic') if group_settings else 'dynamic'
-    
     active_slots = await get_active_shorteners(chat_id)
     count = len(active_slots)
 
@@ -134,7 +88,7 @@ async def grant_full_access(user_id, chat_id):
     await db.update_verify_status(user_id, chat_id, 2, is_reset=True)
     await db.update_verify_status(user_id, chat_id, 3, is_reset=True)
 
-# --- 🧠 MASTER VERIFICATION LOGIC ---
+# --- 🧠 VERIFICATION LOGIC ---
 async def check_verification(client, user_id, chat_id, link_id, message_obj):
     if not IS_VERIFY: return True 
     if await db.get_verify_status(user_id, chat_id): return True 
@@ -147,7 +101,7 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
     # TOGETHER MODE
     if mode == 'together':
         buttons = []
-        info_text = "⚠️ **Verification Required**\n\nPlease complete the following steps:\n"
+        info_text = "⚠️ **Verification Required**\n\nComplete steps to access:\n"
         wait_msg = await message_obj.reply_text("Generating Links... ⏳")
         
         if active_slots.get('1') and await db.get_level_time(user_id, chat_id, 1) == 0:
@@ -227,6 +181,7 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
     await grant_full_access(user_id, chat_id)
     return True
 
+# --- LINK HELPERS ---
 async def generate_single_link(client, chat_id, user_id, link_id, level, slot_data):
     site = slot_data['site']
     api = slot_data['api']
@@ -248,13 +203,80 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
     
     if short_url:
         btn = [[InlineKeyboardButton(f"🚀 Verify Level {level}", url=short_url)]]
-        text = f"⚠️ **Verification Required ({level}/?)**\n\n**Shortener:** {site}"
+        
+        if level == 1:
+            text = f"⚠️ **Verification Required (1/?)**\n\n**Shortener:** {site}\nFile paane ke liye Step 1 complete karein."
+        elif level == 2:
+            text = f"⚠️ **Level 1 Verified! ✅**\n\n**Shortener:** {site}\nAb Level 2 complete karein."
+        else:
+            text = f"⚠️ **Final Step (3/3)**\n\n**Shortener:** {site}\nYe aakhri step hai."
+            
         await message_obj.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
         return "SENT"
     else:
+        # ❌ FAILED (ALERT ADMIN & SKIP)
         await send_shortener_alert(client, chat_id, site)
-        await message_obj.reply_text(f"⚠️ **Alert:** {site} is down. Skipping... ⏩")
+        await message_obj.reply_text(f"⚠️ **Alert:** {site} is down or invalid. Skipping this step... ⏩")
         return "SKIP"
+
+# --- 🔥 PER-GROUP FSUB CHECK LOGIC 🔥 ---
+async def check_fsub(client, user_id, message_obj):
+    # 1. Identify Source Group from Start Command
+    src_chat_id = None
+    if len(message_obj.command) > 1:
+        try:
+            # Format: start=verify_level_userid_CHATID_linkid OR start=get_linkid_CHATID
+            parts = message_obj.command[1].split("_")
+            if len(parts) > 3: src_chat_id = int(parts[3]) 
+            elif len(parts) > 2 and parts[0] == "get": src_chat_id = int(parts[2])
+        except: pass
+    
+    if not src_chat_id: return True # No group context, allow.
+
+    # 2. Fetch Group Settings
+    group_settings = await db.get_group_settings(src_chat_id)
+    if not group_settings: return True
+    
+    fsub_channels = group_settings.get('fsub_channels', {})
+    if not fsub_channels: return True # No Fsub set
+
+    # 3. Check Slots 1, 2, 3
+    for slot, channel_id in fsub_channels.items():
+        channel_id = int(channel_id)
+        
+        # A. Check Member Status
+        try:
+            member = await client.get_chat_member(channel_id, user_id)
+            if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
+                continue # Joined
+        except: pass 
+
+        # B. Check Pending (Requested) Status
+        if await db.is_user_pending(user_id, channel_id):
+            continue # Requested
+
+        # C. Not Joined & Not Pending -> BLOCK
+        try:
+            chat_info = await client.get_chat(channel_id)
+            link = chat_info.invite_link or await client.export_chat_invite_link(channel_id)
+            
+            btn = [[InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=link)]]
+            original_param = message_obj.command[1] if len(message_obj.command) > 1 else "start"
+            btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")])
+
+            await message_obj.reply_text(
+                f"⚠️ **Access Denied!**\n\n"
+                f"You must join our channel (Slot {slot}) to access this file.\n"
+                f"**Note:** Click 'Request to Join' and then 'Try Again'.",
+                reply_markup=InlineKeyboardMarkup(btn)
+            )
+            return False # Stop here
+
+        except Exception as e:
+            print(f"Fsub Error: {e}")
+            continue
+
+    return True
 
 # --- HANDLERS ---
 
@@ -265,10 +287,9 @@ async def start_handler(client, message):
         await db.add_user(message.from_user.id)
         
         # 🔥 FSUB CHECK LOGIC (Executed BEFORE Verification) 🔥
-        # Only check if user is requesting a file/verification
         if len(message.command) > 1:
             is_allowed = await check_fsub(client, message.from_user.id, message)
-            if not is_allowed: return # Stop execution here if not subscribed
+            if not is_allowed: return # Stop execution here
 
     elif message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         await db.add_group(message.chat.id)

@@ -264,11 +264,11 @@ async def start_handler(client, message):
     if message.chat.type == enums.ChatType.PRIVATE:
         await db.add_user(message.from_user.id)
         
-        # 🔥 FSUB CHECK LOGIC 🔥
-        # Sirf tab jab user koi file maang raha ho (verify ya get)
+        # 🔥 FSUB CHECK LOGIC (Executed BEFORE Verification) 🔥
+        # Only check if user is requesting a file/verification
         if len(message.command) > 1:
             is_allowed = await check_fsub(client, message.from_user.id, message)
-            if not is_allowed: return # Stop execution here
+            if not is_allowed: return # Stop execution here if not subscribed
 
     elif message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         await db.add_group(message.chat.id)

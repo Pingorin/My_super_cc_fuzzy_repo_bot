@@ -39,6 +39,3 @@ SHORTLINK_API_2 = "613ce973446725bfe2bf909b320c7a1e84c4bdc8"
 # LEVEL 3 (Optional - Leave empty to disable)
 SHORTLINK_URL_3 = "softurl.in"
 SHORTLINK_API_3 = "613ce973446725bfe2bf909b320c7a1e84c4bdc8"
-
-# Force Subscribe Channel ID (Make sure Bot is Admin in this Channel)
-FSUB_CHANNEL_ID = int(os.environ.get("FSUB_CHANNEL_ID", "-1003481325630")) 

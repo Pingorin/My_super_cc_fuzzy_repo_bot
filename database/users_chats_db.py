@@ -25,8 +25,15 @@ class UserChatDB:
                 'earning_method': 'shortlink', # shortlink or fsub
                 'shortener_mode': 'dynamic',   # dynamic, together, smart
                 'shorteners': {},              # { '1': {'site': '...', 'api': '...'} }
-                'fsub_channels': [],
-                'is_shortlink_active': True
+                'fsub_channels': {},           # ✅ Changed to Dict for Slot Support { '1': -100xx }
+                'is_shortlink_active': True,
+                # Time Defaults
+                'time_dynamic': 86400,
+                'time_smart': 86400,
+                'time_together': 604800,       # 7 Days
+                'time_together_3': 86400,      # 24 Hours
+                'time_gap1': 300,
+                'time_gap2': 300
             }
             await self.groups.insert_one(default_settings)
 
@@ -38,6 +45,7 @@ class UserChatDB:
     async def update_group_settings(self, id, settings):
         await self.groups.update_one({'id': int(id)}, {'$set': settings})
 
+    # --- SHORTENER MANAGEMENT ---
     async def add_shortener(self, chat_id, slot, site, api):
         key = f"shorteners.{slot}"
         await self.groups.update_one(
@@ -47,6 +55,24 @@ class UserChatDB:
 
     async def remove_shortener(self, chat_id, slot):
         key = f"shorteners.{slot}"
+        await self.groups.update_one(
+            {'id': int(chat_id)},
+            {'$unset': {key: ""}}
+        )
+
+    # --- 🔒 FSUB CHANNEL MANAGEMENT (NEW) ---
+    async def update_fsub_channel(self, chat_id, slot, channel_id):
+        """Saves a specific channel ID to a specific slot (1, 2, or 3)"""
+        key = f"fsub_channels.{slot}"
+        await self.groups.update_one(
+            {'id': int(chat_id)},
+            {'$set': {key: int(channel_id)}},
+            upsert=True
+        )
+
+    async def remove_fsub_channel(self, chat_id, slot):
+        """Removes a specific channel ID from a slot"""
+        key = f"fsub_channels.{slot}"
         await self.groups.update_one(
             {'id': int(chat_id)},
             {'$unset': {key: ""}}
@@ -142,7 +168,7 @@ class UserChatDB:
             upsert=True
         )
 
-    # --- 🔥 NEW: ADVANCED FSUB PENDING LOGIC 🔥 ---
+    # --- 🔥 ADVANCED FSUB PENDING LOGIC 🔥 ---
     
     async def add_pending_request(self, user_id, channel_id):
         """Adds a user to the pending join request list."""

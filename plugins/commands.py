@@ -24,13 +24,13 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-# --- 🛠️ AUTO-SAVE GROUP (GROUP OBSERVER) ---
+# --- 🛠️ AUTO-SAVE GROUP ---
 @Client.on_message(filters.group, group=-1)
 async def auto_save_group_handler(client, message):
     try: await db.add_group(message.chat.id)
     except: pass
 
-# --- 🚨 HELPER: SEND ALERT TO ADMIN ---
+# --- 🚨 ALERT SYSTEM ---
 async def send_shortener_alert(client, chat_id, site_domain):
     try:
         try:
@@ -80,19 +80,18 @@ async def grant_full_access(user_id, chat_id):
     elif mode == 'together': 
         active_slots = await get_active_shorteners(chat_id)
         if len(active_slots) >= 3:
-            duration = group_settings.get('time_together_3', 86400) # 3 Links
+            duration = group_settings.get('time_together_3', 86400)
         else:
-            duration = group_settings.get('time_together', 604800) # 1-2 Links
+            duration = group_settings.get('time_together', 604800)
     else: 
         duration = group_settings.get('time_dynamic', 86400) 
 
     await db.update_verify_status(user_id, chat_id, 0, duration)
-    # Reset Levels
     await db.update_verify_status(user_id, chat_id, 1, is_reset=True)
     await db.update_verify_status(user_id, chat_id, 2, is_reset=True)
     await db.update_verify_status(user_id, chat_id, 3, is_reset=True)
 
-# --- 🧠 MASTER VERIFICATION LOGIC ---
+# --- 🧠 VERIFICATION LOGIC ---
 async def check_verification(client, user_id, chat_id, link_id, message_obj):
     if not IS_VERIFY: return True 
     if await db.get_verify_status(user_id, chat_id): return True 
@@ -102,15 +101,12 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
     active_slots = await get_active_shorteners(chat_id)
     current_time = time.time()
 
-    # ==================================================================
-    # 🌟 MODE: TOGETHER
-    # ==================================================================
+    # TOGETHER MODE
     if mode == 'together':
         buttons = []
         info_text = "⚠️ **Verification Required**\n\nComplete the steps below:\n"
         wait_msg = await message_obj.reply_text("Generating Links... ⏳")
         
-        # Slot 1
         if active_slots.get('1') and await db.get_level_time(user_id, chat_id, 1) == 0:
             link = await generate_single_link(client, chat_id, user_id, link_id, 1, active_slots['1'])
             if link: 
@@ -120,7 +116,6 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
                 await db.update_verify_status(user_id, chat_id, 1, is_reset=False) 
                 info_text += f"\n1️⃣ **Step 1:** ✅ Auto-Skipped"
 
-        # Slot 2
         if active_slots.get('2') and await db.get_level_time(user_id, chat_id, 2) == 0:
             link = await generate_single_link(client, chat_id, user_id, link_id, 2, active_slots['2'])
             if link:
@@ -130,7 +125,6 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
                 await db.update_verify_status(user_id, chat_id, 2, is_reset=False)
                 info_text += f"\n2️⃣ **Step 2:** ✅ Auto-Skipped"
 
-        # Slot 3
         if active_slots.get('3') and await db.get_level_time(user_id, chat_id, 3) == 0:
             link = await generate_single_link(client, chat_id, user_id, link_id, 3, active_slots['3'])
             if link:
@@ -141,7 +135,6 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
                 info_text += f"\n3️⃣ **Step 3:** ✅ Auto-Skipped"
 
         await wait_msg.delete()
-
         if buttons:
             await message_obj.reply_text(info_text, reply_markup=InlineKeyboardMarkup(buttons))
             return False
@@ -149,9 +142,7 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
             await grant_full_access(user_id, chat_id)
             return True
 
-    # ==================================================================
-    # 🌟 MODE: SMART
-    # ==================================================================
+    # Smart/Dynamic Mode
     elif mode == 'smart':
         gap1 = group_settings.get('time_gap1', 300)
         gap2 = group_settings.get('time_gap2', 300)
@@ -176,10 +167,7 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
                 res = await attempt_send_link(client, user_id, chat_id, link_id, message_obj, 3, active_slots['3'])
                 if res == "SENT": return False
 
-    # ==================================================================
-    # 🌟 MODE: DYNAMIC
-    # ==================================================================
-    else: 
+    else: # Dynamic
         if active_slots.get('1') and await db.get_level_time(user_id, chat_id, 1) == 0:
             res = await attempt_send_link(client, user_id, chat_id, link_id, message_obj, 1, active_slots['1'])
             if res == "SENT": return False 
@@ -216,10 +204,8 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
     
     if short_url:
         btn = [[InlineKeyboardButton(f"🚀 Verify Level {level}", url=short_url)]]
-        
         text = f"⚠️ **Verification Required ({level}/?)**\n\n**Shortener:** {site}"
         if level == 3: text = f"⚠️ **Final Step (3/3)**\n\n**Shortener:** {site}"
-
         await message_obj.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
         return "SENT"
     else:
@@ -227,34 +213,36 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(f"⚠️ **Alert:** {site} is down. Skipping... ⏩")
         return "SKIP"
 
-# --- 🔥 FSUB CHECK LOGIC (MULTI-SLOT + REQUEST) 🔥 ---
+# --- 🔥 FSUB CHECK (PER GROUP ISOLATION) 🔥 ---
 async def check_fsub(client, user_id, message_obj):
-    # 1. Identify Source Group
+    # 1. GROUP ID EXTRACT KARNA (Sabse Important)
+    # Link format: https://t.me/bot?start=get_12345_-100123456789
+    # Yahan "-100123456789" Group ID hai.
     src_chat_id = None
     if len(message_obj.command) > 1:
         try:
-            # Format: start=verify_level_userid_CHATID_linkid OR start=get_linkid_CHATID
             parts = message_obj.command[1].split("_")
             if len(parts) > 3: src_chat_id = int(parts[3]) 
             elif len(parts) > 2 and parts[0] == "get": src_chat_id = int(parts[2])
         except: pass
     
-    if not src_chat_id: return True # No group context, allow.
+    # Agar link me Group ID nahi hai, to Fsub check mat karo (skip)
+    if not src_chat_id: return True 
 
-    # 2. Get Group Settings
+    # 2. US SPECIFIC GROUP KI SETTINGS NIKALNA
     group_settings = await db.get_group_settings(src_chat_id)
     if not group_settings: return True
     
     fsub_channels = group_settings.get('fsub_channels', {})
-    if not fsub_channels: return True # No Fsub set
+    if not fsub_channels: return True 
 
     # 3. Check All Slots
-    missing_slots = [] # List to store slots user hasn't joined
+    missing_slots = []
 
     for slot, channel_id in fsub_channels.items():
         channel_id = int(channel_id)
         
-        # A. Check Member
+        # A. Member?
         is_member = False
         try:
             member = await client.get_chat_member(channel_id, user_id)
@@ -262,30 +250,30 @@ async def check_fsub(client, user_id, message_obj):
                 is_member = True
         except: pass 
 
-        # B. Check Pending (Requested)
+        # B. Pending?
         is_pending = False
         if not is_member:
             if await db.is_user_pending(user_id, channel_id):
                 is_pending = True
 
-        # If neither, add to missing list
+        # C. Agar Member bhi nahi aur Pending bhi nahi -> Missing list me daalo
         if not is_member and not is_pending:
             missing_slots.append((slot, channel_id))
 
-    # 4. If Missing Slots Exist -> BLOCK & SHOW BUTTONS
+    # 4. Agar koi missing slot hai, to Button Dikhao
     if missing_slots:
         buttons = []
         for slot, channel_id in missing_slots:
             try:
-                # Generate "Request to Join" link for each missing channel
-                # creates_join_request=True is CRITICAL for Request mode
+                # 
+                # Join Request Link Create karo
                 link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=True)
                 link = link_obj.invite_link
                 buttons.append([InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=link)])
             except Exception as e:
                 print(f"Error generating link for {channel_id}: {e}")
         
-        # Add Try Again Button
+        # Try Again Button
         original_param = message_obj.command[1] if len(message_obj.command) > 1 else "start"
         buttons.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")])
 
@@ -295,30 +283,28 @@ async def check_fsub(client, user_id, message_obj):
             f"**Note:** Click 'Request to Join', then click 'Try Again'.",
             reply_markup=InlineKeyboardMarkup(buttons)
         )
-        return False # Access Denied
+        return False # Blocked
 
-    return True # Access Granted (Joined all)
+    return True # Allowed
 
 # --- HANDLERS ---
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start_handler(client, message):
-    # ✅ Step 0: Register User
     if message.chat.type == enums.ChatType.PRIVATE:
         await db.add_user(message.from_user.id)
         
         # 🛑 FSUB CHECK (First Priority)
-        # Only verify if user is trying to access a link/file
         if len(message.command) > 1:
             is_allowed = await check_fsub(client, message.from_user.id, message)
-            if not is_allowed: return # Stop here if blocked
+            if not is_allowed: return 
 
     elif message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         await db.add_group(message.chat.id)
         if len(message.command) == 1:
             return await message.reply("✅ Bot is Alive & Settings Saved!")
 
-    # ✅ Step 1: Verification Return
+    # ✅ VERIFY RETURN
     if len(message.command) > 1 and message.command[1].startswith("verify_"):
         try:
             data = message.command[1].split("_")
@@ -326,68 +312,43 @@ async def start_handler(client, message):
             verify_id = data[2]
             chat_id = data[3]
             link_id = int(data[4]) if len(data) > 4 else 0
-            
-            if str(verify_id) != str(message.from_user.id):
-                return await message.reply("❌ Ye link apke liye nahi hai.")
+            if str(verify_id) != str(message.from_user.id): return await message.reply("❌ Wrong Link.")
             
             await db.update_verify_status(message.from_user.id, chat_id, level)
             is_all_clear = await check_verification(client, message.from_user.id, chat_id, link_id, message)
             
             if is_all_clear:
-                await message.reply(f"✅ **Verification Successful!**\n\nAapko file access mil gaya hai. 📂")
+                await message.reply(f"✅ **Verification Successful!**\n\nAccess Granted. 📂")
                 if link_id != 0:
                     file_data = await Media.get_file_details(link_id)
                     search_data = await Media.search_col.find_one({'link_id': link_id})
                     if file_data and file_data.get('file_id'):
-                        db_caption = search_data.get('caption', f"📂 <b>{search_data.get('file_name')}</b>")
-                        final_caption = f"{db_caption}\n{script.CUSTOM_FOOTER}"
-                        try:
-                            await client.send_cached_media(
-                                chat_id=message.from_user.id,
-                                file_id=file_data.get('file_id'), 
-                                caption=final_caption,
-                                parse_mode=enums.ParseMode.HTML
-                            )
-                        except Exception as e:
-                            await message.reply(f"❌ Error: `{e}`")
+                        caption = search_data.get('caption', f"📂 <b>{search_data.get('file_name')}</b>")
+                        try: await client.send_cached_media(chat_id=message.from_user.id, file_id=file_data.get('file_id'), caption=f"{caption}\n{script.CUSTOM_FOOTER}", parse_mode=enums.ParseMode.HTML)
+                        except Exception as e: await message.reply(f"❌ Error: `{e}`")
             return
-        except Exception as e:
-            return await message.reply(f"❌ Verification Error: {e}")
+        except Exception as e: return await message.reply(f"❌ Error: {e}")
 
-    # ✅ Step 2: File Request
+    # ✅ FILE REQUEST
     if len(message.command) > 1 and message.command[1].startswith("get_"):
         try:
             data = message.command[1].split("_")
             link_id = int(data[1])
             src_chat_id = data[2] if len(data) > 2 else str(message.chat.id)
-            
             is_all_clear = await check_verification(client, message.from_user.id, src_chat_id, link_id, message)
-            
-            if not is_all_clear:
-                return 
+            if not is_all_clear: return 
 
             file_data = await Media.get_file_details(link_id)
             search_data = await Media.search_col.find_one({'link_id': link_id})
-            if not file_data: return await message.reply("❌ File Database se delete ho gayi hai.")
-            file_id = file_data.get('file_id')
-
-            db_caption = search_data.get('caption', f"📂 <b>{search_data.get('file_name')}</b>")
-            final_caption = f"{db_caption}\n{script.CUSTOM_FOOTER}"
-
-            try:
-                await client.send_cached_media(
-                    chat_id=message.from_user.id,
-                    file_id=file_id, 
-                    caption=final_caption,
-                    parse_mode=enums.ParseMode.HTML
-                )
-            except Exception as e:
-                await message.reply(f"❌ Error: `{e}`")
-        except Exception as e:
-            await message.reply(f"❌ Error: {e}")
+            if not file_data: return await message.reply("❌ File Not Found.")
+            
+            caption = search_data.get('caption', f"📂 <b>{search_data.get('file_name')}</b>")
+            try: await client.send_cached_media(chat_id=message.from_user.id, file_id=file_data.get('file_id'), caption=f"{caption}\n{script.CUSTOM_FOOTER}", parse_mode=enums.ParseMode.HTML)
+            except Exception as e: await message.reply(f"❌ Error: `{e}`")
+        except Exception as e: await message.reply(f"❌ Error: {e}")
         return
 
-    # ✅ Step 3: Normal Start (Welcome Message)
+    # ✅ START MSG
     if message.chat.type == enums.ChatType.PRIVATE:
         text = f"Hello {message.from_user.mention} 👋,\nI am an Auto Filter Bot."
         buttons = [

@@ -222,8 +222,13 @@ async def check_fsub(client, user_id, message_obj):
     if len(message_obj.command) > 1:
         try:
             parts = message_obj.command[1].split("_")
-            if len(parts) > 3: src_chat_id = int(parts[3]) 
-            elif len(parts) > 2 and parts[0] == "get": src_chat_id = int(parts[2])
+            # ✅ UPDATED LOGIC HERE: Strict Prefix Check
+            # Verify command logic (verify_level_userid_chatid_linkid)
+            if parts[0] == "verify" and len(parts) >= 4:
+                src_chat_id = int(parts[3]) 
+            # Get command logic (get_linkid_chatid)
+            elif parts[0] == "get" and len(parts) >= 3:
+                src_chat_id = int(parts[2])
         except: pass
     
     # Agar link me Group ID nahi hai, to Fsub check mat karo (skip)

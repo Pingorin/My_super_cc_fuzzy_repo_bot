@@ -71,75 +71,81 @@ async def main_settings_menu(client, query):
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🔒 FSUB SETTINGS (2 SLOTS)
+# 🔒 FSUB SETTINGS (2 SLOTS) - ✅ UPDATED FIX
 # ==============================================================================
 
-# 1. FSUB CONFIGURE MENU
+# 1. FSUB CONFIGURE MENU (Safe Mode)
 @Client.on_callback_query(filters.regex(r"^fsub_menu#"))
 async def fsub_configure_menu(client, query):
-    chat_id = int(query.data.split("#")[1])
-    group_data = await db.get_group_settings(chat_id)
-    
-    # DB SYNC FIX
-    if not group_data:
-        await db.add_group(chat_id)
+    try:
+        chat_id = int(query.data.split("#")[1])
         group_data = await db.get_group_settings(chat_id)
         
-    fsub_channels = group_data.get('fsub_channels', {})
-    
-    # SLOT 1 STATUS
-    s1_id = fsub_channels.get('1')
-    s1_txt = "❌ Slot 1: Not Set"
-    if s1_id:
-        try:
-            chat = await client.get_chat(s1_id)
-            s1_txt = f"✅ Slot 1: 📍{chat.title} ({s1_id})"
-        except:
-            s1_txt = f"✅ Slot 1: `{s1_id}` (Saved)"
+        # DB SYNC FIX
+        if not group_data:
+            await db.add_group(chat_id)
+            group_data = await db.get_group_settings(chat_id)
+            
+        # ✅ CRASH FIX: Handle NoneType safely
+        fsub_channels = group_data.get('fsub_channels') or {}
+        
+        # SLOT 1 STATUS
+        s1_id = fsub_channels.get('1')
+        s1_txt = "❌ Slot 1: Not Set"
+        if s1_id:
+            try:
+                chat = await client.get_chat(s1_id)
+                s1_txt = f"✅ Slot 1: 📍{chat.title} ({s1_id})"
+            except:
+                s1_txt = f"✅ Slot 1: `{s1_id}` (Saved, Unreachable)"
 
-    # SLOT 2 STATUS
-    s2_id = fsub_channels.get('2')
-    s2_txt = "❌ Slot 2: Not Set"
-    if s2_id:
-        try:
-            chat = await client.get_chat(s2_id)
-            s2_txt = f"✅ Slot 2: 📍{chat.title} ({s2_id})"
-        except:
-            s2_txt = f"✅ Slot 2: `{s2_id}` (Saved)"
+        # SLOT 2 STATUS
+        s2_id = fsub_channels.get('2')
+        s2_txt = "❌ Slot 2: Not Set"
+        if s2_id:
+            try:
+                chat = await client.get_chat(s2_id)
+                s2_txt = f"✅ Slot 2: 📍{chat.title} ({s2_id})"
+            except:
+                s2_txt = f"✅ Slot 2: `{s2_id}` (Saved, Unreachable)"
 
-    text = (
-        f"⚙️ **Configure Request F-Sub Channels for:** `{chat_id}`\n\n"
-        f"{s1_txt}\n"
-        f"{s2_txt}\n\n"
-        f"👇 **Select an option below:**"
-    )
-    
-    buttons = []
-    
-    # Slot 1 Buttons
-    if s1_id:
-        buttons.append([
-            InlineKeyboardButton("✏️ Edit Slot 1", callback_data=f"set_fsub#{chat_id}#1"),
-            InlineKeyboardButton("🗑️ Clear Slot 1", callback_data=f"rem_fsub_one#{chat_id}#1")
-        ])
-    else:
-        buttons.append([InlineKeyboardButton("➕ Set Slot 1", callback_data=f"set_fsub#{chat_id}#1")])
+        text = (
+            f"⚙️ **Configure Request F-Sub Channels for:** `{chat_id}`\n\n"
+            f"{s1_txt}\n"
+            f"{s2_txt}\n\n"
+            f"👇 **Select an option below:**"
+        )
+        
+        buttons = []
+        
+        # Slot 1 Buttons
+        if s1_id:
+            buttons.append([
+                InlineKeyboardButton("✏️ Edit Slot 1", callback_data=f"set_fsub#{chat_id}#1"),
+                InlineKeyboardButton("🗑️ Clear Slot 1", callback_data=f"rem_fsub_one#{chat_id}#1")
+            ])
+        else:
+            buttons.append([InlineKeyboardButton("➕ Set Slot 1", callback_data=f"set_fsub#{chat_id}#1")])
 
-    # Slot 2 Buttons
-    if s2_id:
-        buttons.append([
-            InlineKeyboardButton("✏️ Edit Slot 2", callback_data=f"set_fsub#{chat_id}#2"),
-            InlineKeyboardButton("🗑️ Clear Slot 2", callback_data=f"rem_fsub_one#{chat_id}#2")
-        ])
-    else:
-        buttons.append([InlineKeyboardButton("➕ Set Slot 2", callback_data=f"set_fsub#{chat_id}#2")])
+        # Slot 2 Buttons
+        if s2_id:
+            buttons.append([
+                InlineKeyboardButton("✏️ Edit Slot 2", callback_data=f"set_fsub#{chat_id}#2"),
+                InlineKeyboardButton("🗑️ Clear Slot 2", callback_data=f"rem_fsub_one#{chat_id}#2")
+            ])
+        else:
+            buttons.append([InlineKeyboardButton("➕ Set Slot 2", callback_data=f"set_fsub#{chat_id}#2")])
 
-    # Remove All
-    if s1_id or s2_id:
-        buttons.append([InlineKeyboardButton("🗑️ Remove all fsub Channels", callback_data=f"rem_fsub_all#{chat_id}")])
+        # Remove All
+        if s1_id or s2_id:
+            buttons.append([InlineKeyboardButton("🗑️ Remove all fsub Channels", callback_data=f"rem_fsub_all#{chat_id}")])
 
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"set_main#{chat_id}")])
-    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+        buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"set_main#{chat_id}")])
+        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+    except Exception as e:
+        print(f"FSUB MENU ERROR: {e}")
+        await query.answer("❌ Error: Could not load Fsub menu. Check Logs.", show_alert=True)
 
 # 2. SET SLOT INPUT
 @Client.on_callback_query(filters.regex(r"^set_fsub#"))

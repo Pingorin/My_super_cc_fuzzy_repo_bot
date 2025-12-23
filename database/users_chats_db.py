@@ -60,9 +60,26 @@ class UserChatDB:
             {'$unset': {key: ""}}
         )
 
-    # --- 🔒 FSUB CHANNEL MANAGEMENT (NEW) ---
+    # --- 🔒 FSUB CHANNEL MANAGEMENT (FIXED & IMPROVED) ---
+    
     async def update_fsub_channel(self, chat_id, slot, channel_id):
         """Saves a specific channel ID to a specific slot (1, 2, or 3)"""
+        
+        # 🛠️ AUTO-FIX: Check if data is corrupted as a List [] and convert to Dict {}
+        try:
+            group = await self.groups.find_one({'id': int(chat_id)})
+            if group:
+                raw_data = group.get('fsub_channels')
+                if isinstance(raw_data, list):
+                    # Reset to empty dict if it's a list
+                    await self.groups.update_one(
+                        {'id': int(chat_id)}, 
+                        {'$set': {'fsub_channels': {}}}
+                    )
+        except Exception as e:
+            print(f"Auto-Fix Error: {e}")
+
+        # Save the new ID
         key = f"fsub_channels.{slot}"
         await self.groups.update_one(
             {'id': int(chat_id)},
@@ -76,6 +93,13 @@ class UserChatDB:
         await self.groups.update_one(
             {'id': int(chat_id)},
             {'$unset': {key: ""}}
+        )
+
+    async def remove_all_fsub_channels(self, chat_id):
+        """Removes ALL fsub channels for a group"""
+        await self.groups.update_one(
+            {'id': int(chat_id)},
+            {'$unset': {'fsub_channels': ""}} # Completely removes the field
         )
 
     # --- 📊 STATS & BAN LOGIC ---

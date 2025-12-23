@@ -1,7 +1,7 @@
 import asyncio
 import aiohttp
 from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
 from utils import temp
 import info
@@ -35,6 +35,7 @@ async def settings_command(client, message):
     msg = await message.reply_text("🔄 **Loading your groups...**")
     
     user_groups = []
+    # Fetch all groups from DB where user is Admin
     async for group in db.groups.find({}):
         try:
             chat_id = group['id']
@@ -85,6 +86,7 @@ async def fsub_configure_menu(client, query):
             group_data = await db.get_group_settings(chat_id)
             
         # ✅ READ FROM NEW DB STRUCTURE (settings.fsub)
+        # This matches the structure we defined in users_chats_db.py
         settings = group_data.get('settings', {})
         fsub_id = settings.get('fsub')
 
@@ -134,6 +136,7 @@ async def set_fsub_input(client, query):
     )
     
     try:
+        # Listen for User Input
         input_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
         
         if not input_msg.text:
@@ -141,6 +144,7 @@ async def set_fsub_input(client, query):
         
         try:
             channel_id = int(input_msg.text.strip())
+            # Auto-Fix ID if user forgets -100
             if not str(channel_id).startswith("-100"):
                  channel_id = int("-100" + str(channel_id).replace("-", ""))
         except:
@@ -154,18 +158,19 @@ async def set_fsub_input(client, query):
             chat_obj = await client.get_chat(channel_id)
             channel_title = chat_obj.title
             
-            # Admin Check
+            # Smart Admin Check: Try to create a link to test permissions
             try:
                 test_link = await client.create_chat_invite_link(channel_id, member_limit=1)
                 await client.revoke_chat_invite_link(channel_id, test_link.invite_link)
             except:
-                status_note = "\n⚠️ **Warning:** Bot is NOT Admin properly."
+                status_note = "\n⚠️ **Warning:** Bot is NOT Admin properly. FSub might fail."
 
         except Exception as e:
             channel_title = "ID Saved (Restarted)"
             status_note = "\n⚠️ **Note:** Bot couldn't verify name, but **ID is Saved**."
         
         # ✅ WRITE TO NEW DB STRUCTURE
+        # Ensure your users_chats_db.py has update_group_fsub
         await db.update_group_fsub(chat_id, channel_id)
         
         msg_text = (

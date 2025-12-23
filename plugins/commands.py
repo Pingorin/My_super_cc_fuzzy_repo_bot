@@ -3,7 +3,7 @@ import time
 import asyncio
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-from pyrogram.errors import UserNotParticipant # ✅ Import this
+from pyrogram.errors import UserNotParticipant # ✅ Import is Essential
 from database.users_chats_db import db
 from database.ia_filterdb import Media
 import info 
@@ -232,12 +232,10 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(f"⚠️ **Alert:** Shortener {site} is down. Skipping Level {level}... ⏩")
         return "SKIP"
 
-# --- 🚫 FSUB CHECK (SMART & RESTART PROOF) ---
-# Updated Logic: Only blocks if definitely NOT a participant.
-# Allows access if Bot can't verify due to technical errors.
+# --- 🚫 FSUB CHECK (SMART & STRICT RESTART PROOF) ---
 
 async def check_fsub(client, user_id, message_obj):
-    # 1. Source Chat ID Nikalo
+    # 1. Parse Source Chat ID
     src_chat_id = None
     if len(message_obj.command) > 1:
         try:
@@ -260,7 +258,7 @@ async def check_fsub(client, user_id, message_obj):
     try:
         fsub_id = int(fsub_id)
         
-        # --- 🛡️ SMART CHECKING LOGIC ---
+        # --- 🛡️ CHECKING LOGIC ---
         try:
             # Step A: Direct Check
             member = await client.get_chat_member(fsub_id, user_id)
@@ -279,10 +277,10 @@ async def check_fsub(client, user_id, message_obj):
                 # Confirmed Not Participant after refresh
                 return await send_join_link(client, message_obj, fsub_id)
             except Exception as e2:
-                # Step C: Still failing? (Bot issue, not User issue)
-                # Allow Access to prevent blocking innocent users
-                print(f"Technical Fsub Error (Access Granted): {e2}")
-                return True 
+                # Step C: Still failing? 
+                # If we can't verify, we MUST BLOCK to show the button (Restart Proof).
+                print(f"Technical Fsub Error (Blocking to allow join): {e2}")
+                return await send_join_link(client, message_obj, fsub_id)
 
         # Step D: Status Check
         # Treat RESTRICTED as Member (Channels restrict users from posting)
@@ -299,7 +297,8 @@ async def check_fsub(client, user_id, message_obj):
 
     except Exception as e:
         print(f"Critical Fsub Logic Error: {e}")
-        return True
+        # Default to blocking if logic fails
+        return await send_join_link(client, message_obj, fsub_id)
 
 # --- Helper Function to Send Link ---
 async def send_join_link(client, message_obj, channel_id):

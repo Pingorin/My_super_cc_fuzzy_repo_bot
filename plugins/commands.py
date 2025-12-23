@@ -3,7 +3,7 @@ import time
 import asyncio
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-from pyrogram.errors import UserNotParticipant # ✅ Import is Essential
+from pyrogram.errors import UserNotParticipant
 from database.users_chats_db import db
 from database.ia_filterdb import Media
 import info 
@@ -250,8 +250,11 @@ async def check_fsub(client, user_id, message_obj):
     group_data = await db.get_group_settings(src_chat_id)
     if not group_data: return True
 
-    settings = group_data.get('settings', {})
-    fsub_id = settings.get('fsub')
+    # ✅ FIXED: Correct Database Path (fsub_channels)
+    fsub_channels = group_data.get('fsub_channels', {})
+    
+    # We check Slot '1' by default (as per set_fsub command)
+    fsub_id = fsub_channels.get('1')
 
     if not fsub_id: return True 
 
@@ -269,21 +272,17 @@ async def check_fsub(client, user_id, message_obj):
             
         except Exception as e:
             # Step B: Technical Error (Restart/PeerInvalid/Connection)
-            # Try to Refresh Peer and Check Again
             try:
                 await client.get_chat(fsub_id) # 🔄 Refresh Peer Cache
                 member = await client.get_chat_member(fsub_id, user_id) # Retry
             except UserNotParticipant:
-                # Confirmed Not Participant after refresh
                 return await send_join_link(client, message_obj, fsub_id)
             except Exception as e2:
-                # Step C: Still failing? 
-                # If we can't verify, we MUST BLOCK to show the button (Restart Proof).
-                print(f"Technical Fsub Error (Blocking to allow join): {e2}")
+                # Step C: Still failing? Block to be safe.
+                print(f"Technical Fsub Error: {e2}")
                 return await send_join_link(client, message_obj, fsub_id)
 
         # Step D: Status Check
-        # Treat RESTRICTED as Member (Channels restrict users from posting)
         if member.status in [
             enums.ChatMemberStatus.MEMBER, 
             enums.ChatMemberStatus.ADMINISTRATOR, 
@@ -297,7 +296,6 @@ async def check_fsub(client, user_id, message_obj):
 
     except Exception as e:
         print(f"Critical Fsub Logic Error: {e}")
-        # Default to blocking if logic fails
         return await send_join_link(client, message_obj, fsub_id)
 
 # --- Helper Function to Send Link ---
@@ -322,6 +320,38 @@ async def send_join_link(client, message_obj, channel_id):
         return True # If link generation fails, let user pass
 
 # --- 🎮 COMMAND HANDLERS ---
+
+# 1. SET FSUB COMMAND (Admins Only)
+@Client.on_message(filters.command("set_fsub") & filters.group)
+async def set_fsub_command(client, message):
+    # Permission Check
+    member = await client.get_chat_member(message.chat.id, message.from_user.id)
+    if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
+        return await message.reply("❌ You must be an Admin to use this command.")
+
+    if len(message.command) < 2:
+        return await message.reply("⚠️ **Usage:** `/set_fsub <channel_id>`\nExample: `/set_fsub -1001234567890`")
+
+    try:
+        channel_id = int(message.command[1])
+    except ValueError:
+        return await message.reply("❌ Invalid Channel ID. It must be a number.")
+
+    # Bot Admin Check
+    try:
+        chat = await client.get_chat(channel_id)
+        bot_member = await client.get_chat_member(channel_id, "me")
+        if bot_member.status != enums.ChatMemberStatus.ADMINISTRATOR:
+            return await message.reply(f"❌ **Error:** I am not an Admin in {chat.title}.\nPlease add me as Admin there first.")
+    except Exception as e:
+        return await message.reply(f"❌ **Error:** I cannot access that channel.\nMake sure I am added as an Admin.\nError: `{e}`")
+
+    # Save to Database (Slot 1)
+    try:
+        await db.update_fsub_channel(message.chat.id, "1", channel_id)
+        await message.reply(f"✅ **Success!**\nForce Subscribe Channel set to: **{chat.title}**")
+    except Exception as e:
+        await message.reply(f"❌ Database Error: {e}")
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start_handler(client, message):

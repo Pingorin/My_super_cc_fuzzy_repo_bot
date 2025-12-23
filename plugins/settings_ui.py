@@ -71,100 +71,65 @@ async def main_settings_menu(client, query):
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🔒 FSUB SETTINGS (2 SLOTS) - ✅ RESTART PROOF & ROBUST
+# 🔒 FSUB SETTINGS (SINGLE CHANNEL - RESTART PROOF)
 # ==============================================================================
 
-# 1. FSUB CONFIGURE MENU
 @Client.on_callback_query(filters.regex(r"^fsub_menu#"))
 async def fsub_configure_menu(client, query):
     try:
         chat_id = int(query.data.split("#")[1])
         group_data = await db.get_group_settings(chat_id)
         
-        # DB SYNC FIX
         if not group_data:
             await db.add_group(chat_id)
             group_data = await db.get_group_settings(chat_id)
             
-        # ✅ HANDLE DATA TYPES (List vs Dict)
-        raw_fsub = group_data.get('fsub_channels')
-        if isinstance(raw_fsub, list):
-            fsub_channels = {} 
-        elif isinstance(raw_fsub, dict):
-            fsub_channels = raw_fsub
-        else:
-            fsub_channels = {}
+        # ✅ READ FROM NEW DB STRUCTURE (settings.fsub)
+        settings = group_data.get('settings', {})
+        fsub_id = settings.get('fsub')
 
-        # SLOT 1 STATUS
-        s1_id = fsub_channels.get('1')
-        s1_txt = "❌ Slot 1: Not Set"
-        if s1_id:
+        status_txt = "❌ Current Channel: **Not Set**"
+        
+        if fsub_id:
             try:
-                chat = await client.get_chat(s1_id)
-                s1_txt = f"✅ Slot 1: 📍{chat.title} ({s1_id})"
+                chat = await client.get_chat(fsub_id)
+                status_txt = f"✅ Current Channel: **{chat.title}**\nID: `{fsub_id}`"
             except:
-                s1_txt = f"✅ Slot 1: `{s1_id}` (Saved, Peer Invalid)"
-
-        # SLOT 2 STATUS
-        s2_id = fsub_channels.get('2')
-        s2_txt = "❌ Slot 2: Not Set"
-        if s2_id:
-            try:
-                chat = await client.get_chat(s2_id)
-                s2_txt = f"✅ Slot 2: 📍{chat.title} ({s2_id})"
-            except:
-                s2_txt = f"✅ Slot 2: `{s2_id}` (Saved, Peer Invalid)"
+                status_txt = f"✅ Current Channel: `{fsub_id}`\n(Saved, but Bot needs to see it again)"
 
         text = (
-            f"⚙️ **Configure Request F-Sub Channels for:** `{chat_id}`\n\n"
-            f"{s1_txt}\n"
-            f"{s2_txt}\n\n"
-            f"👇 **Select an option below:**"
+            f"⚙️ **Force Subscribe Settings for:** `{chat_id}`\n\n"
+            f"{status_txt}\n\n"
+            f"👇 **Manage Channel:**"
         )
         
         buttons = []
         
-        # Slot 1 Buttons
-        if s1_id:
+        if fsub_id:
             buttons.append([
-                InlineKeyboardButton("✏️ Edit Slot 1", callback_data=f"set_fsub#{chat_id}#1"),
-                InlineKeyboardButton("🗑️ Clear Slot 1", callback_data=f"rem_fsub_one#{chat_id}#1")
+                InlineKeyboardButton("✏️ Change Channel", callback_data=f"set_fsub#{chat_id}"),
+                InlineKeyboardButton("🗑️ Remove Channel", callback_data=f"rem_fsub_main#{chat_id}")
             ])
         else:
-            buttons.append([InlineKeyboardButton("➕ Set Slot 1", callback_data=f"set_fsub#{chat_id}#1")])
-
-        # Slot 2 Buttons
-        if s2_id:
-            buttons.append([
-                InlineKeyboardButton("✏️ Edit Slot 2", callback_data=f"set_fsub#{chat_id}#2"),
-                InlineKeyboardButton("🗑️ Clear Slot 2", callback_data=f"rem_fsub_one#{chat_id}#2")
-            ])
-        else:
-            buttons.append([InlineKeyboardButton("➕ Set Slot 2", callback_data=f"set_fsub#{chat_id}#2")])
-
-        # Remove All
-        if s1_id or s2_id:
-            buttons.append([InlineKeyboardButton("🗑️ Remove all fsub Channels", callback_data=f"rem_fsub_all#{chat_id}")])
+            buttons.append([InlineKeyboardButton("➕ Set Channel", callback_data=f"set_fsub#{chat_id}")])
 
         buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"set_main#{chat_id}")])
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
     except Exception as e:
         print(f"FSUB MENU ERROR: {e}")
-        await query.answer("❌ Error: Database mismatch. Try again.", show_alert=True)
+        await query.answer("❌ Error: DB Mismatch.", show_alert=True)
 
-# 2. SET SLOT INPUT - 🛡️ RESTART PROOF LOGIC
 @Client.on_callback_query(filters.regex(r"^set_fsub#"))
 async def set_fsub_input(client, query):
-    _, chat_id, slot = query.data.split("#")
+    _, chat_id = query.data.split("#")
     chat_id = int(chat_id)
     cancel_btn = [[InlineKeyboardButton("❌ Cancel", callback_data=f"fsub_menu#{chat_id}")]]
     
-    # 1. Ask for Text ID (No Forwarding needed)
     await query.message.edit_text(
-        f"👇 **Set F-Sub Channel for Slot {slot}**\n\n"
-        f"Please send the **Channel ID** (e.g. `-100xxxxxxx`).\n"
-        f"⚠️ Make sure the Bot is **Admin** in that channel.",
+        f"👇 **Set F-Sub Channel**\n\n"
+        f"Send the **Channel ID** (e.g. `-100xxxxxxx`).\n"
+        f"⚠️ Make sure the Bot is **Admin** in that channel!",
         reply_markup=InlineKeyboardMarkup(cancel_btn)
     )
     
@@ -172,75 +137,57 @@ async def set_fsub_input(client, query):
         input_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
         
         if not input_msg.text:
-            return await query.message.edit_text("❌ Please send the Channel ID in text format only.", reply_markup=InlineKeyboardMarkup(cancel_btn))
+            return await query.message.edit_text("❌ Text ID only.", reply_markup=InlineKeyboardMarkup(cancel_btn))
         
-        # ID Validation
         try:
             channel_id = int(input_msg.text.strip())
-            # Auto-add -100 prefix if user forgot it
             if not str(channel_id).startswith("-100"):
                  channel_id = int("-100" + str(channel_id).replace("-", ""))
         except:
-            return await query.message.edit_text("❌ Invalid ID format! Must be numeric (e.g., -100123456789).", reply_markup=InlineKeyboardMarkup(cancel_btn))
+            return await query.message.edit_text("❌ Invalid ID.", reply_markup=InlineKeyboardMarkup(cancel_btn))
         
-        # --- 🛡️ RESTART PROOF LOGIC ---
-        channel_title = "Unknown Channel"
+        # --- LOGIC: VERIFY OR FORCE SAVE ---
+        channel_title = "Unknown"
         status_note = ""
 
         try:
-            # Try to fetch channel info (This fails if bot restarted and hasn't seen channel)
             chat_obj = await client.get_chat(channel_id)
             channel_title = chat_obj.title
             
-            # Try to verify Admin rights
+            # Admin Check
             try:
                 test_link = await client.create_chat_invite_link(channel_id, member_limit=1)
                 await client.revoke_chat_invite_link(channel_id, test_link.invite_link)
             except:
-                status_note = "\n⚠️ **Warning:** Bot might not be Admin. Ensure 'Invite Users' permission is ON."
+                status_note = "\n⚠️ **Warning:** Bot is NOT Admin properly."
 
         except Exception as e:
-            # 🛑 CRITICAL: If PeerIdInvalid (Restart issue), we IGNORE error and FORCE SAVE
-            print(f"Peer Error (Ignored for Force Save): {e}")
-            channel_title = "Channel ID Saved"
-            status_note = "\n⚠️ **Note:** Bot couldn't verify name due to restart, but **ID is Saved**."
+            channel_title = "ID Saved (Restarted)"
+            status_note = "\n⚠️ **Note:** Bot couldn't verify name, but **ID is Saved**."
         
-        # 💾 SAVE TO DATABASE (Forcefully)
-        await db.update_fsub_channel(chat_id, slot, channel_id)
+        # ✅ WRITE TO NEW DB STRUCTURE
+        await db.update_group_fsub(chat_id, channel_id)
         
         msg_text = (
             f"✅ **F-Sub Channel Set!**\n\n"
-            f"ID: `{channel_id}`\nSlot: {slot}\n"
+            f"ID: `{channel_id}`\n"
             f"Name: **{channel_title}**"
             f"{status_note}"
         )
 
         await query.message.edit_text(msg_text, reply_markup=InlineKeyboardMarkup(cancel_btn))
         await asyncio.sleep(2)
-        
-        # Return to Menu
         query.data = f"fsub_menu#{chat_id}"
         await fsub_configure_menu(client, query)
 
     except asyncio.TimeoutError:
-        await query.message.edit_text("❌ Timeout! Try again.", reply_markup=InlineKeyboardMarkup(cancel_btn))
-    except Exception as e:
-        await query.message.edit_text(f"❌ Error: {e}", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        await query.message.edit_text("❌ Timeout.", reply_markup=InlineKeyboardMarkup(cancel_btn))
 
-# 4. REMOVE SINGLE SLOT
-@Client.on_callback_query(filters.regex(r"^rem_fsub_one#"))
-async def remove_fsub_one(client, query):
-    _, chat_id, slot = query.data.split("#")
-    await db.remove_fsub_channel(int(chat_id), slot)
-    await query.answer(f"Slot {slot} Cleared!", show_alert=True)
-    await fsub_configure_menu(client, query)
-
-# 5. REMOVE ALL SLOTS
-@Client.on_callback_query(filters.regex(r"^rem_fsub_all#"))
-async def remove_fsub_all(client, query):
+@Client.on_callback_query(filters.regex(r"^rem_fsub_main#"))
+async def remove_fsub_main(client, query):
     chat_id = int(query.data.split("#")[1])
-    await db.remove_all_fsub_channels(chat_id)
-    await query.answer("All Fsub Channels Removed!", show_alert=True)
+    await db.remove_group_fsub(chat_id)
+    await query.answer("Channel Removed!", show_alert=True)
     await fsub_configure_menu(client, query)
 
 
@@ -458,9 +405,12 @@ async def disable_menu(client, query):
     # Requirement Check
     try: count = await client.get_chat_members_count(chat_id)
     except: count = 0
-    fsub_list = group_data.get('fsub_channels', {})
+    
+    # ✅ FIX: Check new F-Sub structure for Disable Requirements
+    settings = group_data.get('settings', {})
+    req_fsub = bool(settings.get('fsub'))
+    
     req_mem = count >= 100
-    req_fsub = bool(fsub_list.get('1') or fsub_list.get('2'))
 
     text = (
         f"🚫 **Disable Shortlink Mode**\n\n"

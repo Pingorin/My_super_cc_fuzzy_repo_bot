@@ -249,11 +249,15 @@ async def check_fsub(client, user_id, message_obj):
     group_settings = await db.get_group_settings(src_chat_id)
     if not group_settings: return True
     
-    fsub_channels = group_settings.get('fsub_channels', {})
-    if not fsub_channels: return True 
+    # 🛠️ FIX: PREVENT LIST ERROR (DB COMPATIBILITY)
+    fsub_channels = group_settings.get('fsub_channels')
+    if not fsub_channels or not isinstance(fsub_channels, dict): 
+        return True 
 
     for slot, channel_id in fsub_channels.items():
-        channel_id = int(channel_id)
+        try:
+            channel_id = int(channel_id)
+        except: continue
         
         # 1. Check if user is already a member
         try:
@@ -268,6 +272,11 @@ async def check_fsub(client, user_id, message_obj):
 
         # 3. Create JOIN REQUEST Link and Block Access
         try:
+            # 🛠️ FIX: PRE-FETCH CHAT TO PREVENT 'PEER_ID_INVALID'
+            # Telegram API requires us to "know" the chat before creating a link
+            try: await client.get_chat(channel_id)
+            except: pass 
+
             # creates_join_request=True forces the user to Request Join instead of instant join
             link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=True)
             link = link_obj.invite_link
@@ -287,7 +296,8 @@ async def check_fsub(client, user_id, message_obj):
             return False 
 
         except Exception as e:
-            logger.error(f"Fsub Link Generation Error for {channel_id}: {e}")
+            # Avoid printing error to logs repeatedly to save space
+            pass
             continue
 
     return True

@@ -87,7 +87,6 @@ async def fsub_configure_menu(client, query):
             group_data = await db.get_group_settings(chat_id)
             
         # ✅ CRASH FIX: Smart Type Checking
-        # This handles the case where old database data might be a List [] instead of a Dict {}
         raw_fsub = group_data.get('fsub_channels')
         
         if isinstance(raw_fsub, list):
@@ -155,7 +154,7 @@ async def fsub_configure_menu(client, query):
         print(f"FSUB MENU ERROR: {e}")
         await query.answer("❌ Error: Could not load Fsub menu. Check Logs.", show_alert=True)
 
-# 2. SET SLOT INPUT - ✅ ROBUST "PEER ID INVALID" FIX
+# 2. SET SLOT INPUT - ✅ UPGRADED ADMIN CHECK
 @Client.on_callback_query(filters.regex(r"^set_fsub#"))
 async def set_fsub_input(client, query):
     _, chat_id, slot = query.data.split("#")
@@ -185,40 +184,50 @@ async def set_fsub_input(client, query):
             except:
                 return await query.message.edit_text("❌ Invalid ID format! Must start with -100...", reply_markup=InlineKeyboardMarkup(cancel_btn))
         
-        # 🛠️ FIX: PRE-FETCH CHAT (Peer ID Invalid Fix)
-        # Bot ko force karo ki wo channel ko dhoondhe
-        try: 
+        # 🛠️ FIX 1: Bot ko Channel "Dikhana" (Peer Refresh)
+        channel_title = "Channel"
+        try:
             chat_obj = await client.get_chat(channel_id)
-            channel_name = chat_obj.title
+            channel_title = chat_obj.title
         except Exception as e:
+            # Agar direct ID se nahi mila, to user ko warning do
             return await query.message.edit_text(
-                f"❌ **Error:** I cannot find that channel (`{channel_id}`).\n\n"
-                f"1. Make sure I am a member/admin there.\n"
-                f"2. Send a message in that channel first.\n"
-                f"3. Forward a message from there to me.",
+                f"❌ **Bot doesn't know this channel yet!**\n\n"
+                f"Bot restart hua tha, isliye use ye channel yaad nahi hai.\n"
+                f"**Solution:** Us channel se koi bhi message mujhe **Forward** karein.",
                 reply_markup=InlineKeyboardMarkup(cancel_btn)
             )
 
-        # 3. ADMIN CHECK
-        status_msg = await query.message.reply_text(f"🔎 Checking Admin Status in **{channel_name}**...")
+        # 🛠️ FIX 2: SOLID ADMIN CHECK (Functional Test)
+        # Hum status check nahi karenge, hum seedha Link banane ki koshish karenge.
+        # Agar Link ban gaya = Bot Admin hai.
+        
+        status_msg = await query.message.reply_text(f"🔎 Verifying Admin Rights in **{channel_title}**...")
+        
         try:
-            member = await client.get_chat_member(channel_id, (await client.get_me()).id)
-            if member.status != enums.ChatMemberStatus.ADMINISTRATOR:
-                await status_msg.delete()
-                return await query.message.edit_text(
-                    f"❌ **Error:** I am not an Admin in `{channel_name}`.\n\nPlease make me Admin with 'Invite Users' rights.",
-                    reply_markup=InlineKeyboardMarkup(cancel_btn)
-                )
+            # 1. Try creating a dummy invite link (Best proof of Admin)
+            test_link = await client.create_chat_invite_link(channel_id, member_limit=1)
+            
+            # 2. Cleanup (Revoke immediately)
+            try: await client.revoke_chat_invite_link(channel_id, test_link.invite_link)
+            except: pass
+            
         except Exception as e:
             await status_msg.delete()
-            return await query.message.edit_text(f"❌ Error: `{e}`", reply_markup=InlineKeyboardMarkup(cancel_btn))
+            return await query.message.edit_text(
+                f"❌ **Verification Failed!**\n\n"
+                f"Bot is NOT an Admin in `{channel_title}` OR doesn't have permissions.\n"
+                f"**Required Permission:** 'Invite Users via Link'\n\n"
+                f"Error: `{e}`",
+                reply_markup=InlineKeyboardMarkup(cancel_btn)
+            )
 
         # Save
         await db.update_fsub_channel(chat_id, slot, channel_id)
         await status_msg.delete()
         
         await query.message.edit_text(
-            f"✅ **Success!**\n\nChannel: **{channel_name}**\nID: `{channel_id}`\nSlot: {slot}\n\nRedirecting...",
+            f"✅ **Success!**\n\nChannel: **{channel_title}**\nID: `{channel_id}`\nSlot: {slot}\n\nRedirecting...",
             reply_markup=InlineKeyboardMarkup(cancel_btn)
         )
         await asyncio.sleep(2)

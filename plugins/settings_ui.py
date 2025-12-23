@@ -155,7 +155,7 @@ async def fsub_configure_menu(client, query):
         print(f"FSUB MENU ERROR: {e}")
         await query.answer("❌ Error: Could not load Fsub menu. Check Logs.", show_alert=True)
 
-# 2. SET SLOT INPUT
+# 2. SET SLOT INPUT - ✅ ROBUST "PEER ID INVALID" FIX
 @Client.on_callback_query(filters.regex(r"^set_fsub#"))
 async def set_fsub_input(client, query):
     _, chat_id, slot = query.data.split("#")
@@ -165,8 +165,7 @@ async def set_fsub_input(client, query):
     await query.message.edit_text(
         f"👇 **Please send the ID for Request Fsub Channel for Slot {slot}.**\n\n"
         f"1. Make sure I am an **Admin** in the channel first.\n"
-        f"2. This must be a private/public channel.\n"
-        f"3. Forward message OR Send ID (e.g. -100xxxx).",
+        f"2. Forward message from Channel OR Send ID (e.g. -100xxxx).",
         reply_markup=InlineKeyboardMarkup(cancel_btn)
     )
     
@@ -186,33 +185,41 @@ async def set_fsub_input(client, query):
             except:
                 return await query.message.edit_text("❌ Invalid ID format! Must start with -100...", reply_markup=InlineKeyboardMarkup(cancel_btn))
         
-        # RESTART FIX: Refresh Cache
-        try: await client.get_chat(channel_id)
-        except: pass
+        # 🛠️ FIX: PRE-FETCH CHAT (Peer ID Invalid Fix)
+        # Bot ko force karo ki wo channel ko dhoondhe
+        try: 
+            chat_obj = await client.get_chat(channel_id)
+            channel_name = chat_obj.title
+        except Exception as e:
+            return await query.message.edit_text(
+                f"❌ **Error:** I cannot find that channel (`{channel_id}`).\n\n"
+                f"1. Make sure I am a member/admin there.\n"
+                f"2. Send a message in that channel first.\n"
+                f"3. Forward a message from there to me.",
+                reply_markup=InlineKeyboardMarkup(cancel_btn)
+            )
 
         # 3. ADMIN CHECK
-        status_msg = await query.message.reply_text("🔎 Checking Bot Admin Status...")
+        status_msg = await query.message.reply_text(f"🔎 Checking Admin Status in **{channel_name}**...")
         try:
             member = await client.get_chat_member(channel_id, (await client.get_me()).id)
             if member.status != enums.ChatMemberStatus.ADMINISTRATOR:
                 await status_msg.delete()
                 return await query.message.edit_text(
-                    f"❌ **Error:** I am not an Admin in `{channel_id}`.\n\nPlease add me as Admin with 'Invite Users' rights and try again.",
+                    f"❌ **Error:** I am not an Admin in `{channel_name}`.\n\nPlease make me Admin with 'Invite Users' rights.",
                     reply_markup=InlineKeyboardMarkup(cancel_btn)
                 )
         except Exception as e:
             await status_msg.delete()
-            return await query.message.edit_text(
-                f"❌ **Error:** I cannot access that channel.\nMake sure I am added as Admin.\nError: `{e}`",
-                reply_markup=InlineKeyboardMarkup(cancel_btn)
-            )
+            return await query.message.edit_text(f"❌ Error: `{e}`", reply_markup=InlineKeyboardMarkup(cancel_btn))
 
         # Save
         await db.update_fsub_channel(chat_id, slot, channel_id)
         await status_msg.delete()
+        
         await query.message.edit_text(
-            f"✅ **Fsub channel for Slot {slot} has been set for chat {chat_id}.**\n\n"
-            f"Back to fsub menu..."
+            f"✅ **Success!**\n\nChannel: **{channel_name}**\nID: `{channel_id}`\nSlot: {slot}\n\nRedirecting...",
+            reply_markup=InlineKeyboardMarkup(cancel_btn)
         )
         await asyncio.sleep(2)
         
@@ -224,6 +231,7 @@ async def set_fsub_input(client, query):
         await query.message.edit_text("❌ Timeout! Please try again.", reply_markup=InlineKeyboardMarkup(cancel_btn))
     except Exception as e:
         print(f"Error in Fsub Set: {e}")
+        await query.message.edit_text(f"❌ Error: {e}", reply_markup=InlineKeyboardMarkup(cancel_btn))
 
 # 4. REMOVE SINGLE SLOT
 @Client.on_callback_query(filters.regex(r"^rem_fsub_one#"))

@@ -71,7 +71,7 @@ async def main_settings_menu(client, query):
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🔒 FSUB SETTINGS (2 SLOTS) - ✅ UPDATED FIX
+# 🔒 FSUB SETTINGS (2 SLOTS) - ✅ FIXED & ROBUST
 # ==============================================================================
 
 # 1. FSUB CONFIGURE MENU (Safe Mode)
@@ -86,9 +86,17 @@ async def fsub_configure_menu(client, query):
             await db.add_group(chat_id)
             group_data = await db.get_group_settings(chat_id)
             
-        # ✅ CRASH FIX: Handle NoneType safely
-        fsub_channels = group_data.get('fsub_channels') or {}
+        # ✅ CRASH FIX: Smart Type Checking
+        # This handles the case where old database data might be a List [] instead of a Dict {}
+        raw_fsub = group_data.get('fsub_channels')
         
+        if isinstance(raw_fsub, list):
+            fsub_channels = {} # Reset corrupt list to empty dict
+        elif isinstance(raw_fsub, dict):
+            fsub_channels = raw_fsub
+        else:
+            fsub_channels = {}
+
         # SLOT 1 STATUS
         s1_id = fsub_channels.get('1')
         s1_txt = "❌ Slot 1: Not Set"

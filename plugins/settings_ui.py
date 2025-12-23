@@ -71,10 +71,10 @@ async def main_settings_menu(client, query):
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🔒 FSUB SETTINGS (2 SLOTS) - ✅ FIXED & ROBUST
+# 🔒 FSUB SETTINGS (2 SLOTS) - ✅ RESTART PROOF & ROBUST
 # ==============================================================================
 
-# 1. FSUB CONFIGURE MENU (Safe Mode)
+# 1. FSUB CONFIGURE MENU
 @Client.on_callback_query(filters.regex(r"^fsub_menu#"))
 async def fsub_configure_menu(client, query):
     try:
@@ -86,11 +86,10 @@ async def fsub_configure_menu(client, query):
             await db.add_group(chat_id)
             group_data = await db.get_group_settings(chat_id)
             
-        # ✅ CRASH FIX: Smart Type Checking (Handles List vs Dict error)
+        # ✅ HANDLE DATA TYPES (List vs Dict)
         raw_fsub = group_data.get('fsub_channels')
-        
         if isinstance(raw_fsub, list):
-            fsub_channels = {} # Reset corrupt list to empty dict
+            fsub_channels = {} 
         elif isinstance(raw_fsub, dict):
             fsub_channels = raw_fsub
         else:
@@ -104,7 +103,7 @@ async def fsub_configure_menu(client, query):
                 chat = await client.get_chat(s1_id)
                 s1_txt = f"✅ Slot 1: 📍{chat.title} ({s1_id})"
             except:
-                s1_txt = f"✅ Slot 1: `{s1_id}` (Saved, Unreachable)"
+                s1_txt = f"✅ Slot 1: `{s1_id}` (Saved, Peer Invalid)"
 
         # SLOT 2 STATUS
         s2_id = fsub_channels.get('2')
@@ -114,7 +113,7 @@ async def fsub_configure_menu(client, query):
                 chat = await client.get_chat(s2_id)
                 s2_txt = f"✅ Slot 2: 📍{chat.title} ({s2_id})"
             except:
-                s2_txt = f"✅ Slot 2: `{s2_id}` (Saved, Unreachable)"
+                s2_txt = f"✅ Slot 2: `{s2_id}` (Saved, Peer Invalid)"
 
         text = (
             f"⚙️ **Configure Request F-Sub Channels for:** `{chat_id}`\n\n"
@@ -152,16 +151,16 @@ async def fsub_configure_menu(client, query):
 
     except Exception as e:
         print(f"FSUB MENU ERROR: {e}")
-        await query.answer("❌ Error: Database format mismatch. I have auto-fixed it. Try again.", show_alert=True)
+        await query.answer("❌ Error: Database mismatch. Try again.", show_alert=True)
 
-# 2. SET SLOT INPUT - ✅ FORCE SAVE & RESTART PROOF
+# 2. SET SLOT INPUT - 🛡️ RESTART PROOF LOGIC
 @Client.on_callback_query(filters.regex(r"^set_fsub#"))
 async def set_fsub_input(client, query):
     _, chat_id, slot = query.data.split("#")
     chat_id = int(chat_id)
     cancel_btn = [[InlineKeyboardButton("❌ Cancel", callback_data=f"fsub_menu#{chat_id}")]]
     
-    # 1. Ask ONLY for ID (No Forwarding)
+    # 1. Ask for Text ID (No Forwarding needed)
     await query.message.edit_text(
         f"👇 **Set F-Sub Channel for Slot {slot}**\n\n"
         f"Please send the **Channel ID** (e.g. `-100xxxxxxx`).\n"
@@ -178,18 +177,18 @@ async def set_fsub_input(client, query):
         # ID Validation
         try:
             channel_id = int(input_msg.text.strip())
-            # Auto-add -100 prefix if missing
+            # Auto-add -100 prefix if user forgot it
             if not str(channel_id).startswith("-100"):
                  channel_id = int("-100" + str(channel_id).replace("-", ""))
         except:
             return await query.message.edit_text("❌ Invalid ID format! Must be numeric (e.g., -100123456789).", reply_markup=InlineKeyboardMarkup(cancel_btn))
         
-        # --- 🛠️ FORCE SAVE LOGIC ---
+        # --- 🛡️ RESTART PROOF LOGIC ---
         channel_title = "Unknown Channel"
         status_note = ""
 
         try:
-            # Try to fetch channel info
+            # Try to fetch channel info (This fails if bot restarted and hasn't seen channel)
             chat_obj = await client.get_chat(channel_id)
             channel_title = chat_obj.title
             
@@ -201,9 +200,9 @@ async def set_fsub_input(client, query):
                 status_note = "\n⚠️ **Warning:** Bot might not be Admin. Ensure 'Invite Users' permission is ON."
 
         except Exception as e:
-            # If PeerIdInvalid (Restart issue), we IGNORE error and FORCE SAVE
+            # 🛑 CRITICAL: If PeerIdInvalid (Restart issue), we IGNORE error and FORCE SAVE
             print(f"Peer Error (Ignored for Force Save): {e}")
-            channel_title = "Channel ID Saved (Bot Restarted)"
+            channel_title = "Channel ID Saved"
             status_note = "\n⚠️ **Note:** Bot couldn't verify name due to restart, but **ID is Saved**."
         
         # 💾 SAVE TO DATABASE (Forcefully)
@@ -212,7 +211,7 @@ async def set_fsub_input(client, query):
         msg_text = (
             f"✅ **F-Sub Channel Set!**\n\n"
             f"ID: `{channel_id}`\nSlot: {slot}\n"
-            f"Channel: **{channel_title}**"
+            f"Name: **{channel_title}**"
             f"{status_note}"
         )
 

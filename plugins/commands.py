@@ -24,13 +24,13 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-# --- 🛠️ AUTO-SAVE GROUP ---
+# --- 🛠️ AUTO-SAVE GROUP (GROUP OBSERVER) ---
 @Client.on_message(filters.group, group=-1)
 async def auto_save_group_handler(client, message):
     try: await db.add_group(message.chat.id)
     except: pass
 
-# --- 🚨 ALERT SYSTEM ---
+# --- 🚨 HELPER: SEND ALERT TO ADMIN ---
 async def send_shortener_alert(client, chat_id, site_domain):
     try:
         try:
@@ -53,7 +53,7 @@ async def send_shortener_alert(client, chat_id, site_domain):
             except: pass
     except: pass
 
-# --- 🧠 PRIORITY LOGIC ---
+# --- 🧠 PRIORITY LOGIC (GET SETTINGS) ---
 async def get_active_shorteners(chat_id):
     group_settings = await db.get_group_settings(chat_id)
     if group_settings:
@@ -70,28 +70,30 @@ async def get_active_shorteners(chat_id):
     if info.SHORTLINK_URL_3 and info.SHORTLINK_API_3: default_shorteners['3'] = {'site': info.SHORTLINK_URL_3, 'api': info.SHORTLINK_API_3}
     return default_shorteners
 
-# --- 🧠 GRANT ACCESS ---
+# --- 🧠 HELPER: GRANT ACCESS ---
 async def grant_full_access(user_id, chat_id):
     group_settings = await db.get_group_settings(chat_id)
     mode = group_settings.get('shortener_mode', 'dynamic') if group_settings else 'dynamic'
     
+    # Duration Logic
     if mode == 'smart': 
         duration = group_settings.get('time_smart', 86400)
     elif mode == 'together': 
         active_slots = await get_active_shorteners(chat_id)
         if len(active_slots) >= 3:
-            duration = group_settings.get('time_together_3', 86400)
+            duration = group_settings.get('time_together_3', 86400) # 3 Links
         else:
-            duration = group_settings.get('time_together', 604800)
+            duration = group_settings.get('time_together', 604800) # 1-2 Links
     else: 
         duration = group_settings.get('time_dynamic', 86400) 
 
     await db.update_verify_status(user_id, chat_id, 0, duration)
+    # Reset Levels for next cycle
     await db.update_verify_status(user_id, chat_id, 1, is_reset=True)
     await db.update_verify_status(user_id, chat_id, 2, is_reset=True)
     await db.update_verify_status(user_id, chat_id, 3, is_reset=True)
 
-# --- 🧠 VERIFICATION LOGIC ---
+# --- 🧠 MASTER VERIFICATION LOGIC ---
 async def check_verification(client, user_id, chat_id, link_id, message_obj):
     if not IS_VERIFY: return True 
     if await db.get_verify_status(user_id, chat_id): return True 
@@ -101,12 +103,15 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
     active_slots = await get_active_shorteners(chat_id)
     current_time = time.time()
 
-    # TOGETHER MODE
+    # ==================================================================
+    # 🌟 MODE: TOGETHER (All Links One Msg)
+    # ==================================================================
     if mode == 'together':
         buttons = []
         info_text = "⚠️ **Verification Required**\n\nComplete the steps below:\n"
         wait_msg = await message_obj.reply_text("Generating Links... ⏳")
         
+        # Slot 1
         if active_slots.get('1') and await db.get_level_time(user_id, chat_id, 1) == 0:
             link = await generate_single_link(client, chat_id, user_id, link_id, 1, active_slots['1'])
             if link: 
@@ -116,6 +121,7 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
                 await db.update_verify_status(user_id, chat_id, 1, is_reset=False) 
                 info_text += f"\n1️⃣ **Step 1:** ✅ Auto-Skipped"
 
+        # Slot 2
         if active_slots.get('2') and await db.get_level_time(user_id, chat_id, 2) == 0:
             link = await generate_single_link(client, chat_id, user_id, link_id, 2, active_slots['2'])
             if link:
@@ -125,6 +131,7 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
                 await db.update_verify_status(user_id, chat_id, 2, is_reset=False)
                 info_text += f"\n2️⃣ **Step 2:** ✅ Auto-Skipped"
 
+        # Slot 3
         if active_slots.get('3') and await db.get_level_time(user_id, chat_id, 3) == 0:
             link = await generate_single_link(client, chat_id, user_id, link_id, 3, active_slots['3'])
             if link:
@@ -135,6 +142,7 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
                 info_text += f"\n3️⃣ **Step 3:** ✅ Auto-Skipped"
 
         await wait_msg.delete()
+
         if buttons:
             await message_obj.reply_text(info_text, reply_markup=InlineKeyboardMarkup(buttons))
             return False
@@ -142,7 +150,9 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
             await grant_full_access(user_id, chat_id)
             return True
 
-    # Smart/Dynamic Mode
+    # ==================================================================
+    # 🌟 MODE: SMART
+    # ==================================================================
     elif mode == 'smart':
         gap1 = group_settings.get('time_gap1', 300)
         gap2 = group_settings.get('time_gap2', 300)
@@ -167,7 +177,10 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
                 res = await attempt_send_link(client, user_id, chat_id, link_id, message_obj, 3, active_slots['3'])
                 if res == "SENT": return False
 
-    else: # Dynamic
+    # ==================================================================
+    # 🌟 MODE: DYNAMIC
+    # ==================================================================
+    else: 
         if active_slots.get('1') and await db.get_level_time(user_id, chat_id, 1) == 0:
             res = await attempt_send_link(client, user_id, chat_id, link_id, message_obj, 1, active_slots['1'])
             if res == "SENT": return False 
@@ -213,84 +226,62 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(f"⚠️ **Alert:** {site} is down. Skipping... ⏩")
         return "SKIP"
 
-# --- 🔥 FSUB CHECK (PER GROUP ISOLATION) 🔥 ---
+# --- 🔥 FSUB CHECK LOGIC (UPDATED: FORCE REQUEST LINK) 🔥 ---
 async def check_fsub(client, user_id, message_obj):
-    # 1. GROUP ID EXTRACT KARNA (Sabse Important)
-    # Link format: https://t.me/bot?start=get_12345_-100123456789
-    # Yahan "-100123456789" Group ID hai.
     src_chat_id = None
     if len(message_obj.command) > 1:
         try:
             parts = message_obj.command[1].split("_")
-            # ✅ UPDATED LOGIC HERE: Strict Prefix Check
-            # Verify command logic (verify_level_userid_chatid_linkid)
-            if parts[0] == "verify" and len(parts) >= 4:
-                src_chat_id = int(parts[3]) 
-            # Get command logic (get_linkid_chatid)
-            elif parts[0] == "get" and len(parts) >= 3:
-                src_chat_id = int(parts[2])
+            if len(parts) > 3: src_chat_id = int(parts[3]) 
+            elif len(parts) > 2 and parts[0] == "get": src_chat_id = int(parts[2])
         except: pass
     
-    # Agar link me Group ID nahi hai, to Fsub check mat karo (skip)
     if not src_chat_id: return True 
 
-    # 2. US SPECIFIC GROUP KI SETTINGS NIKALNA
     group_settings = await db.get_group_settings(src_chat_id)
     if not group_settings: return True
     
     fsub_channels = group_settings.get('fsub_channels', {})
     if not fsub_channels: return True 
 
-    # 3. Check All Slots
-    missing_slots = []
-
     for slot, channel_id in fsub_channels.items():
         channel_id = int(channel_id)
         
         # A. Member?
-        is_member = False
         try:
             member = await client.get_chat_member(channel_id, user_id)
             if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
-                is_member = True
+                continue 
         except: pass 
 
         # B. Pending?
-        is_pending = False
-        if not is_member:
-            if await db.is_user_pending(user_id, channel_id):
-                is_pending = True
+        if await db.is_user_pending(user_id, channel_id):
+            continue 
 
-        # C. Agar Member bhi nahi aur Pending bhi nahi -> Missing list me daalo
-        if not is_member and not is_pending:
-            missing_slots.append((slot, channel_id))
+        # C. Block & Send Request Link
+        try:
+            # 🔥 KEY CHANGE: Create link specifically for JOIN REQUEST
+            # creates_join_request=True ensure karta hai ki user join na ho paye, sirf request bhej paye
+            link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=True)
+            link = link_obj.invite_link
+            
+            btn = [[InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=link)]]
+            original_param = message_obj.command[1] if len(message_obj.command) > 1 else "start"
+            btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")])
 
-    # 4. Agar koi missing slot hai, to Button Dikhao
-    if missing_slots:
-        buttons = []
-        for slot, channel_id in missing_slots:
-            try:
-                # 
-                # Join Request Link Create karo
-                link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=True)
-                link = link_obj.invite_link
-                buttons.append([InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=link)])
-            except Exception as e:
-                print(f"Error generating link for {channel_id}: {e}")
-        
-        # Try Again Button
-        original_param = message_obj.command[1] if len(message_obj.command) > 1 else "start"
-        buttons.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")])
+            await message_obj.reply_text(
+                f"⚠️ **Access Denied!**\n\n"
+                f"You must request to join our channel (Slot {slot}) to access this file.\n"
+                f"**Note:** Click 'Request to Join', then click 'Try Again'.",
+                reply_markup=InlineKeyboardMarkup(btn)
+            )
+            return False 
 
-        await message_obj.reply_text(
-            f"⚠️ **Access Denied!**\n\n"
-            f"You must request to join the following channel(s) to access this file.\n"
-            f"**Note:** Click 'Request to Join', then click 'Try Again'.",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        return False # Blocked
+        except Exception as e:
+            print(f"Fsub Link Gen Error: {e}")
+            continue
 
-    return True # Allowed
+    return True
 
 # --- HANDLERS ---
 
@@ -299,7 +290,7 @@ async def start_handler(client, message):
     if message.chat.type == enums.ChatType.PRIVATE:
         await db.add_user(message.from_user.id)
         
-        # 🛑 FSUB CHECK (First Priority)
+        # 🛑 FSUB CHECK
         if len(message.command) > 1:
             is_allowed = await check_fsub(client, message.from_user.id, message)
             if not is_allowed: return 

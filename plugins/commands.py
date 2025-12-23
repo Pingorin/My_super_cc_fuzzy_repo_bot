@@ -3,6 +3,7 @@ import time
 import asyncio
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
+from pyrogram.errors import UserNotParticipant  # ✅ Vital Import
 from database.users_chats_db import db
 from database.ia_filterdb import Media
 import info 
@@ -260,27 +261,32 @@ async def check_fsub(client, user_id, message_obj):
     try:
         fsub_id = int(fsub_id)
         
-        # --- 🛠️ RESTART PROOF LOGIC (CRITICAL) ---
-        # If bot restarts, it forgets the peer (PeerIdInvalid).
-        # We must try to get member status, and if it fails, REFRESH the peer.
-        
+        # --- 🛠️ RESTART PROOF & STRICT MEMBERSHIP CHECK ---
         try:
+            # ✅ Try to get member status
             member = await client.get_chat_member(fsub_id, user_id)
-        except Exception as e:
-            # Error implies Bot forgot channel or User not found.
-            # ACTION: Refresh Peer Cache
+        except UserNotParticipant:
+            # 🛑 User is NOT in the channel -> FORCE JOIN
+            raise UserNotParticipant 
+        except Exception:
+            # ⚠️ Error implies Bot forgot channel (Restart) or other API issue
             try:
                 await client.get_chat(fsub_id) # 🔄 Forces Bot to "remember" channel
-                member = await client.get_chat_member(fsub_id, user_id) # Retry
+                member = await client.get_chat_member(fsub_id, user_id) # Retry check
+            except UserNotParticipant:
+                raise UserNotParticipant # 🛑 Confirmed Not in Channel
             except:
-                # If it still fails, Bot is likely not Admin or kicked.
-                # Allow user to pass to prevent blocking legitimate traffic.
+                # If still failing (e.g. Bot not Admin), we must Fail-Safe to Allow
                 return True 
 
-        # 3. Check Status
+        # 3. Check Status (Member/Admin/Owner)
         if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
             return True # Access Granted
 
+        # If User Left/Kicked
+        raise UserNotParticipant
+
+    except UserNotParticipant:
         # 4. Access Denied: Generate Link
         try:
             invite_link = await client.create_chat_invite_link(fsub_id, member_limit=1)

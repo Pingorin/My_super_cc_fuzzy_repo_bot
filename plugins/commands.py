@@ -1,4 +1,3 @@
-import os
 import logging
 import time
 import asyncio
@@ -232,75 +231,77 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(f"⚠️ **Alert:** Shortener {site} is down. Skipping Level {level}... ⏩")
         return "SKIP"
 
-# --- 🚫 FSUB CHECK (FORCE REQUEST JOIN) ---
+# --- 🚫 FSUB CHECK (RESTART PROOF & PERMANENT) ---
 
 async def check_fsub(client, user_id, message_obj):
+    # 1. Parse Source Chat ID
     src_chat_id = None
-    # Parse source chat ID from start command
     if len(message_obj.command) > 1:
         try:
+            # Format: /start get_LINKID_CHATID
             parts = message_obj.command[1].split("_")
-            if len(parts) > 3: src_chat_id = int(parts[3]) 
-            elif len(parts) > 2 and parts[0] == "get": src_chat_id = int(parts[2])
+            if len(parts) >= 3:
+                src_chat_id = int(parts[-1]) # Extract Chat ID (Last part)
         except: pass
     
-    if not src_chat_id: return True 
+    if not src_chat_id: return True
 
-    group_settings = await db.get_group_settings(src_chat_id)
-    if not group_settings: return True
-    
-    # 🛠️ FIX: PREVENT LIST ERROR (DB COMPATIBILITY)
-    fsub_channels = group_settings.get('fsub_channels')
-    if not fsub_channels or not isinstance(fsub_channels, dict): 
-        return True 
+    # 2. Fetch Settings from Database
+    group_data = await db.get_group_settings(src_chat_id)
+    if not group_data: return True
 
-    for slot, channel_id in fsub_channels.items():
-        try:
-            channel_id = int(channel_id)
-        except: continue
+    # ✅ Access NEW structure: settings -> fsub
+    settings = group_data.get('settings', {})
+    fsub_id = settings.get('fsub')
+
+    # If no F-Sub ID is set in DB, allow access
+    if not fsub_id: return True 
+
+    try:
+        fsub_id = int(fsub_id)
         
-        # 1. Check if user is already a member
+        # --- 🛠️ RESTART PROOF LOGIC (CRITICAL) ---
+        # If bot restarts, it forgets the peer (PeerIdInvalid).
+        # We must try to get member status, and if it fails, REFRESH the peer.
+        
         try:
-            member = await client.get_chat_member(channel_id, user_id)
-            if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
-                continue 
-        except: pass 
+            member = await client.get_chat_member(fsub_id, user_id)
+        except Exception as e:
+            # Error implies Bot forgot channel or User not found.
+            # ACTION: Refresh Peer Cache
+            try:
+                await client.get_chat(fsub_id) # 🔄 Forces Bot to "remember" channel
+                member = await client.get_chat_member(fsub_id, user_id) # Retry
+            except:
+                # If it still fails, Bot is likely not Admin or kicked.
+                # Allow user to pass to prevent blocking legitimate traffic.
+                return True 
 
-        # 2. Check if user has already sent a Join Request (Pending)
-        if await db.is_user_pending(user_id, channel_id):
-            continue 
+        # 3. Check Status
+        if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
+            return True # Access Granted
 
-        # 3. Create JOIN REQUEST Link and Block Access
+        # 4. Access Denied: Generate Link
         try:
-            # 🛠️ FIX: PRE-FETCH CHAT TO PREVENT 'PEER_ID_INVALID'
-            # Telegram API requires us to "know" the chat before creating a link
-            try: await client.get_chat(channel_id)
-            except: pass 
-
-            # creates_join_request=True forces the user to Request Join instead of instant join
-            link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=True)
-            link = link_obj.invite_link
-            
-            btn = [[InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=link)]]
-            original_param = message_obj.command[1] if len(message_obj.command) > 1 else "start"
-            btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")])
-
+            invite_link = await client.create_chat_invite_link(fsub_id, member_limit=1)
+            btn = [
+                [InlineKeyboardButton("📢 Join Channel", url=invite_link.invite_link)],
+                [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={message_obj.command[1]}")]
+            ]
             await message_obj.reply_text(
-                f"⚠️ **Access Denied!**\n\n"
-                f"You must **Request to Join** our update channel (Slot {slot}) to access this file.\n\n"
-                f"1️⃣ Click **Request to Join**\n"
-                f"2️⃣ Wait for approval (or auto-approve)\n"
-                f"3️⃣ Click **Try Again**",
+                "⚠️ **Access Denied!**\n\n"
+                "You must join our update channel to access this file.",
                 reply_markup=InlineKeyboardMarkup(btn)
             )
-            return False 
+            return False
 
         except Exception as e:
-            # Avoid printing error to logs repeatedly to save space
-            pass
-            continue
+            print(f"Link Generation Error: {e}")
+            return True # Fail-safe
 
-    return True
+    except Exception as e:
+        print(f"Fsub Check Error: {e}")
+        return True
 
 # --- 🎮 COMMAND HANDLERS ---
 

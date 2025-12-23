@@ -3,7 +3,7 @@ import time
 import asyncio
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-from pyrogram.errors import UserNotParticipant  # ✅ Vital Import
+from pyrogram.errors import UserNotParticipant # ✅ Import this
 from database.users_chats_db import db
 from database.ia_filterdb import Media
 import info 
@@ -232,82 +232,95 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(f"⚠️ **Alert:** Shortener {site} is down. Skipping Level {level}... ⏩")
         return "SKIP"
 
-# --- 🚫 FSUB CHECK (RESTART PROOF & PERMANENT) ---
+# --- 🚫 FSUB CHECK (SMART & RESTART PROOF) ---
+# Updated Logic: Only blocks if definitely NOT a participant.
+# Allows access if Bot can't verify due to technical errors.
 
 async def check_fsub(client, user_id, message_obj):
-    # 1. Parse Source Chat ID
+    # 1. Source Chat ID Nikalo
     src_chat_id = None
     if len(message_obj.command) > 1:
         try:
-            # Format: /start get_LINKID_CHATID
             parts = message_obj.command[1].split("_")
             if len(parts) >= 3:
-                src_chat_id = int(parts[-1]) # Extract Chat ID (Last part)
+                src_chat_id = int(parts[-1]) 
         except: pass
     
     if not src_chat_id: return True
 
-    # 2. Fetch Settings from Database
+    # 2. Database se Settings Nikalo
     group_data = await db.get_group_settings(src_chat_id)
     if not group_data: return True
 
-    # ✅ Access NEW structure: settings -> fsub
     settings = group_data.get('settings', {})
     fsub_id = settings.get('fsub')
 
-    # If no F-Sub ID is set in DB, allow access
     if not fsub_id: return True 
 
     try:
         fsub_id = int(fsub_id)
         
-        # --- 🛠️ RESTART PROOF & STRICT MEMBERSHIP CHECK ---
+        # --- 🛡️ SMART CHECKING LOGIC ---
         try:
-            # ✅ Try to get member status
+            # Step A: Direct Check
             member = await client.get_chat_member(fsub_id, user_id)
+        
         except UserNotParticipant:
-            # 🛑 User is NOT in the channel -> FORCE JOIN
-            raise UserNotParticipant 
-        except Exception:
-            # ⚠️ Error implies Bot forgot channel (Restart) or other API issue
+            # ✅ CONFIRMED: User is NOT in channel -> Block & Send Link
+            return await send_join_link(client, message_obj, fsub_id)
+            
+        except Exception as e:
+            # Step B: Technical Error (Restart/PeerInvalid/Connection)
+            # Try to Refresh Peer and Check Again
             try:
-                await client.get_chat(fsub_id) # 🔄 Forces Bot to "remember" channel
-                member = await client.get_chat_member(fsub_id, user_id) # Retry check
+                await client.get_chat(fsub_id) # 🔄 Refresh Peer Cache
+                member = await client.get_chat_member(fsub_id, user_id) # Retry
             except UserNotParticipant:
-                raise UserNotParticipant # 🛑 Confirmed Not in Channel
-            except:
-                # If still failing (e.g. Bot not Admin), we must Fail-Safe to Allow
+                # Confirmed Not Participant after refresh
+                return await send_join_link(client, message_obj, fsub_id)
+            except Exception as e2:
+                # Step C: Still failing? (Bot issue, not User issue)
+                # Allow Access to prevent blocking innocent users
+                print(f"Technical Fsub Error (Access Granted): {e2}")
                 return True 
 
-        # 3. Check Status (Member/Admin/Owner)
-        if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
+        # Step D: Status Check
+        # Treat RESTRICTED as Member (Channels restrict users from posting)
+        if member.status in [
+            enums.ChatMemberStatus.MEMBER, 
+            enums.ChatMemberStatus.ADMINISTRATOR, 
+            enums.ChatMemberStatus.OWNER,
+            enums.ChatMemberStatus.RESTRICTED 
+        ]:
             return True # Access Granted
-
-        # If User Left/Kicked
-        raise UserNotParticipant
-
-    except UserNotParticipant:
-        # 4. Access Denied: Generate Link
-        try:
-            invite_link = await client.create_chat_invite_link(fsub_id, member_limit=1)
-            btn = [
-                [InlineKeyboardButton("📢 Join Channel", url=invite_link.invite_link)],
-                [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={message_obj.command[1]}")]
-            ]
-            await message_obj.reply_text(
-                "⚠️ **Access Denied!**\n\n"
-                "You must join our update channel to access this file.",
-                reply_markup=InlineKeyboardMarkup(btn)
-            )
-            return False
-
-        except Exception as e:
-            print(f"Link Generation Error: {e}")
-            return True # Fail-safe
+        
+        # If Left/Kicked -> Send Link
+        return await send_join_link(client, message_obj, fsub_id)
 
     except Exception as e:
-        print(f"Fsub Check Error: {e}")
+        print(f"Critical Fsub Logic Error: {e}")
         return True
+
+# --- Helper Function to Send Link ---
+async def send_join_link(client, message_obj, channel_id):
+    try:
+        # creates_join_request=True -> Admin Approval Mode
+        invite_link = await client.create_chat_invite_link(channel_id, creates_join_request=True)
+        
+        btn = [
+            [InlineKeyboardButton("📢 Request to Join Channel", url=invite_link.invite_link)],
+            [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={message_obj.command[1]}")]
+        ]
+        await message_obj.reply_text(
+            "⚠️ **Access Denied!**\n\n"
+            "You must **Request to Join** our update channel to access this file.\n"
+            "Click the button below and wait for approval.",
+            reply_markup=InlineKeyboardMarkup(btn)
+        )
+        return False
+    except Exception as e:
+        print(f"Link Gen Error: {e}")
+        return True # If link generation fails, let user pass
 
 # --- 🎮 COMMAND HANDLERS ---
 

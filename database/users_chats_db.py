@@ -1,6 +1,5 @@
 import motor.motor_asyncio
 import time
-import datetime
 from info import DATABASE_URI, DATABASE_NAME
 
 class UserChatDB:
@@ -10,56 +9,35 @@ class UserChatDB:
         self.users = self.db.users
         self.groups = self.db.groups
         self.banned = self.db.banned 
-        self.fsub_pending = self.db.fsub_pending # ✅ Join Requests के लिए कलेक्शन
-        self.req = self.db.join_req # Join Request collection (Legacy support के लिए)
+        self.fsub_pending = self.db.fsub_pending # ✅ New Collection for Join Requests
 
     async def add_user(self, id):
         user = await self.users.find_one({'id': int(id)})
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ चेक करता है कि ग्रुप डेटाबेस में है या नहीं
-    async def get_chat(self, chat_id):
-        chat = await self.groups.find_one({'id': int(chat_id)})
-        return chat if chat else False
-    
-    # ✅ सभी ग्रुप्स की लिस्ट लाता है (/settings कमांड के लिए जरूरी)
-    async def get_all_chats(self):
-        return self.groups.find({})
-
-    # ✅ नया ग्रुप ऑब्जेक्ट बनाता है (डिफ़ॉल्ट सेटिंग्स के साथ)
-    def new_group(self, chat_id, title):
-        return {
-            'id': int(chat_id),
-            'title': title,
-            'chat_status': True,
-            'earning_method': 'shortlink',
-            'shortener_mode': 'dynamic',
-            'shorteners': {},
-            'fsub_channels': {},
-            'is_shortlink_active': True,
-            'time_dynamic': 86400,
-            'time_smart': 86400,
-            'time_together': 604800,
-            'time_together_3': 86400,
-            'time_gap1': 300,
-            'time_gap2': 300
-        }
-
-    # ✅ ग्रुप को Title के साथ डेटाबेस में सेव या अपडेट करना
-    async def add_chat(self, chat_id, title):
-        chat_dict = self.new_group(chat_id, title)
-        # अगर ग्रुप पहले से है तो अपडेट करेगा, नहीं तो नया बनाएगा (upsert=True)
-        await self.groups.update_one({'id': int(chat_id)}, {'$set': chat_dict}, upsert=True)
-
-    # ✅ ग्रुप को डिफ़ॉल्ट सेटिंग्स के साथ जोड़ना (पुराने कोड के सपोर्ट के लिए)
+    # ✅ Add Group with Default Settings
     async def add_group(self, id):
         group = await self.groups.find_one({'id': int(id)})
         if not group:
-            chat = self.new_group(id, "Group") 
-            await self.groups.insert_one(chat)
+            default_settings = {
+                'id': int(id),
+                'earning_method': 'shortlink', # shortlink or fsub
+                'shortener_mode': 'dynamic',   # dynamic, together, smart
+                'shorteners': {},              # { '1': {'site': '...', 'api': '...'} }
+                'fsub_channels': {},           # ✅ Dict for Slots { '1': -100xx }
+                'is_shortlink_active': True,
+                # Time Defaults
+                'time_dynamic': 86400,
+                'time_smart': 86400,
+                'time_together': 604800,       # 7 Days
+                'time_together_3': 86400,      # 24 Hours
+                'time_gap1': 300,
+                'time_gap2': 300
+            }
+            await self.groups.insert_one(default_settings)
 
-    # --- ⚙️ ग्रुप सेटिंग्स के लिए हेल्पर्स ---
+    # --- ⚙️ GROUP SETTINGS HELPERS ---
     
     async def get_group_settings(self, id):
         return await self.groups.find_one({'id': int(id)})
@@ -67,7 +45,7 @@ class UserChatDB:
     async def update_group_settings(self, id, settings):
         await self.groups.update_one({'id': int(id)}, {'$set': settings})
 
-    # --- शॉर्टनर मैनेजमेंट ---
+    # --- SHORTENER MANAGEMENT ---
     async def add_shortener(self, chat_id, slot, site, api):
         key = f"shorteners.{slot}"
         await self.groups.update_one(
@@ -82,8 +60,26 @@ class UserChatDB:
             {'$unset': {key: ""}}
         )
 
-    # --- 🔒 FSUB चैनल मैनेजमेंट ---
+    # --- 🔒 FSUB CHANNEL MANAGEMENT (FIXED & IMPROVED) ---
+    
     async def update_fsub_channel(self, chat_id, slot, channel_id):
+        """Saves a specific channel ID to a specific slot (1, 2, or 3)"""
+        
+        # 🛠️ AUTO-FIX: Check if data is corrupted as a List [] and convert to Dict {}
+        try:
+            group = await self.groups.find_one({'id': int(chat_id)})
+            if group:
+                raw_data = group.get('fsub_channels')
+                if isinstance(raw_data, list):
+                    # Reset to empty dict if it's a list
+                    await self.groups.update_one(
+                        {'id': int(chat_id)}, 
+                        {'$set': {'fsub_channels': {}}}
+                    )
+        except Exception as e:
+            print(f"Auto-Fix Error: {e}")
+
+        # Save the new ID
         key = f"fsub_channels.{slot}"
         await self.groups.update_one(
             {'id': int(chat_id)},
@@ -92,6 +88,7 @@ class UserChatDB:
         )
 
     async def remove_fsub_channel(self, chat_id, slot):
+        """Removes a specific channel ID from a slot"""
         key = f"fsub_channels.{slot}"
         await self.groups.update_one(
             {'id': int(chat_id)},
@@ -99,12 +96,13 @@ class UserChatDB:
         )
 
     async def remove_all_fsub_channels(self, chat_id):
+        """Removes ALL fsub channels for a group"""
         await self.groups.update_one(
             {'id': int(chat_id)},
-            {'$unset': {'fsub_channels': ""}}
+            {'$unset': {'fsub_channels': ""}} # Completely removes the field
         )
 
-    # --- 📊 स्टेट्स और बैन लॉजिक ---
+    # --- 📊 STATS & BAN LOGIC ---
 
     async def total_users_count(self):
         return await self.users.count_documents({})
@@ -129,37 +127,54 @@ class UserChatDB:
     async def remove_ban(self, id, type="user"):
         await self.banned.delete_one({"id": int(id), "type": type})
 
-    # --- 🔒 वेरिफिकेशन सिस्टम ---
+    # --- 🔒 ADVANCED VERIFICATION SYSTEM ---
     
     async def get_verify_status(self, user_id, chat_id):
+        """
+        Checks if user has FINAL FULL ACCESS (Level 0).
+        """
         user = await self.users.find_one({'id': int(user_id)})
         if user:
             all_verifications = user.get('verify_status', {})
             if isinstance(all_verifications, (int, float)): return False
+
             chat_data = all_verifications.get(str(chat_id), {})
             if isinstance(chat_data, (int, float)): return False
+
+            # Check Level 0 (Full Access Token) Expiry
             return chat_data.get('0', 0) > time.time()
+            
         return False
 
     async def get_level_time(self, user_id, chat_id, level):
+        """
+        Returns the TIMESTAMP when a specific level was completed.
+        """
         user = await self.users.find_one({'id': int(user_id)})
         if user:
             all_verifications = user.get('verify_status', {})
             if isinstance(all_verifications, (int, float)): return 0
+            
             chat_data = all_verifications.get(str(chat_id), {})
             if isinstance(chat_data, (int, float)): return 0
+            
             return chat_data.get(str(level), 0)
         return 0
 
     async def update_verify_status(self, user_id, chat_id, level, duration=0, is_reset=False):
+        """
+        Updates verification status with Auto-Fix & Reset capability.
+        """
         current_time = time.time()
+        
         if is_reset:
-            value = 0 
+            value = 0 # Reset logic
         elif duration > 0:
-            value = current_time + duration 
+            value = current_time + duration # Expiry Timestamp
         else:
-            value = current_time 
+            value = current_time # Completion Timestamp
 
+        # Auto-Fix Logic for Corrupt Data
         user = await self.users.find_one({'id': int(user_id)})
         if user:
             current_status = user.get('verify_status')
@@ -177,29 +192,32 @@ class UserChatDB:
             upsert=True
         )
 
-    # --- 🔥 जॉइन रिक्वेस्ट लॉजिक (FSUB) ---
+    # --- 🔥 ADVANCED FSUB PENDING LOGIC 🔥 ---
     
     async def add_pending_request(self, user_id, channel_id):
+        """Adds a user to the pending join request list."""
         try:
             await self.fsub_pending.update_one(
                 {'_id': f"{user_id}_{channel_id}"},
-                {'$set': {'user_id': int(user_id), 'chat_id': int(channel_id), 'date': datetime.datetime.now()}},
+                {'$set': {'user_id': int(user_id), 'chat_id': int(channel_id)}},
                 upsert=True
             )
         except Exception as e:
             print(f"Error adding pending request: {e}")
 
+    async def remove_pending_request(self, user_id, channel_id):
+        """Removes a user from the pending list (When joined/left/approved)."""
+        try:
+            await self.fsub_pending.delete_one({'_id': f"{user_id}_{channel_id}"})
+        except Exception as e:
+            print(f"Error removing pending request: {e}")
+
     async def is_user_pending(self, user_id, channel_id):
+        """Checks if a user has a pending join request."""
         try:
             found = await self.fsub_pending.find_one({'_id': f"{user_id}_{channel_id}"})
             return bool(found)
         except:
             return False
-
-    async def remove_pending_request(self, user_id, channel_id):
-        try:
-            await self.fsub_pending.delete_one({'_id': f"{user_id}_{channel_id}"})
-        except Exception as e:
-            print(f"Error removing pending request: {e}")
 
 db = UserChatDB(DATABASE_URI, DATABASE_NAME)

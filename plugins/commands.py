@@ -232,7 +232,7 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(f"⚠️ **Alert:** Shortener {site} is down. Skipping Level {level}... ⏩")
         return "SKIP"
 
-# --- 🚫 FSUB CHECK (FORCE REQUEST JOIN) ---
+# --- 🚫 FSUB CHECK (REQUEST VS NORMAL) ---
 
 async def check_fsub(client, user_id, message_obj):
     src_chat_id = None
@@ -262,28 +262,50 @@ async def check_fsub(client, user_id, message_obj):
                 continue 
         except: pass 
 
-        # 2. Check if user has already sent a Join Request (Pending)
-        if await db.is_user_pending(user_id, channel_id):
-            continue 
+        # 2. Check Pending Status (ONLY for Request Fsub: Slots 1, 2, 4)
+        if str(slot) != '3':
+            if await db.is_user_pending(user_id, channel_id):
+                continue 
 
-        # 3. Create JOIN REQUEST Link and Block Access
+        # 3. Create Link and Block Access
         try:
-            # creates_join_request=True forces the user to Request Join instead of instant join
-            link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=True)
-            link = link_obj.invite_link
-            
-            btn = [[InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=link)]]
+            # SLOT 3 = NORMAL FSUB (Creates Join Link)
+            if str(slot) == '3':
+                try:
+                    # Try creating standard invite link
+                    link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=False)
+                    link = link_obj.invite_link
+                except:
+                    # Fallback to export if limit reached
+                    link = await client.export_chat_invite_link(channel_id)
+                
+                btn_text = "📢 Join Update Channel"
+                msg_text = (
+                    f"⚠️ **Access Denied!**\n\n"
+                    f"You must **Join** our update channel to access this file.\n\n"
+                    f"1️⃣ Click **Join Update Channel**\n"
+                    f"2️⃣ Join the Channel\n"
+                    f"3️⃣ Click **Try Again**"
+                )
+
+            # SLOT 1, 2, 4 = REQUEST FSUB (Creates Request Link)
+            else:
+                link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=True)
+                link = link_obj.invite_link
+                btn_text = f"📢 Request to Join Channel"
+                msg_text = (
+                    f"⚠️ **Access Denied!**\n\n"
+                    f"You must **Request to Join** our update channel (Slot {slot}) to access this file.\n\n"
+                    f"1️⃣ Click **Request to Join**\n"
+                    f"2️⃣ Wait for approval (or auto-approve)\n"
+                    f"3️⃣ Click **Try Again**"
+                )
+
+            btn = [[InlineKeyboardButton(btn_text, url=link)]]
             original_param = message_obj.command[1] if len(message_obj.command) > 1 else "start"
             btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")])
 
-            await message_obj.reply_text(
-                f"⚠️ **Access Denied!**\n\n"
-                f"You must **Request to Join** our update channel (Slot {slot}) to access this file.\n\n"
-                f"1️⃣ Click **Request to Join**\n"
-                f"2️⃣ Wait for approval (or auto-approve)\n"
-                f"3️⃣ Click **Try Again**",
-                reply_markup=InlineKeyboardMarkup(btn)
-            )
+            await message_obj.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(btn))
             return False 
 
         except Exception as e:

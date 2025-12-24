@@ -16,13 +16,12 @@ class UserChatDB:
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ Add Group with Default Settings & Title Persistence
-    async def add_group(self, id, title="Group"):
+    # ✅ Add Group with Default Settings
+    async def add_group(self, id):
         group = await self.groups.find_one({'id': int(id)})
         if not group:
             default_settings = {
                 'id': int(id),
-                'title': title, # ✅ Save Title
                 'earning_method': 'shortlink', # shortlink or fsub
                 'shortener_mode': 'dynamic',   # dynamic, together, smart
                 'shorteners': {},              # { '1': {'site': '...', 'api': '...'} }
@@ -37,9 +36,6 @@ class UserChatDB:
                 'time_gap2': 300
             }
             await self.groups.insert_one(default_settings)
-        else:
-            # ✅ Update Title if group already exists
-            await self.groups.update_one({'id': int(id)}, {'$set': {'title': title}})
 
     # --- ⚙️ GROUP SETTINGS HELPERS ---
     

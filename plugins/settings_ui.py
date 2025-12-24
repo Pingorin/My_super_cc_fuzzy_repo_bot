@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 from pyrogram import Client, filters, enums
+from pyrogram.errors import PeerIdInvalid, ChannelInvalid, FloodWait
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from database.users_chats_db import db
 from utils import temp
@@ -28,7 +29,7 @@ async def check_shortener_link(domain, api):
     except: pass
     return False
 
-# --- /settings COMMAND (OPTIMIZED) ---
+# --- /settings COMMAND (RESTART PROOF) ---
 @Client.on_message(filters.command("settings") & filters.private)
 async def settings_command(client, message):
     user_id = message.from_user.id
@@ -36,24 +37,38 @@ async def settings_command(client, message):
     
     user_groups = []
     
-    # Iterate through all groups in DB
+    # Database se saare groups fetch karo
     async for group in db.groups.find({}):
+        chat_id = group['id']
+        saved_title = group.get('title', str(chat_id)) # DB wala title (Fast)
+        
         try:
-            chat_id = group['id']
-            # ✅ RETRIEVE TITLE FROM DB (No API Call needed for title)
-            group_title = group.get('title', f"Group {chat_id}")
-            
-            # Check Admin Status (API Call required for security)
+            # 🟢 STEP 1: FORCE REFRESH (Ye line Restart Issue fix karegi)
+            # Bot server se puchega "Ye chat ID exist karti hai?" -> Cache Warmup
             try:
-                member = await client.get_chat_member(chat_id, user_id)
-                if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-                    continue
-            except:
-                # Bot is kicked or User not in group -> Skip
-                continue 
+                await client.get_chat(chat_id)
+            except PeerIdInvalid:
+                # Agar bot group me nahi hai ya ID invalid ho gayi
+                print(f"Skipping {chat_id}: Bot kicked or Invalid Peer.")
+                continue
+            except Exception:
+                pass # Other errors ignore, try get_chat_member directly
+
+            # 🟢 STEP 2: Verify Admin Status
+            # (Security: Hum non-admin ko settings nahi dikha sakte)
+            member = await client.get_chat_member(chat_id, user_id)
             
-            user_groups.append((group_title, chat_id))
-        except: 
+            if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
+                user_groups.append((saved_title, chat_id))
+            else:
+                print(f"Skipping {chat_id}: User is not Admin.")
+
+        except FloodWait as e:
+            # Agar bahut saare groups check kar rahe ho to FloodWait aa sakta hai
+            await asyncio.sleep(e.value)
+        except Exception as e:
+            print(f"❌ Error checking group {chat_id}: {e}")
+            # Agar koi unknown error aaya, to skip karo
             continue 
 
     await msg.delete()
@@ -61,36 +76,43 @@ async def settings_command(client, message):
     if not user_groups:
         return await message.reply_text(
             "❌ **No Connected Groups Found!**\n\n"
-            "1. Add me to your group.\n"
-            "2. Promote me to **Admin**.\n"
-            "3. Send any message in the group to register it."
+            "**Possible Reasons:**\n"
+            "1. You are not an Admin in any registered group.\n"
+            "2. Bot has been kicked from the group.\n"
+            "3. Try sending `/connect` inside your group once to refresh."
         )
 
     buttons = []
     for title, chat_id in user_groups:
         buttons.append([InlineKeyboardButton(f"📂 {title}", callback_data=f"set_main#{chat_id}")])
     
-    await message.reply_text("⚙️ **Select a Group to Configure:**", reply_markup=InlineKeyboardMarkup(buttons))
+    await message.reply_text("⚙️ **Select a Group:**", reply_markup=InlineKeyboardMarkup(buttons))
+
+# ... (BAAKI KA SAARA CODE SAME RAHEGA - Niche Copy Paste karein) ...
 
 # --- MAIN MENUS ---
 @Client.on_callback_query(filters.regex(r"^set_main#"))
 async def main_settings_menu(client, query):
     chat_id = int(query.data.split("#")[1])
     
+    # Title fetch karne ki koshish (DB se ya Live)
+    try: 
+        chat = await client.get_chat(chat_id)
+        title = chat.title
+    except: 
+        # Agar live fail ho jaye to DB se nikalo
+        group_data = await db.get_group_settings(chat_id)
+        title = group_data.get('title', "Unknown Group")
+
     buttons = [
         [InlineKeyboardButton("💰 Earning Method", callback_data=f"set_earn#{chat_id}"),
          InlineKeyboardButton("🔒 Force Subscribe", callback_data=f"fsub_menu#{chat_id}")],
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
-    
-    # ✅ Get Title from DB for speed
-    group_data = await db.get_group_settings(chat_id)
-    title = group_data.get('title', "Unknown Group") if group_data else "Unknown Group"
-    
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🔒 FSUB SETTINGS (2 SLOTS) - ✅ FIXED & ROBUST
+# 🔒 FSUB SETTINGS (2 SLOTS) 
 # ==============================================================================
 
 # 1. FSUB CONFIGURE MENU
@@ -101,9 +123,10 @@ async def fsub_configure_menu(client, query):
         group_data = await db.get_group_settings(chat_id)
         
         if not group_data:
-            # Fallback for old groups without DB entry
-            try: title = (await client.get_chat(chat_id)).title
-            except: title = "Unknown"
+            # Agar group DB me nahi hai (Rare case), to add karo
+            try: chat = await client.get_chat(chat_id)
+            except: chat = None
+            title = chat.title if chat else "Unknown"
             await db.add_group(chat_id, title)
             group_data = await db.get_group_settings(chat_id)
             
@@ -207,7 +230,6 @@ async def set_fsub_input(client, query):
         try:
             chat_obj = await client.get_chat(channel_id)
             channel_title = chat_obj.title
-            
             try:
                 test_link = await client.create_chat_invite_link(channel_id, member_limit=1)
                 await client.revoke_chat_invite_link(channel_id, test_link.invite_link)
@@ -215,6 +237,7 @@ async def set_fsub_input(client, query):
                 status_note = "\n⚠️ **Warning:** Bot might not be Admin. Ensure 'Invite Users' permission is ON."
 
         except Exception as e:
+            print(f"Peer Error (Ignored for Force Save): {e}")
             channel_title = "Channel ID Saved (Bot Restarted)"
             status_note = "\n⚠️ **Note:** Bot couldn't verify name due to restart, but **ID is Saved**."
         
@@ -263,7 +286,6 @@ async def remove_fsub_all(client, query):
 async def earning_settings(client, query):
     chat_id = int(query.data.split("#")[1])
     group_data = await db.get_group_settings(chat_id)
-    # Ensure group exists in DB, pass default title if missing
     if not group_data: 
         await db.add_group(chat_id, "Unknown Group")
         group_data = await db.get_group_settings(chat_id)
@@ -330,7 +352,6 @@ async def set_mode_handler(client, query):
 async def time_picker_ui(client, query):
     _, chat_id, key = query.data.split("#")
     
-    # Friendly Name Mapping
     names = {
         'time_dynamic': "Dynamic Full Access",
         'time_gap1': "Smart Gap 1",
@@ -506,5 +527,3 @@ async def alert_requirements(client, query):
 @Client.on_callback_query(filters.regex(r"^set_back_home"))
 async def back_home(client, query):
     await settings_command(client, query.message)
-
-#Update settings_ui.py

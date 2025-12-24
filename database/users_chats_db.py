@@ -19,6 +19,10 @@ class UserChatDB:
     # ✅ Check if Group Exists (New)
     async def get_chat(self, chat_id):
         return await self.groups.find_one({'id': int(chat_id)})
+    
+    # ✅ Get All Chats (Required for /settings command)
+    async def get_all_chats(self):
+        return self.groups.find({})
 
     # ✅ Create New Group Object (New Helper)
     def new_group(self, chat_id, title):

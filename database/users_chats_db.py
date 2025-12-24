@@ -78,13 +78,6 @@ class UserChatDB:
             {'$unset': {key: ""}}
         )
 
-    async def remove_all_fsub_channels(self, chat_id):
-        """Removes ALL fsub channels for a group"""
-        await self.groups.update_one(
-            {'id': int(chat_id)},
-            {'$unset': {'fsub_channels': ""}}
-        )
-
     # --- 📊 STATS & BAN LOGIC ---
 
     async def total_users_count(self):

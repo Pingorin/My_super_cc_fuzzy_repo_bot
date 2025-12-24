@@ -62,7 +62,7 @@ class UserChatDB:
 
     # --- 🔒 FSUB CHANNEL MANAGEMENT (NEW) ---
     async def update_fsub_channel(self, chat_id, slot, channel_id):
-        """Saves a specific channel ID to a specific slot (1, 2, or 3)"""
+        """Saves a specific channel ID to a specific slot (1, 2, 3, or 4)"""
         key = f"fsub_channels.{slot}"
         await self.groups.update_one(
             {'id': int(chat_id)},
@@ -76,6 +76,13 @@ class UserChatDB:
         await self.groups.update_one(
             {'id': int(chat_id)},
             {'$unset': {key: ""}}
+        )
+
+    async def remove_all_fsub_channels(self, chat_id):
+        """Removes all fsub channels for a group"""
+        await self.groups.update_one(
+            {'id': int(chat_id)},
+            {'$unset': {'fsub_channels': ""}}
         )
 
     # --- 📊 STATS & BAN LOGIC ---

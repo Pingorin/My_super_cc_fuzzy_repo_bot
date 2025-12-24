@@ -32,44 +32,23 @@ async def check_shortener_link(domain, api):
 @Client.on_message(filters.command("settings") & filters.private)
 async def settings_command(client, message):
     user_id = message.from_user.id
-    msg = await message.reply_text("<b>♻️ ᴄʜᴇᴄᴋɪɴɢ ʏᴏᴜʀ ᴀᴅᴍɪɴ ʀɪɢʜᴛs ɪɴ ᴀʟʟ ɢʀᴏᴜᴘs... ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...</b>")
-    
-    # 1. Database se Connected Groups ki list nikalo (Set for fast lookup)
-    connected_ids = set()
-    async for group in db.groups.find({}):
-        connected_ids.add(group['id'])
+    msg = await message.reply_text("🔄 **Loading your groups...**")
     
     user_groups = []
-    
-    try:
-        # 2. Telegram se poocho: "Main kin groups me hu?" (Dialogs)
-        # Ye sabse IMPORTANT step hai. Ye restart ke baad bhi kaam karega.
-        async for dialog in client.get_dialogs():
-            
-            # Sirf Groups/Supergroups check karo
-            if dialog.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-                
-                # Kya ye group humare Database me Connected hai?
-                if dialog.chat.id in connected_ids:
-                    chat_id = dialog.chat.id
-                    title = dialog.chat.title
-                    
-                    # 3. Check karo User Admin hai ya nahi
-                    try:
-                        # Dialog object se direct check karo (Fast & Reliable)
-                        member = await dialog.chat.get_member(user_id)
-                        if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-                            user_groups.append((title, chat_id))
-                    except Exception as e:
-                        # Agar user group me nahi hai to skip karo
-                        pass
-    except Exception as e:
-        print(f"Error in Dialogs: {e}")
+    async for group in db.groups.find({}):
+        try:
+            chat_id = group['id']
+            try:
+                member = await client.get_chat_member(chat_id, user_id)
+            except: continue 
+            if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
+                chat_info = await client.get_chat(chat_id)
+                user_groups.append((chat_info.title, chat_id))
+        except: continue 
 
     await msg.delete()
-    
     if not user_groups:
-        return await message.reply_text("❌ **No Groups Found!**\n\nPossible Reasons:\n1. I am not in your group.\n2. You haven't typed `/connect` in the group.\n3. You are not an Admin.")
+        return await message.reply_text("❌ **No Groups Found!**\nMake sure I am added to your group and you are an Admin there.")
 
     buttons = []
     for title, chat_id in user_groups:
@@ -87,15 +66,8 @@ async def main_settings_menu(client, query):
          InlineKeyboardButton("📢 Force Subscribe", callback_data=f"fsub_menu#{chat_id}")],
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
-    try: 
-        # Title DB se lene ki koshish, warna refresh
-        group_data = await db.get_group_settings(chat_id)
-        if group_data and group_data.get('title'):
-             title = group_data.get('title')
-        else:
-             title = (await client.get_chat(chat_id)).title
-    except: title = "Unknown Group"
-    
+    try: title = (await client.get_chat(chat_id)).title
+    except: title = "Unknown"
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
@@ -242,10 +214,6 @@ async def set_fsub_input(client, query):
         # Validate Bot Admin
         status_msg = await query.message.reply_text("🔎 Verifying Admin Status...")
         try:
-            # TRY REFRESH FIRST
-            try: await client.get_chat(channel_id)
-            except: pass
-            
             member = await client.get_chat_member(channel_id, (await client.get_me()).id)
             if member.status != enums.ChatMemberStatus.ADMINISTRATOR:
                 await status_msg.delete()
@@ -505,7 +473,7 @@ async def disable_menu(client, query):
     except: count = 0
     fsub_list = group_data.get('fsub_channels', {})
     req_mem = count >= 100
-    req_fsub = bool(fsub_list.get('1') or fsub_list.get('2') or fsub_list.get('3') or fsub_list.get('4'))
+    req_fsub = bool(fsub_list.get('1') or fsub_list.get('2'))
 
     text = (
         f"🚫 **Disable Shortlink Mode**\n\n"

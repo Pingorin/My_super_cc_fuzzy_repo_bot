@@ -240,8 +240,15 @@ async def check_fsub(client, user_id, message_obj):
     if len(message_obj.command) > 1:
         try:
             parts = message_obj.command[1].split("_")
-            if len(parts) > 3: src_chat_id = int(parts[3]) 
-            elif len(parts) > 2 and parts[0] == "get": src_chat_id = int(parts[2])
+            # Case 1: Verify Links (verify_level_userid_chatid_linkid)
+            if len(parts) > 3 and parts[0] == "verify": 
+                src_chat_id = int(parts[3]) 
+            # Case 2: Get Links (get_linkid_chatid)
+            elif len(parts) > 2 and parts[0] == "get": 
+                src_chat_id = int(parts[2])
+            # Case 3: File Links (file_chatid_fileid) - ✅ FIX ADDED HERE
+            elif len(parts) > 2 and parts[0] == "file":
+                src_chat_id = int(parts[1])
         except: pass
     
     if not src_chat_id: return True 
@@ -381,6 +388,23 @@ async def start_handler(client, message):
             
             caption = search_data.get('caption', f"📂 <b>{search_data.get('file_name')}</b>")
             try: await client.send_cached_media(chat_id=message.from_user.id, file_id=file_data.get('file_id'), caption=f"{caption}\n{script.CUSTOM_FOOTER}", parse_mode=enums.ParseMode.HTML)
+            except Exception as e: await message.reply(f"❌ Error sending file: `{e}`")
+        except Exception as e: await message.reply(f"❌ Error: {e}")
+        return
+
+    # ✅ FILE RETRIEVAL LOGIC - DIRECT FILE ID (file_chatid_fileid) - FIX ADDED
+    if len(message.command) > 1 and message.command[1].startswith("file_"):
+        try:
+            data = message.command[1].split("_")
+            src_chat_id = data[1]
+            file_id = data[2]
+            
+            # Check Verification Status (Pass 0 as link_id since we have direct file_id)
+            is_all_clear = await check_verification(client, message.from_user.id, src_chat_id, 0, message)
+            if not is_all_clear: return 
+
+            # Send File
+            try: await client.send_cached_media(chat_id=message.from_user.id, file_id=file_id, caption=f"{script.CUSTOM_FOOTER}", parse_mode=enums.ParseMode.HTML)
             except Exception as e: await message.reply(f"❌ Error sending file: `{e}`")
         except Exception as e: await message.reply(f"❌ Error: {e}")
         return

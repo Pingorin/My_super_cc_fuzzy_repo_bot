@@ -28,33 +28,49 @@ async def check_shortener_link(domain, api):
     except: pass
     return False
 
-# --- /settings COMMAND ---
+# --- /settings COMMAND (OPTIMIZED) ---
 @Client.on_message(filters.command("settings") & filters.private)
 async def settings_command(client, message):
     user_id = message.from_user.id
-    msg = await message.reply_text("🔄 **Loading your groups...**")
+    msg = await message.reply_text("🔄 **Loading your groups from Database...**")
     
     user_groups = []
+    
+    # Iterate through all groups in DB
     async for group in db.groups.find({}):
         try:
             chat_id = group['id']
+            # ✅ RETRIEVE TITLE FROM DB (No API Call needed for title)
+            group_title = group.get('title', f"Group {chat_id}")
+            
+            # Check Admin Status (API Call required for security)
             try:
                 member = await client.get_chat_member(chat_id, user_id)
-            except: continue 
-            if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-                chat_info = await client.get_chat(chat_id)
-                user_groups.append((chat_info.title, chat_id))
-        except: continue 
+                if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
+                    continue
+            except:
+                # Bot is kicked or User not in group -> Skip
+                continue 
+            
+            user_groups.append((group_title, chat_id))
+        except: 
+            continue 
 
     await msg.delete()
+    
     if not user_groups:
-        return await message.reply_text("❌ **No Groups Found!**\nMake sure I am added to your group and you are an Admin there.")
+        return await message.reply_text(
+            "❌ **No Connected Groups Found!**\n\n"
+            "1. Add me to your group.\n"
+            "2. Promote me to **Admin**.\n"
+            "3. Send any message in the group to register it."
+        )
 
     buttons = []
     for title, chat_id in user_groups:
         buttons.append([InlineKeyboardButton(f"📂 {title}", callback_data=f"set_main#{chat_id}")])
     
-    await message.reply_text("⚙️ **Select a Group:**", reply_markup=InlineKeyboardMarkup(buttons))
+    await message.reply_text("⚙️ **Select a Group to Configure:**", reply_markup=InlineKeyboardMarkup(buttons))
 
 # --- MAIN MENUS ---
 @Client.on_callback_query(filters.regex(r"^set_main#"))
@@ -66,31 +82,35 @@ async def main_settings_menu(client, query):
          InlineKeyboardButton("🔒 Force Subscribe", callback_data=f"fsub_menu#{chat_id}")],
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
-    try: title = (await client.get_chat(chat_id)).title
-    except: title = "Unknown"
+    
+    # ✅ Get Title from DB for speed
+    group_data = await db.get_group_settings(chat_id)
+    title = group_data.get('title', "Unknown Group") if group_data else "Unknown Group"
+    
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
 # 🔒 FSUB SETTINGS (2 SLOTS) - ✅ FIXED & ROBUST
 # ==============================================================================
 
-# 1. FSUB CONFIGURE MENU (Safe Mode)
+# 1. FSUB CONFIGURE MENU
 @Client.on_callback_query(filters.regex(r"^fsub_menu#"))
 async def fsub_configure_menu(client, query):
     try:
         chat_id = int(query.data.split("#")[1])
         group_data = await db.get_group_settings(chat_id)
         
-        # DB SYNC FIX
         if not group_data:
-            await db.add_group(chat_id)
+            # Fallback for old groups without DB entry
+            try: title = (await client.get_chat(chat_id)).title
+            except: title = "Unknown"
+            await db.add_group(chat_id, title)
             group_data = await db.get_group_settings(chat_id)
             
-        # ✅ CRASH FIX: Smart Type Checking (Handles List vs Dict error)
         raw_fsub = group_data.get('fsub_channels')
         
         if isinstance(raw_fsub, list):
-            fsub_channels = {} # Reset corrupt list to empty dict
+            fsub_channels = {} 
         elif isinstance(raw_fsub, dict):
             fsub_channels = raw_fsub
         else:
@@ -154,14 +174,13 @@ async def fsub_configure_menu(client, query):
         print(f"FSUB MENU ERROR: {e}")
         await query.answer("❌ Error: Database format mismatch. I have auto-fixed it. Try again.", show_alert=True)
 
-# 2. SET SLOT INPUT - ✅ FORCE SAVE & RESTART PROOF
+# 2. SET SLOT INPUT
 @Client.on_callback_query(filters.regex(r"^set_fsub#"))
 async def set_fsub_input(client, query):
     _, chat_id, slot = query.data.split("#")
     chat_id = int(chat_id)
     cancel_btn = [[InlineKeyboardButton("❌ Cancel", callback_data=f"fsub_menu#{chat_id}")]]
     
-    # 1. Ask ONLY for ID (No Forwarding)
     await query.message.edit_text(
         f"👇 **Set F-Sub Channel for Slot {slot}**\n\n"
         f"Please send the **Channel ID** (e.g. `-100xxxxxxx`).\n"
@@ -175,25 +194,20 @@ async def set_fsub_input(client, query):
         if not input_msg.text:
             return await query.message.edit_text("❌ Please send the Channel ID in text format only.", reply_markup=InlineKeyboardMarkup(cancel_btn))
         
-        # ID Validation
         try:
             channel_id = int(input_msg.text.strip())
-            # Auto-add -100 prefix if missing
             if not str(channel_id).startswith("-100"):
                  channel_id = int("-100" + str(channel_id).replace("-", ""))
         except:
             return await query.message.edit_text("❌ Invalid ID format! Must be numeric (e.g., -100123456789).", reply_markup=InlineKeyboardMarkup(cancel_btn))
         
-        # --- 🛠️ FORCE SAVE LOGIC ---
         channel_title = "Unknown Channel"
         status_note = ""
 
         try:
-            # Try to fetch channel info
             chat_obj = await client.get_chat(channel_id)
             channel_title = chat_obj.title
             
-            # Try to verify Admin rights
             try:
                 test_link = await client.create_chat_invite_link(channel_id, member_limit=1)
                 await client.revoke_chat_invite_link(channel_id, test_link.invite_link)
@@ -201,12 +215,9 @@ async def set_fsub_input(client, query):
                 status_note = "\n⚠️ **Warning:** Bot might not be Admin. Ensure 'Invite Users' permission is ON."
 
         except Exception as e:
-            # If PeerIdInvalid (Restart issue), we IGNORE error and FORCE SAVE
-            print(f"Peer Error (Ignored for Force Save): {e}")
             channel_title = "Channel ID Saved (Bot Restarted)"
             status_note = "\n⚠️ **Note:** Bot couldn't verify name due to restart, but **ID is Saved**."
         
-        # 💾 SAVE TO DATABASE (Forcefully)
         await db.update_fsub_channel(chat_id, slot, channel_id)
         
         msg_text = (
@@ -219,7 +230,6 @@ async def set_fsub_input(client, query):
         await query.message.edit_text(msg_text, reply_markup=InlineKeyboardMarkup(cancel_btn))
         await asyncio.sleep(2)
         
-        # Return to Menu
         query.data = f"fsub_menu#{chat_id}"
         await fsub_configure_menu(client, query)
 
@@ -253,7 +263,10 @@ async def remove_fsub_all(client, query):
 async def earning_settings(client, query):
     chat_id = int(query.data.split("#")[1])
     group_data = await db.get_group_settings(chat_id)
-    if not group_data: await db.add_group(chat_id)
+    # Ensure group exists in DB, pass default title if missing
+    if not group_data: 
+        await db.add_group(chat_id, "Unknown Group")
+        group_data = await db.get_group_settings(chat_id)
     
     active_mode = "SHORTLINK" if group_data.get('is_shortlink_active', True) else "FSUB (Disable Shortlink)"
     buttons = [
@@ -493,3 +506,5 @@ async def alert_requirements(client, query):
 @Client.on_callback_query(filters.regex(r"^set_back_home"))
 async def back_home(client, query):
     await settings_command(client, query.message)
+
+#Update settings_ui.py

@@ -85,8 +85,7 @@ async def fsub_configure_menu(client, query):
             await db.add_group(chat_id)
             group_data = await db.get_group_settings(chat_id)
             
-        # ✅ READ FROM NEW DB STRUCTURE (settings.fsub)
-        # This matches the structure we defined in users_chats_db.py
+        # ✅ READ FROM NEW DB STRUCTURE
         settings = group_data.get('settings', {})
         fsub_id = settings.get('fsub')
 
@@ -150,6 +149,8 @@ async def set_fsub_input(client, query):
         except:
             return await query.message.edit_text("❌ Invalid ID.", reply_markup=InlineKeyboardMarkup(cancel_btn))
         
+        await input_msg.delete()
+        
         # --- LOGIC: VERIFY OR FORCE SAVE ---
         channel_title = "Unknown"
         status_note = ""
@@ -170,7 +171,6 @@ async def set_fsub_input(client, query):
             status_note = "\n⚠️ **Note:** Bot couldn't verify name, but **ID is Saved**."
         
         # ✅ WRITE TO NEW DB STRUCTURE
-        # Ensure your users_chats_db.py has update_group_fsub
         await db.update_group_fsub(chat_id, channel_id)
         
         msg_text = (

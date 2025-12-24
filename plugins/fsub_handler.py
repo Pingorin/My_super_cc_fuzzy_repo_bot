@@ -1,11 +1,7 @@
-from pyrogram import Client, filters, enums
+from pyrogram import Client, enums
 from pyrogram.types import ChatJoinRequest, ChatMemberUpdated, InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
 from utils import temp
-from info import ADMINS, LOG_CHANNEL
-import logging
-
-logger = logging.getLogger(__name__)
 
 # --- 1. JOIN REQUEST LISTENER ---
 @Client.on_chat_join_request()
@@ -14,9 +10,9 @@ async def join_req_handler(client: Client, request: ChatJoinRequest):
         # User ko Pending List me daalo
         await db.add_pending_request(request.from_user.id, request.chat.id)
     except Exception as e:
-        logger.error(f"Join Request Error: {e}")
+        print(f"Join Request Error: {e}")
 
-# --- 2. STATUS UPDATE LISTENER (AUTO NOTIFY & LOGGING) ---
+# --- 2. STATUS UPDATE LISTENER (AUTO NOTIFY LOGIC) ---
 @Client.on_chat_member_updated()
 async def member_update_handler(client: Client, update: ChatMemberUpdated):
     try:
@@ -33,25 +29,9 @@ async def member_update_handler(client: Client, update: ChatMemberUpdated):
         if new_status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR]:
             if was_pending:
                 await db.remove_pending_request(user_id, chat_id)
-                
-                # 1. Notify User
-                try: 
-                    await client.send_message(user_id, "✅ **Your request has been approved!**\nYou can now access the files.")
+                # Optional: Approve hone par badhai message
+                try: await client.send_message(user_id, "✅ **Your request has been approved!**\nYou can now access the files.")
                 except: pass
-
-                # 2. Log to Log Channel
-                if LOG_CHANNEL:
-                    try:
-                        user = update.new_chat_member.user
-                        chat = update.chat
-                        await client.send_message(
-                            LOG_CHANNEL,
-                            f"✅ **FSub Request Approved**\n\n"
-                            f"👤 User: {user.mention} (`{user.id}`)\n"
-                            f"📍 Channel: {chat.title}\n"
-                            f"🤖 By: Auto-Approve / Admin"
-                        )
-                    except: pass
 
         # --- CASE 2: DISMISSED / LEFT (REJECTED) ---
         elif new_status == enums.ChatMemberStatus.LEFT:
@@ -61,14 +41,11 @@ async def member_update_handler(client: Client, update: ChatMemberUpdated):
                 
                 # 2. 🔥 USER KO TURANT MESSAGE BHEJO (With Button) 🔥
                 try:
+                    # Link generate karo
                     chat_info = await client.get_chat(chat_id)
-                    # Try to create a request link
-                    try:
-                        link_obj = await client.create_chat_invite_link(chat_id, creates_join_request=True)
-                        link = link_obj.invite_link
-                    except:
-                        link = f"https://t.me/{temp.U_NAME}" # Fallback
-
+                    link_obj = await client.create_chat_invite_link(chat_id, creates_join_request=True)
+                    link = link_obj.invite_link
+                    
                     btn = [
                         [InlineKeyboardButton("📢 Request to Join Again", url=link)],
                         [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start=start")]
@@ -76,40 +53,11 @@ async def member_update_handler(client: Client, update: ChatMemberUpdated):
                     
                     await client.send_message(
                         chat_id=user_id,
-                        text=f"❌ **Your Join Request was Declined.**\n\n"
-                             f"Admin has dismissed your request for **{chat_info.title}**.\n"
-                             f"You need to request again to access the files.",
+                        text="❌ **Your Join Request was Declined.**\n\nAdmin has dismissed your request.\nYou need to request again to access the files.",
                         reply_markup=InlineKeyboardMarkup(btn)
                     )
                 except Exception as e:
-                    logger.error(f"Could not send dismiss alert: {e}")
-
-                # 3. Log to Log Channel
-                if LOG_CHANNEL:
-                    try:
-                        user = update.new_chat_member.user
-                        chat = update.chat
-                        await client.send_message(
-                            LOG_CHANNEL,
-                            f"❌ **FSub Request Declined**\n\n"
-                            f"👤 User: {user.mention} (`{user.id}`)\n"
-                            f"📍 Channel: {chat.title}"
-                        )
-                    except: pass
+                    print(f"Could not send dismiss alert: {e}")
 
     except Exception as e:
-        logger.error(f"Member Update Error: {e}")
-
-# --- 3. CLEANUP COMMAND (MAINTENANCE) ---
-@Client.on_message(filters.command("delreq") & filters.private & filters.user(ADMINS))
-async def del_requests(client, message):
-    """
-    Clears the Join Request database cache.
-    Use this if DB gets too big or buggy.
-    """
-    try:
-        # Direct DB access to delete all pending requests
-        await db.fsub_pending.delete_many({})
-        await message.reply("<b>⚙️ Successfully cleared Join Request Cache.</b>")
-    except Exception as e:
-        await message.reply(f"Error: {e}")
+        print(f"Member Update Error: {e}")

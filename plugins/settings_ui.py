@@ -35,15 +35,23 @@ async def settings_command(client, message):
     msg = await message.reply_text("🔄 **Loading your groups...**")
     
     user_groups = []
+    # Fetch all groups from DB
     async for group in db.groups.find({}):
         try:
             chat_id = group['id']
             try:
+                # Check if user is admin in that group
                 member = await client.get_chat_member(chat_id, user_id)
             except: continue 
+            
             if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-                chat_info = await client.get_chat(chat_id)
-                user_groups.append((chat_info.title, chat_id))
+                try:
+                    chat_info = await client.get_chat(chat_id)
+                    title = chat_info.title
+                except:
+                    title = group.get('title', 'Unknown Group')
+                    
+                user_groups.append((title, chat_id))
         except: continue 
 
     await msg.delete()

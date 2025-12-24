@@ -1,9 +1,9 @@
+import os
 import logging
 import time
 import asyncio
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-from pyrogram.errors import UserNotParticipant
 from database.users_chats_db import db
 from database.ia_filterdb import Media
 import info 
@@ -232,145 +232,68 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(f"⚠️ **Alert:** Shortener {site} is down. Skipping Level {level}... ⏩")
         return "SKIP"
 
-# --- 🚫 FSUB CHECK (SMART & STRICT RESTART PROOF) ---
+# --- 🚫 FSUB CHECK (FORCE REQUEST JOIN) ---
 
 async def check_fsub(client, user_id, message_obj):
-    # 1. Parse Source Chat ID
     src_chat_id = None
+    # Parse source chat ID from start command
     if len(message_obj.command) > 1:
         try:
             parts = message_obj.command[1].split("_")
-            if len(parts) >= 3:
-                src_chat_id = int(parts[-1]) 
+            if len(parts) > 3: src_chat_id = int(parts[3]) 
+            elif len(parts) > 2 and parts[0] == "get": src_chat_id = int(parts[2])
         except: pass
     
-    if not src_chat_id: return True
+    if not src_chat_id: return True 
 
-    # 2. Database se Settings Nikalo
-    group_data = await db.get_group_settings(src_chat_id)
-    if not group_data: return True
+    group_settings = await db.get_group_settings(src_chat_id)
+    if not group_settings: return True
+    
+    fsub_channels = group_settings.get('fsub_channels', {})
+    if not fsub_channels: return True 
 
-    # Check Slot '1' by default
-    fsub_channels = group_data.get('fsub_channels', {})
-    fsub_id = fsub_channels.get('1')
-
-    if not fsub_id: return True 
-
-    try:
-        fsub_id = int(fsub_id)
+    for slot, channel_id in fsub_channels.items():
+        channel_id = int(channel_id)
         
-        # --- 🛡️ CHECKING LOGIC ---
+        # 1. Check if user is already a member
         try:
-            # Step A: Direct Check
-            member = await client.get_chat_member(fsub_id, user_id)
-        
-        except UserNotParticipant:
-            # User is NOT in channel -> Block & Send Link
-            return await send_join_link(client, message_obj, fsub_id)
+            member = await client.get_chat_member(channel_id, user_id)
+            if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
+                continue 
+        except: pass 
+
+        # 2. Check if user has already sent a Join Request (Pending)
+        if await db.is_user_pending(user_id, channel_id):
+            continue 
+
+        # 3. Create JOIN REQUEST Link and Block Access
+        try:
+            # creates_join_request=True forces the user to Request Join instead of instant join
+            link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=True)
+            link = link_obj.invite_link
             
+            btn = [[InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=link)]]
+            original_param = message_obj.command[1] if len(message_obj.command) > 1 else "start"
+            btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")])
+
+            await message_obj.reply_text(
+                f"⚠️ **Access Denied!**\n\n"
+                f"You must **Request to Join** our update channel (Slot {slot}) to access this file.\n\n"
+                f"1️⃣ Click **Request to Join**\n"
+                f"2️⃣ Wait for approval (or auto-approve)\n"
+                f"3️⃣ Click **Try Again**",
+                reply_markup=InlineKeyboardMarkup(btn)
+            )
+            return False 
+
         except Exception as e:
-            # Step B: Technical Error (Restart/PeerInvalid/Connection)
-            try:
-                await client.get_chat(fsub_id) # 🔄 Refresh Peer Cache
-                member = await client.get_chat_member(fsub_id, user_id) # Retry
-            except UserNotParticipant:
-                return await send_join_link(client, message_obj, fsub_id)
-            except Exception as e2:
-                # Step C: Still failing? Block to be safe.
-                print(f"Technical Fsub Error: {e2}")
-                return await send_join_link(client, message_obj, fsub_id)
+            logger.error(f"Fsub Link Generation Error for {channel_id}: {e}")
+            continue
 
-        # Step D: Status Check
-        if member.status in [
-            enums.ChatMemberStatus.MEMBER, 
-            enums.ChatMemberStatus.ADMINISTRATOR, 
-            enums.ChatMemberStatus.OWNER,
-            enums.ChatMemberStatus.RESTRICTED 
-        ]:
-            return True # Access Granted
-        
-        # If Left/Kicked -> Send Link
-        return await send_join_link(client, message_obj, fsub_id)
-
-    except Exception as e:
-        print(f"Critical Fsub Logic Error: {e}")
-        return await send_join_link(client, message_obj, fsub_id)
-
-# --- Helper Function to Send Link ---
-async def send_join_link(client, message_obj, channel_id):
-    try:
-        # creates_join_request=True -> Admin Approval Mode
-        invite_link = await client.create_chat_invite_link(channel_id, creates_join_request=True)
-        
-        btn = [
-            [InlineKeyboardButton("📢 Request to Join Channel", url=invite_link.invite_link)],
-            [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={message_obj.command[1]}")]
-        ]
-        await message_obj.reply_text(
-            "⚠️ **Access Denied!**\n\n"
-            "You must **Request to Join** our update channel to access this file.\n"
-            "Click the button below and wait for approval.",
-            reply_markup=InlineKeyboardMarkup(btn)
-        )
-        return False
-    except Exception as e:
-        print(f"Link Gen Error: {e}")
-        return True # If link generation fails, let user pass
+    return True
 
 # --- 🎮 COMMAND HANDLERS ---
 
-# 1. SET FSUB COMMAND (UPDATED & FIXED)
-@Client.on_message(filters.command("set_fsub") & filters.group)
-async def set_fsub_command(client, message):
-    # 1. Admin Check
-    member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-        return await message.reply("❌ Sirf Admins ye command use kar sakte hain.")
-
-    # 2. Input Check
-    if len(message.command) < 2:
-        return await message.reply("⚠️ **Usage:** `/set_fsub -100xxxxxxx`\n(Channel ID daalein)")
-
-    try:
-        channel_id = int(message.command[1])
-    except:
-        return await message.reply("❌ Invalid ID! ID sirf numbers me honi chahiye (e.g. -100...).")
-
-    # 3. Channel Admin Check (Sabse Zaruri)
-    msg = await message.reply("🔎 Checking Channel...")
-    try:
-        chat = await client.get_chat(channel_id)
-        bot_member = await client.get_chat_member(channel_id, "me")
-        
-        if bot_member.status != enums.ChatMemberStatus.ADMINISTRATOR:
-            return await msg.edit(f"❌ **Error:** Main us Channel (`{chat.title}`) me Admin nahi hoon.\nPehle mujhe wahan Admin banayein.")
-            
-    except Exception as e:
-        return await msg.edit(f"❌ **Error:** Main us channel ko access nahi kar pa raha.\nCheck karein ki kya main wahan add hoon?\nError: `{e}`")
-
-    # 4. Save to DB (Slot '1')
-    try:
-        await db.update_fsub_channel(message.chat.id, "1", channel_id)
-        await msg.edit(f"✅ **Success!**\nForce Subscribe Channel set to: **{chat.title}**\nID: `{channel_id}`")
-    except Exception as e:
-        await msg.edit(f"❌ Database Error: {e}")
-
-# 2. REMOVE FSUB COMMAND (NEW)
-@Client.on_message(filters.command(["del_fsub", "remove_fsub"]) & filters.group)
-async def remove_fsub_manual(client, message):
-    # 1. Admin Check
-    member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-        return await message.reply("❌ Sirf Admins ye command use kar sakte hain.")
-
-    # 2. Remove from DB
-    try:
-        await db.remove_fsub_channel(message.chat.id, "1")
-        await message.reply("🗑️ **Success!**\nForce Subscribe Channel remove kar diya gaya hai.")
-    except Exception as e:
-        await message.reply(f"❌ Error: {e}")
-
-# 3. START COMMAND
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start_handler(client, message):
     # --- Private Chat Logic ---

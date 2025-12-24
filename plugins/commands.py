@@ -70,12 +70,15 @@ async def get_active_shorteners(chat_id):
     if info.SHORTLINK_URL_3 and info.SHORTLINK_API_3: default_shorteners['3'] = {'site': info.SHORTLINK_URL_3, 'api': info.SHORTLINK_API_3}
     return default_shorteners
 
-# --- 🛠️ GROUP OBSERVER ---
+# --- 🛠️ GROUP OBSERVER (UPDATED) ---
 @Client.on_message(filters.group, group=-1)
 async def auto_save_group_handler(client, message):
-    """Automatically saves group ID to database on any message."""
-    try: await db.add_group(message.chat.id)
-    except: pass
+    """Automatically saves group ID AND Title to database on any message."""
+    try: 
+        # ✅ UPDATED: Pass Title along with ID
+        await db.add_group(message.chat.id, message.chat.title)
+    except: 
+        pass
 
 # --- 🔐 VERIFICATION LOGIC ---
 
@@ -336,7 +339,8 @@ async def start_handler(client, message):
 
     # --- Group Chat Logic ---
     elif message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-        await db.add_group(message.chat.id)
+        # ✅ UPDATED: Pass Title along with ID
+        await db.add_group(message.chat.id, message.chat.title)
         if len(message.command) == 1:
             return await message.reply("✅ Bot is Alive & Settings Saved!")
 
@@ -425,7 +429,8 @@ async def connect_handler(client, message):
         user_id = message.from_user.id
         member = await client.get_chat_member(message.chat.id, user_id)
         if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]: return await message.reply("❌ **Admin Only.** You cannot use this.")
-        await db.add_group(message.chat.id)
+        # ✅ UPDATED: Pass Title along with ID
+        await db.add_group(message.chat.id, message.chat.title)
         await message.reply_text(f"✅ **Successfully Connected!**\nGroup ID: `{message.chat.id}` saved.")
     except Exception as e:
         await message.reply_text(f"❌ Error: {e}")

@@ -34,38 +34,42 @@ async def settings_command(client, message):
     user_id = message.from_user.id
     msg = await message.reply_text("<b>♻️ ᴄʜᴇᴄᴋɪɴɢ ʏᴏᴜʀ ᴀᴅᴍɪɴ ʀɪɢʜᴛs ɪɴ ᴀʟʟ ɢʀᴏᴜᴘs... ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...</b>")
     
-    user_groups = []
-    # Database se sabhi groups nikalo
+    # 1. Database se Connected Groups ki list nikalo (Set for fast lookup)
+    connected_ids = set()
     async for group in db.groups.find({}):
-        try:
-            chat_id = group['id']
-            # Title DB se lo, taaki connect ki zarurat na pade
-            title = group.get('title', f"Group {chat_id}")
-
-            # --- ADMIN CHECK LOGIC (ROBUST) ---
-            try:
-                # 1. Pehle direct check karo
-                member = await client.get_chat_member(chat_id, user_id)
-            except Exception:
-                # 2. Agar fail ho (Restart ke baad), to Chat ko Refresh karo
-                try:
-                    await client.get_chat(chat_id) # Cache Refresh
-                    member = await client.get_chat_member(chat_id, user_id) # Dobara Check
-                except Exception as e:
-                    # Agar ab bhi fail ho, to shayad bot group me nahi hai
-                    # print(f"Skipping {chat_id}: {e}")
-                    continue 
-
-            # 3. Status Check
-            if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-                user_groups.append((title, chat_id))
-        
-        except Exception as e: 
-            continue 
+        connected_ids.add(group['id'])
+    
+    user_groups = []
+    
+    try:
+        # 2. Telegram se poocho: "Main kin groups me hu?" (Dialogs)
+        # Ye sabse IMPORTANT step hai. Ye restart ke baad bhi kaam karega.
+        async for dialog in client.get_dialogs():
+            
+            # Sirf Groups/Supergroups check karo
+            if dialog.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+                
+                # Kya ye group humare Database me Connected hai?
+                if dialog.chat.id in connected_ids:
+                    chat_id = dialog.chat.id
+                    title = dialog.chat.title
+                    
+                    # 3. Check karo User Admin hai ya nahi
+                    try:
+                        # Dialog object se direct check karo (Fast & Reliable)
+                        member = await dialog.chat.get_member(user_id)
+                        if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
+                            user_groups.append((title, chat_id))
+                    except Exception as e:
+                        # Agar user group me nahi hai to skip karo
+                        pass
+    except Exception as e:
+        print(f"Error in Dialogs: {e}")
 
     await msg.delete()
+    
     if not user_groups:
-        return await message.reply_text("❌ **No Groups Found!**\nMake sure I am added to your group and you are an Admin there.")
+        return await message.reply_text("❌ **No Groups Found!**\n\nPossible Reasons:\n1. I am not in your group.\n2. You haven't typed `/connect` in the group.\n3. You are not an Admin.")
 
     buttons = []
     for title, chat_id in user_groups:
@@ -238,6 +242,10 @@ async def set_fsub_input(client, query):
         # Validate Bot Admin
         status_msg = await query.message.reply_text("🔎 Verifying Admin Status...")
         try:
+            # TRY REFRESH FIRST
+            try: await client.get_chat(channel_id)
+            except: pass
+            
             member = await client.get_chat_member(channel_id, (await client.get_me()).id)
             if member.status != enums.ChatMemberStatus.ADMINISTRATOR:
                 await status_msg.delete()

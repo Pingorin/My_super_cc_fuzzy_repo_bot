@@ -1,10 +1,11 @@
 import motor.motor_asyncio
 import time
-# ✅ CHANGED: Imported USER_DB_URI instead of DATABASE_URI
+# ✅ CHANGED: Imported USER_DB_URI for separate User/Group Database
 from info import USER_DB_URI, DATABASE_NAME
 
 class UserChatDB:
     def __init__(self, uri, database_name):
+        # Connects to the User Database Cluster
         self._client = motor.motor_asyncio.AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         self.users = self.db.users
@@ -17,12 +18,15 @@ class UserChatDB:
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ Add Group with Default Settings
-    async def add_group(self, id):
+    # ✅ MODIFIED: Accepts 'title' to save Group Name (Restart Proof Logic)
+    async def add_group(self, id, title):
         group = await self.groups.find_one({'id': int(id)})
+        
         if not group:
+            # If new group, save Default Settings + Title
             default_settings = {
                 'id': int(id),
+                'title': title, # ✅ Save Title
                 'earning_method': 'shortlink', 
                 'shortener_mode': 'dynamic',   
                 'shorteners': {},              
@@ -37,6 +41,9 @@ class UserChatDB:
                 'time_gap2': 300
             }
             await self.groups.insert_one(default_settings)
+        else:
+            # If group exists, update the Title (in case it changed)
+            await self.groups.update_one({'id': int(id)}, {'$set': {'title': title}})
 
     # --- ⚙️ GROUP SETTINGS HELPERS ---
     
@@ -65,11 +72,11 @@ class UserChatDB:
     
     async def update_fsub_channel(self, chat_id, slot, channel_id):
         """Saves a specific channel ID to a specific slot (1, 2, or 3)"""
-        
         try:
             group = await self.groups.find_one({'id': int(chat_id)})
             if group:
                 raw_data = group.get('fsub_channels')
+                # Auto-fix if data is corrupted
                 if isinstance(raw_data, list):
                     await self.groups.update_one(
                         {'id': int(chat_id)}, 
@@ -160,7 +167,7 @@ class UserChatDB:
         else:
             value = current_time 
 
-        # Auto-Fix Logic
+        # Auto-Fix Logic for Corrupt Data
         user = await self.users.find_one({'id': int(user_id)})
         if user:
             current_status = user.get('verify_status')
@@ -203,5 +210,5 @@ class UserChatDB:
         except:
             return False
 
-# ✅ CHANGED: Initialized with USER_DB_URI to connect to Second MongoDB
+# ✅ INITIALIZATION: Using USER_DB_URI for the second database
 db = UserChatDB(USER_DB_URI, DATABASE_NAME)

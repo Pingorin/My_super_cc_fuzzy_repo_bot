@@ -2,6 +2,7 @@ import os
 import logging
 import time
 import asyncio
+import datetime
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from database.users_chats_db import db
@@ -29,6 +30,17 @@ def get_size(size):
         size /= power
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
+
+def get_status():
+    """Returns greeting based on current time."""
+    now = datetime.datetime.now()
+    hour = now.hour
+    if 0 <= hour < 12:
+        return "Good Morning"
+    elif 12 <= hour < 18:
+        return "Good Afternoon"
+    else:
+        return "Good Evening"
 
 async def send_shortener_alert(client, chat_id, site_domain):
     """Sends an alert to admins if a shortener fails."""
@@ -327,11 +339,54 @@ async def start_handler(client, message):
             is_allowed = await check_fsub(client, message.from_user.id, message)
             if not is_allowed: return 
 
-    # --- Group Chat Logic ---
+    # --- Group Chat Logic (UPDATED) ---
     elif message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-        await db.add_group(message.chat.id)
+        status = get_status()
+        
+        # 1. Reply with Status Message
+        await message.reply_text(f"<b>🔥 Yes {status},\nHow can I help you?</b>")
+
+        # 2. Check if Group exists in Database
+        # Note: Ensure db.get_chat() is implemented in users_chats_db.py
+        if (str(message.chat.id)).startswith("-100") and not await db.get_chat(message.chat.id):
+            total = await client.get_chat_members_count(message.chat.id)
+            user = message.from_user.mention if message.from_user else "Unknown"
+            
+            # Generate Link if possible
+            try:
+                group_link = await message.chat.export_invite_link()
+            except:
+                group_link = "Link not available (Bot needs Admin Rights)"
+
+            # 3. Send Log to LOG_CHANNEL
+            if info.LOG_CHANNEL:
+                try:
+                    bot_username = (await client.get_me()).username
+                    msg_text = script.NEW_GROUP_TXT.format(
+                        f"https://t.me/{bot_username}", 
+                        message.chat.title, 
+                        message.chat.id, 
+                        message.chat.username or "No Username", 
+                        group_link, 
+                        total, 
+                        user
+                    )
+                    await client.send_message(info.LOG_CHANNEL, msg_text, disable_web_page_preview=True)
+                except Exception as e:
+                    logger.error(f"Log Error: {e}")
+            
+            # 4. Save Group to Database
+            # Note: Ensure db.add_chat() is implemented in users_chats_db.py
+            await db.add_chat(message.chat.id, message.chat.title)
+            await message.reply("✅ **Group Saved to Database!**")
+        
+        else:
+            # If group already exists, ensure it's saved (Legacy support)
+            await db.add_group(message.chat.id)
+
+        # Stop further processing if only /start command
         if len(message.command) == 1:
-            return await message.reply("✅ Bot is Alive & Settings Saved!")
+            return 
 
     # ✅ VERIFICATION RETURN LOGIC (verify_level_userid_chatid_linkid)
     if len(message.command) > 1 and message.command[1].startswith("verify_"):

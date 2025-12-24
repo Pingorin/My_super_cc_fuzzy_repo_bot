@@ -70,7 +70,7 @@ async def get_active_shorteners(chat_id):
     if info.SHORTLINK_URL_3 and info.SHORTLINK_API_3: default_shorteners['3'] = {'site': info.SHORTLINK_URL_3, 'api': info.SHORTLINK_API_3}
     return default_shorteners
 
-# --- 🛠️ GROUP OBSERVER (UPDATED) ---
+# --- 🛠️ GROUP OBSERVER (AUTO SAVE TITLE) ---
 @Client.on_message(filters.group, group=-1)
 async def auto_save_group_handler(client, message):
     """
@@ -78,8 +78,9 @@ async def auto_save_group_handler(client, message):
     This ensures the bot remembers the Group Name after restart.
     """
     try: 
-        # ✅ Save Title along with ID
-        await db.add_group(message.chat.id, message.chat.title)
+        # ✅ Save Title along with ID automatically
+        if message.chat and message.chat.title:
+            await db.add_group(message.chat.id, message.chat.title)
     except: 
         pass
 
@@ -397,7 +398,7 @@ async def connect_handler(client, message):
         member = await client.get_chat_member(message.chat.id, user_id)
         if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]: return await message.reply("❌ **Admin Only.** You cannot use this.")
         
-        # ✅ Save Title Here Too
+        # ✅ Save Title Here Too (Fix for Restart Issue)
         await db.add_group(message.chat.id, message.chat.title)
         
         await message.reply_text(f"✅ **Successfully Connected!**\nGroup: `{message.chat.title}`\nID: `{message.chat.id}` saved.")
@@ -425,5 +426,3 @@ async def stats_handler(client, message):
         await msg.edit(f"📊 **BOT STATISTICS**\n\n👤 **Users:** {users}\n👥 **Groups:** {groups}\n📂 **Files Indexed:** {files}")
     except Exception as e: 
         await message.reply(f"Error: {e}")
-
-#Update commands.py

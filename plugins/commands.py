@@ -328,6 +328,42 @@ async def check_fsub(client, user_id, message_obj):
 
 # --- 🎮 COMMAND HANDLERS ---
 
+# ✅ SETTINGS COMMAND (Added)
+@Client.on_message(filters.command('settings'))
+async def settings(client, message):
+    user_id = message.from_user.id if message.from_user else None
+    if not user_id: return
+
+    # --- PM LOGIC FOR SETTINGS (LIST GROUPS) ---
+    if message.chat.type == enums.ChatType.PRIVATE:
+        msg = await message.reply_text("<b>♻️ ᴄʜᴇᴄᴋɪɴɢ ʏᴏᴜʀ ᴀᴅᴍɪɴ ʀɪɢʜᴛs ɪɴ ᴀʟʟ ɢʀᴏᴜᴘs... ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...</b>")
+        
+        all_chats = await db.get_all_chats()
+        my_groups = []
+        
+        async for chat in all_chats:
+            try:
+                member = await client.get_chat_member(chat['id'], user_id)
+                if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
+                    my_groups.append(chat)
+            except Exception:
+                pass
+        
+        if not my_groups:
+            await msg.edit("<b>☹️ ʏᴏᴜ ᴀʀᴇ ɴᴏᴛ ᴀɴ ᴀᴅᴍɪɴ ɪɴ ᴀɴʏ ɢʀᴏᴜᴘ ᴡʜᴇʀᴇ ɪ ᴀᴍ ᴘʀᴇsᴇɴᴛ.</b>")
+            return
+            
+        btn = []
+        for group in my_groups:
+            btn.append([InlineKeyboardButton(f"{group['title']}", callback_data=f"open_settings#{group['id']}")])
+        btn.append([InlineKeyboardButton('ᴄʟᴏsᴇ', callback_data='close_data')])
+        
+        await msg.edit(
+            "<b>⚙️ sᴇʟᴇᴄᴛ ᴛʜᴇ ɢʀᴏᴜᴘ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ᴄᴏɴғɪɢᴜʀᴇ:</b>",
+            reply_markup=InlineKeyboardMarkup(btn)
+        )
+        return
+
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start_handler(client, message):
     # --- Private Chat Logic ---
@@ -347,7 +383,6 @@ async def start_handler(client, message):
         await message.reply_text(f"<b>🔥 Yes {status},\nHow can I help you?</b>")
 
         # 2. Check if Group exists in Database
-        # Note: Ensure db.get_chat() is implemented in users_chats_db.py
         if (str(message.chat.id)).startswith("-100") and not await db.get_chat(message.chat.id):
             total = await client.get_chat_members_count(message.chat.id)
             user = message.from_user.mention if message.from_user else "Unknown"
@@ -376,7 +411,6 @@ async def start_handler(client, message):
                     logger.error(f"Log Error: {e}")
             
             # 4. Save Group to Database
-            # Note: Ensure db.add_chat() is implemented in users_chats_db.py
             await db.add_chat(message.chat.id, message.chat.title)
             await message.reply("✅ **Group Saved to Database!**")
         

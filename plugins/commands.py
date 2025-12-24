@@ -250,10 +250,8 @@ async def check_fsub(client, user_id, message_obj):
     group_data = await db.get_group_settings(src_chat_id)
     if not group_data: return True
 
-    # ✅ FIXED: Correct Database Path (fsub_channels)
+    # Check Slot '1' by default
     fsub_channels = group_data.get('fsub_channels', {})
-    
-    # We check Slot '1' by default (as per set_fsub command)
     fsub_id = fsub_channels.get('1')
 
     if not fsub_id: return True 
@@ -267,7 +265,7 @@ async def check_fsub(client, user_id, message_obj):
             member = await client.get_chat_member(fsub_id, user_id)
         
         except UserNotParticipant:
-            # ✅ CONFIRMED: User is NOT in channel -> Block & Send Link
+            # User is NOT in channel -> Block & Send Link
             return await send_join_link(client, message_obj, fsub_id)
             
         except Exception as e:
@@ -321,38 +319,58 @@ async def send_join_link(client, message_obj, channel_id):
 
 # --- 🎮 COMMAND HANDLERS ---
 
-# 1. SET FSUB COMMAND (Admins Only)
+# 1. SET FSUB COMMAND (UPDATED & FIXED)
 @Client.on_message(filters.command("set_fsub") & filters.group)
 async def set_fsub_command(client, message):
-    # Permission Check
+    # 1. Admin Check
     member = await client.get_chat_member(message.chat.id, message.from_user.id)
     if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-        return await message.reply("❌ You must be an Admin to use this command.")
+        return await message.reply("❌ Sirf Admins ye command use kar sakte hain.")
 
+    # 2. Input Check
     if len(message.command) < 2:
-        return await message.reply("⚠️ **Usage:** `/set_fsub <channel_id>`\nExample: `/set_fsub -1001234567890`")
+        return await message.reply("⚠️ **Usage:** `/set_fsub -100xxxxxxx`\n(Channel ID daalein)")
 
     try:
         channel_id = int(message.command[1])
-    except ValueError:
-        return await message.reply("❌ Invalid Channel ID. It must be a number.")
+    except:
+        return await message.reply("❌ Invalid ID! ID sirf numbers me honi chahiye (e.g. -100...).")
 
-    # Bot Admin Check
+    # 3. Channel Admin Check (Sabse Zaruri)
+    msg = await message.reply("🔎 Checking Channel...")
     try:
         chat = await client.get_chat(channel_id)
         bot_member = await client.get_chat_member(channel_id, "me")
+        
         if bot_member.status != enums.ChatMemberStatus.ADMINISTRATOR:
-            return await message.reply(f"❌ **Error:** I am not an Admin in {chat.title}.\nPlease add me as Admin there first.")
+            return await msg.edit(f"❌ **Error:** Main us Channel (`{chat.title}`) me Admin nahi hoon.\nPehle mujhe wahan Admin banayein.")
+            
     except Exception as e:
-        return await message.reply(f"❌ **Error:** I cannot access that channel.\nMake sure I am added as an Admin.\nError: `{e}`")
+        return await msg.edit(f"❌ **Error:** Main us channel ko access nahi kar pa raha.\nCheck karein ki kya main wahan add hoon?\nError: `{e}`")
 
-    # Save to Database (Slot 1)
+    # 4. Save to DB (Slot '1')
     try:
         await db.update_fsub_channel(message.chat.id, "1", channel_id)
-        await message.reply(f"✅ **Success!**\nForce Subscribe Channel set to: **{chat.title}**")
+        await msg.edit(f"✅ **Success!**\nForce Subscribe Channel set to: **{chat.title}**\nID: `{channel_id}`")
     except Exception as e:
-        await message.reply(f"❌ Database Error: {e}")
+        await msg.edit(f"❌ Database Error: {e}")
 
+# 2. REMOVE FSUB COMMAND (NEW)
+@Client.on_message(filters.command(["del_fsub", "remove_fsub"]) & filters.group)
+async def remove_fsub_manual(client, message):
+    # 1. Admin Check
+    member = await client.get_chat_member(message.chat.id, message.from_user.id)
+    if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
+        return await message.reply("❌ Sirf Admins ye command use kar sakte hain.")
+
+    # 2. Remove from DB
+    try:
+        await db.remove_fsub_channel(message.chat.id, "1")
+        await message.reply("🗑️ **Success!**\nForce Subscribe Channel remove kar diya gaya hai.")
+    except Exception as e:
+        await message.reply(f"❌ Error: {e}")
+
+# 3. START COMMAND
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start_handler(client, message):
     # --- Private Chat Logic ---

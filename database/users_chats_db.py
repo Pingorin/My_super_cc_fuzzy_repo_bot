@@ -16,26 +16,42 @@ class UserChatDB:
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ Add Group with Default Settings
+    # ✅ Check if Group Exists (New)
+    async def get_chat(self, chat_id):
+        return await self.groups.find_one({'id': int(chat_id)})
+
+    # ✅ Create New Group Object (New Helper)
+    def new_group(self, chat_id, title):
+        return {
+            'id': int(chat_id),
+            'title': title,
+            'earning_method': 'shortlink',
+            'shortener_mode': 'dynamic',
+            'shorteners': {},
+            'fsub_channels': {},
+            'is_shortlink_active': True,
+            'time_dynamic': 86400,
+            'time_smart': 86400,
+            'time_together': 604800,
+            'time_together_3': 86400,
+            'time_gap1': 300,
+            'time_gap2': 300
+        }
+
+    # ✅ Add Group with Title (New Function for Start Handler)
+    async def add_chat(self, chat_id, title):
+        chat = await self.get_chat(chat_id)
+        if not chat:
+            chat = self.new_group(chat_id, title)
+            await self.groups.insert_one(chat)
+
+    # ✅ Add Group with Default Settings (Legacy Support)
     async def add_group(self, id):
         group = await self.groups.find_one({'id': int(id)})
         if not group:
-            default_settings = {
-                'id': int(id),
-                'earning_method': 'shortlink', # shortlink or fsub
-                'shortener_mode': 'dynamic',   # dynamic, together, smart
-                'shorteners': {},              # { '1': {'site': '...', 'api': '...'} }
-                'fsub_channels': {},           # ✅ Dict for Slots { '1': -100xx }
-                'is_shortlink_active': True,
-                # Time Defaults
-                'time_dynamic': 86400,
-                'time_smart': 86400,
-                'time_together': 604800,       # 7 Days
-                'time_together_3': 86400,      # 24 Hours
-                'time_gap1': 300,
-                'time_gap2': 300
-            }
-            await self.groups.insert_one(default_settings)
+            # Using 'Group' as default title if not provided
+            chat = self.new_group(id, "Group") 
+            await self.groups.insert_one(chat)
 
     # --- ⚙️ GROUP SETTINGS HELPERS ---
     

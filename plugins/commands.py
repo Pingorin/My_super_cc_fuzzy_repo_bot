@@ -70,15 +70,12 @@ async def get_active_shorteners(chat_id):
     if info.SHORTLINK_URL_3 and info.SHORTLINK_API_3: default_shorteners['3'] = {'site': info.SHORTLINK_URL_3, 'api': info.SHORTLINK_API_3}
     return default_shorteners
 
-# --- 🛠️ GROUP OBSERVER (UPDATED) ---
+# --- 🛠️ GROUP OBSERVER ---
 @Client.on_message(filters.group, group=-1)
 async def auto_save_group_handler(client, message):
-    """Automatically saves group ID AND Title to database on any message."""
-    try: 
-        # ✅ UPDATED: Pass Title along with ID
-        await db.add_group(message.chat.id, message.chat.title)
-    except: 
-        pass
+    """Automatically saves group ID to database on any message."""
+    try: await db.add_group(message.chat.id)
+    except: pass
 
 # --- 🔐 VERIFICATION LOGIC ---
 
@@ -243,15 +240,8 @@ async def check_fsub(client, user_id, message_obj):
     if len(message_obj.command) > 1:
         try:
             parts = message_obj.command[1].split("_")
-            # Case 1: Verify Links (verify_level_userid_chatid_linkid)
-            if len(parts) > 3 and parts[0] == "verify": 
-                src_chat_id = int(parts[3]) 
-            # Case 2: Get Links (get_linkid_chatid)
-            elif len(parts) > 2 and parts[0] == "get": 
-                src_chat_id = int(parts[2])
-            # Case 3: File Links (file_chatid_fileid) - ✅ FIX ADDED HERE
-            elif len(parts) > 2 and parts[0] == "file":
-                src_chat_id = int(parts[1])
+            if len(parts) > 3: src_chat_id = int(parts[3]) 
+            elif len(parts) > 2 and parts[0] == "get": src_chat_id = int(parts[2])
         except: pass
     
     if not src_chat_id: return True 
@@ -339,8 +329,7 @@ async def start_handler(client, message):
 
     # --- Group Chat Logic ---
     elif message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-        # ✅ UPDATED: Pass Title along with ID
-        await db.add_group(message.chat.id, message.chat.title)
+        await db.add_group(message.chat.id)
         if len(message.command) == 1:
             return await message.reply("✅ Bot is Alive & Settings Saved!")
 
@@ -396,23 +385,6 @@ async def start_handler(client, message):
         except Exception as e: await message.reply(f"❌ Error: {e}")
         return
 
-    # ✅ FILE RETRIEVAL LOGIC - DIRECT FILE ID (file_chatid_fileid) - FIX ADDED
-    if len(message.command) > 1 and message.command[1].startswith("file_"):
-        try:
-            data = message.command[1].split("_")
-            src_chat_id = data[1]
-            file_id = data[2]
-            
-            # Check Verification Status (Pass 0 as link_id since we have direct file_id)
-            is_all_clear = await check_verification(client, message.from_user.id, src_chat_id, 0, message)
-            if not is_all_clear: return 
-
-            # Send File
-            try: await client.send_cached_media(chat_id=message.from_user.id, file_id=file_id, caption=f"{script.CUSTOM_FOOTER}", parse_mode=enums.ParseMode.HTML)
-            except Exception as e: await message.reply(f"❌ Error sending file: `{e}`")
-        except Exception as e: await message.reply(f"❌ Error: {e}")
-        return
-
     # ✅ STANDARD START MESSAGE
     if message.chat.type == enums.ChatType.PRIVATE:
         text = f"Hello {message.from_user.mention} 👋,\nI am a Powerul Auto Filter Bot with Verification Support."
@@ -429,8 +401,7 @@ async def connect_handler(client, message):
         user_id = message.from_user.id
         member = await client.get_chat_member(message.chat.id, user_id)
         if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]: return await message.reply("❌ **Admin Only.** You cannot use this.")
-        # ✅ UPDATED: Pass Title along with ID
-        await db.add_group(message.chat.id, message.chat.title)
+        await db.add_group(message.chat.id)
         await message.reply_text(f"✅ **Successfully Connected!**\nGroup ID: `{message.chat.id}` saved.")
     except Exception as e:
         await message.reply_text(f"❌ Error: {e}")

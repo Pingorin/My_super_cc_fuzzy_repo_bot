@@ -28,23 +28,31 @@ async def check_shortener_link(domain, api):
     except: pass
     return False
 
-# --- /settings COMMAND ---
+# --- /settings COMMAND (UPDATED FIX) ---
 @Client.on_message(filters.command("settings") & filters.private)
 async def settings_command(client, message):
     user_id = message.from_user.id
-    msg = await message.reply_text("🔄 **Loading your groups...**")
+    
+    # ✅ UPDATE 1: Loading Msg changed to Aaj_elsa_bot_s style
+    msg = await message.reply_text("<b>♻️ ᴄʜᴇᴄᴋɪɴɢ ʏᴏᴜʀ ᴀᴅᴍɪɴ ʀɪɢʜᴛs ɪɴ ᴀʟʟ ɢʀᴏᴜᴘs... ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...</b>")
     
     user_groups = []
     async for group in db.groups.find({}):
         try:
             chat_id = group['id']
+            # ✅ UPDATE 2: Get Title from DB (Fixes Restart/Connect issue)
+            # Agar DB me title nahi hai to ID dikhayega
+            title = group.get('title', f"Group {chat_id}")
+
             try:
+                # Sirf Admin Check (No get_chat call)
                 member = await client.get_chat_member(chat_id, user_id)
-            except: continue 
-            if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-                chat_info = await client.get_chat(chat_id)
-                user_groups.append((chat_info.title, chat_id))
-        except: continue 
+                if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
+                    user_groups.append((title, chat_id))
+            except: 
+                continue 
+        except: 
+            continue 
 
     await msg.delete()
     if not user_groups:
@@ -66,8 +74,14 @@ async def main_settings_menu(client, query):
          InlineKeyboardButton("📢 Force Subscribe", callback_data=f"fsub_menu#{chat_id}")],
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
-    try: title = (await client.get_chat(chat_id)).title
-    except: title = "Unknown"
+    # Try getting title from DB first to avoid API call
+    try: 
+        group_data = await db.get_group_settings(chat_id)
+        title = group_data.get('title', "Unknown Group")
+    except: 
+        try: title = (await client.get_chat(chat_id)).title
+        except: title = "Unknown"
+
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================

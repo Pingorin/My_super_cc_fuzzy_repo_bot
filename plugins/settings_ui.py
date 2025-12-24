@@ -28,30 +28,39 @@ async def check_shortener_link(domain, api):
     except: pass
     return False
 
-# --- /settings COMMAND (UPDATED FIX) ---
+# --- /settings COMMAND ---
 @Client.on_message(filters.command("settings") & filters.private)
 async def settings_command(client, message):
     user_id = message.from_user.id
-    
-    # ✅ UPDATE 1: Loading Msg changed to Aaj_elsa_bot_s style
     msg = await message.reply_text("<b>♻️ ᴄʜᴇᴄᴋɪɴɢ ʏᴏᴜʀ ᴀᴅᴍɪɴ ʀɪɢʜᴛs ɪɴ ᴀʟʟ ɢʀᴏᴜᴘs... ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...</b>")
     
     user_groups = []
+    # Database se sabhi groups nikalo
     async for group in db.groups.find({}):
         try:
             chat_id = group['id']
-            # ✅ UPDATE 2: Get Title from DB (Fixes Restart/Connect issue)
-            # Agar DB me title nahi hai to ID dikhayega
+            # Title DB se lo, taaki connect ki zarurat na pade
             title = group.get('title', f"Group {chat_id}")
 
+            # --- ADMIN CHECK LOGIC (ROBUST) ---
             try:
-                # Sirf Admin Check (No get_chat call)
+                # 1. Pehle direct check karo
                 member = await client.get_chat_member(chat_id, user_id)
-                if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-                    user_groups.append((title, chat_id))
-            except: 
-                continue 
-        except: 
+            except Exception:
+                # 2. Agar fail ho (Restart ke baad), to Chat ko Refresh karo
+                try:
+                    await client.get_chat(chat_id) # Cache Refresh
+                    member = await client.get_chat_member(chat_id, user_id) # Dobara Check
+                except Exception as e:
+                    # Agar ab bhi fail ho, to shayad bot group me nahi hai
+                    # print(f"Skipping {chat_id}: {e}")
+                    continue 
+
+            # 3. Status Check
+            if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
+                user_groups.append((title, chat_id))
+        
+        except Exception as e: 
             continue 
 
     await msg.delete()
@@ -74,14 +83,15 @@ async def main_settings_menu(client, query):
          InlineKeyboardButton("📢 Force Subscribe", callback_data=f"fsub_menu#{chat_id}")],
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
-    # Try getting title from DB first to avoid API call
     try: 
+        # Title DB se lene ki koshish, warna refresh
         group_data = await db.get_group_settings(chat_id)
-        title = group_data.get('title', "Unknown Group")
-    except: 
-        try: title = (await client.get_chat(chat_id)).title
-        except: title = "Unknown"
-
+        if group_data and group_data.get('title'):
+             title = group_data.get('title')
+        else:
+             title = (await client.get_chat(chat_id)).title
+    except: title = "Unknown Group"
+    
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
@@ -487,7 +497,7 @@ async def disable_menu(client, query):
     except: count = 0
     fsub_list = group_data.get('fsub_channels', {})
     req_mem = count >= 100
-    req_fsub = bool(fsub_list.get('1') or fsub_list.get('2'))
+    req_fsub = bool(fsub_list.get('1') or fsub_list.get('2') or fsub_list.get('3') or fsub_list.get('4'))
 
     text = (
         f"🚫 **Disable Shortlink Mode**\n\n"

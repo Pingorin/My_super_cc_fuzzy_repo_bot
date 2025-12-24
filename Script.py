@@ -5,3 +5,15 @@ class script(object):
 <b>⚡ Powered by @VPFILS</b>
 <b>✨ Join for More: @YourChannel</b>
     """
+    
+    NEW_GROUP_TXT = """<b>🆕 New Group Added</b>
+
+<b>Bot:</b> {}
+<b>Title:</b> {}
+<b>ID:</b> <code>{}</code>
+<b>Username:</b> @{}
+<b>Link:</b> {}
+<b>Members:</b> {}
+<b>Added By:</b> {}
+"""
+    

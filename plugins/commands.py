@@ -10,7 +10,6 @@ import info
 from info import ADMINS, IS_VERIFY
 from utils import temp, get_shortlink 
 from Script import script 
-from utils import get_fsub_status # ✅ CORRECT IMPORT
 
 # Configure Logging
 logger = logging.getLogger(__name__)
@@ -76,12 +75,12 @@ async def get_active_shorteners(chat_id):
 async def auto_save_group_handler(client, message):
     """
     Automatically saves group ID and TITLE to database on any message.
-    Uses 'add_chat' with upsert=True logic.
+    This ensures the bot remembers the Group Name after restart.
     """
     try: 
+        # ✅ Save Title along with ID automatically
         if message.chat and message.chat.title:
-            # ✅ Updated to use add_chat (as per DB update)
-            await db.add_chat(message.chat.id, message.chat.title)
+            await db.add_group(message.chat.id, message.chat.title)
     except: 
         pass
 
@@ -240,13 +239,9 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(f"⚠️ **Alert:** Shortener {site} is down. Skipping Level {level}... ⏩")
         return "SKIP"
 
-# --- 🚫 ADVANCED FSUB CHECK (WITH REQUEST BUTTON) ---
+# --- 🚫 FSUB CHECK (FORCE REQUEST JOIN) ---
 
 async def check_fsub(client, user_id, message_obj):
-    """
-    Checks if user is a member OR has requested to join (Pending).
-    Uses 'creates_join_request=True' to allow admin-approval flow.
-    """
     src_chat_id = None
     # Parse source chat ID from start command
     if len(message_obj.command) > 1:
@@ -261,6 +256,7 @@ async def check_fsub(client, user_id, message_obj):
     group_settings = await db.get_group_settings(src_chat_id)
     if not group_settings: return True
     
+    # 🛠️ FIX: PREVENT LIST ERROR (DB COMPATIBILITY)
     fsub_channels = group_settings.get('fsub_channels')
     if not fsub_channels or not isinstance(fsub_channels, dict): 
         return True 
@@ -268,34 +264,38 @@ async def check_fsub(client, user_id, message_obj):
     for slot, channel_id in fsub_channels.items():
         try:
             channel_id = int(channel_id)
-            
-            # ✅ Step 1: Use Helper to Check Member OR Pending Request
-            is_allowed = await get_fsub_status(client, user_id, channel_id)
-            
-            if is_allowed:
-                continue # User is good, check next slot
-            
-            # ❌ Step 2: User Access Denied -> Generate "Request to Join" Link
-            try:
-                # 'creates_join_request=True' generates a link that adds user to Pending List
-                invite = await client.create_chat_invite_link(channel_id, creates_join_request=True)
-                invite_link = invite.invite_link
-            except Exception as e:
-                # Fallback if bot is not admin or error
-                print(f"FSub Link Error: {e}")
-                invite_link = "https://t.me/YourChannel" # Replace with your fallback
+        except: continue
+        
+        # 1. Check if user is already a member
+        try:
+            member = await client.get_chat_member(channel_id, user_id)
+            if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
+                continue 
+        except: pass 
 
-            original_param = message_obj.command[1] if len(message_obj.command) > 1 else "start"
+        # 2. Check if user has already sent a Join Request (Pending)
+        if await db.is_user_pending(user_id, channel_id):
+            continue 
+
+        # 3. Create JOIN REQUEST Link and Block Access
+        try:
+            # 🛠️ FIX: PRE-FETCH CHAT TO PREVENT 'PEER_ID_INVALID'
+            # Telegram API requires us to "know" the chat before creating a link
+            try: await client.get_chat(channel_id)
+            except: pass 
+
+            # creates_join_request=True forces the user to Request Join instead of instant join
+            link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=True)
+            link = link_obj.invite_link
             
-            btn = [
-                [InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=invite_link)],
-                [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")]
-            ]
+            btn = [[InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=link)]]
+            original_param = message_obj.command[1] if len(message_obj.command) > 1 else "start"
+            btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")])
 
             await message_obj.reply_text(
                 f"⚠️ **Access Denied!**\n\n"
                 f"You must **Request to Join** our update channel (Slot {slot}) to access this file.\n\n"
-                f"1️⃣ Click **Request to Join Channel**\n"
+                f"1️⃣ Click **Request to Join**\n"
                 f"2️⃣ Wait for approval (or auto-approve)\n"
                 f"3️⃣ Click **Try Again**",
                 reply_markup=InlineKeyboardMarkup(btn)
@@ -303,68 +303,13 @@ async def check_fsub(client, user_id, message_obj):
             return False 
 
         except Exception as e:
-            # Skip invalid channels to prevent loop crash
-            print(f"FSub Slot Check Error: {e}")
+            # Avoid printing error to logs repeatedly to save space
             pass
+            continue
 
     return True
 
 # --- 🎮 COMMAND HANDLERS ---
-
-# ✅ UPDATED: PERSISTENT SETTINGS COMMAND (WITH CACHE RELOAD FIX)
-@Client.on_message(filters.command('settings'))
-async def settings(client, message):
-    user_id = message.from_user.id if message.from_user else None
-    if not user_id: return
-
-    # --- PM LOGIC ---
-    if message.chat.type == enums.ChatType.PRIVATE:
-        msg = await message.reply_text("<b>♻️ ᴄʜᴇᴄᴋɪɴɢ ʏᴏᴜʀ ᴀᴅᴍɪɴ ʀɪɢʜᴛs ɪɴ ᴀʟʟ ɢʀᴏᴜᴘs... ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...</b>")
-        
-        # ✅ THE MAGIC FIX: FORCE REFRESH SESSION CACHE
-        # This loop fetches the list of groups the bot is in from Telegram Server.
-        # This restores the 'Access Hash' after a restart on Render.
-        try:
-            async for dialog in client.get_dialogs():
-                pass 
-        except Exception as e:
-            print(f"Cache Refresh Error: {e}")
-            pass
-
-        all_chats = await db.get_all_chats()
-        my_groups = []
-        
-        async for chat in all_chats:
-            try:
-                # 1. Force ID to Integer
-                chat_id = int(chat['id'])
-                
-                # 2. Check Admin Rights (Live Check)
-                # Since we refreshed cache above, this will now succeed!
-                member = await client.get_chat_member(chat_id, user_id)
-                
-                if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-                    # 3. Use Title from DB (No fallback needed if DB is correct, but safe)
-                    chat['title'] = chat.get('title', 'Unknown Group')
-                    my_groups.append(chat)
-            except Exception:
-                # 4. Silent Fail (Pass)
-                pass
-        
-        if not my_groups:
-            await msg.edit("<b>☹️ ʏᴏᴜ ᴀʀᴇ ɴᴏᴛ ᴀɴ ᴀᴅᴍɪɴ ɪɴ ᴀɴʏ ɢʀᴏᴜᴘ ᴡʜᴇʀᴇ ɪ ᴀᴍ ᴘʀᴇsᴇɴᴛ.</b>")
-            return
-            
-        btn = []
-        for group in my_groups:
-            btn.append([InlineKeyboardButton(f"{group['title']}", callback_data=f"open_settings#{group['id']}")])
-        btn.append([InlineKeyboardButton('ᴄʟᴏsᴇ', callback_data='close_data')])
-        
-        await msg.edit(
-            "<b>⚙️ sᴇʟᴇᴄᴛ ᴛʜᴇ ɢʀᴏᴜᴘ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ᴄᴏɴғɪɢᴜʀᴇ:</b>",
-            reply_markup=InlineKeyboardMarkup(btn)
-        )
-        return
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start_handler(client, message):
@@ -379,9 +324,8 @@ async def start_handler(client, message):
 
     # --- Group Chat Logic ---
     elif message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-        # ✅ Save Title (Persistence Logic)
-        await db.add_chat(message.chat.id, message.chat.title)
-        
+        # ✅ Save Title here as well
+        await db.add_group(message.chat.id, message.chat.title)
         if len(message.command) == 1:
             return await message.reply("✅ Bot is Alive & Settings Saved!")
 
@@ -454,8 +398,8 @@ async def connect_handler(client, message):
         member = await client.get_chat_member(message.chat.id, user_id)
         if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]: return await message.reply("❌ **Admin Only.** You cannot use this.")
         
-        # ✅ Save Title (Persistence Logic)
-        await db.add_chat(message.chat.id, message.chat.title)
+        # ✅ Save Title Here Too (Fix for Restart Issue)
+        await db.add_group(message.chat.id, message.chat.title)
         
         await message.reply_text(f"✅ **Successfully Connected!**\nGroup: `{message.chat.title}`\nID: `{message.chat.id}` saved.")
     except Exception as e:

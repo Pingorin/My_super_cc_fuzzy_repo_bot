@@ -28,24 +28,18 @@ async def get_shortlink(site, api, link):
     
     try:
         async with aiohttp.ClientSession() as session:
-            # ✅ UPDATED: Timeout set to 20 Seconds
             async with session.get(url, params=params, timeout=20) as response:
                 if response.status == 200:
                     data = await response.json()
-                    
-                    # Standard API Response Check
                     if "shortenedUrl" in data:
                         return data["shortenedUrl"]
                     elif "status" in data and data["status"] == "success" and "shortenedUrl" in data:
                         return data["shortenedUrl"]
-                
-                # Agar valid response nahi mila
                 logger.error(f"Shortener Failed ({site}): Status {response.status}")
                 return None 
-
     except Exception as e:
         logger.error(f"Shortlink Exception ({site}): {e}")
-        return None # Return None taaki Commands.py isko Skip karke next try kare
+        return None 
 
 # --- ADVANCED FSUB CHECK (Database + Live) ---
 async def get_fsub_status(client, user_id, channel_id):
@@ -57,23 +51,17 @@ async def get_fsub_status(client, user_id, channel_id):
     # 1. LIVE CHECK: Telegram API se pucho
     try:
         member = await client.get_chat_member(channel_id, user_id)
-        
-        # Agar user Member, Admin ya Owner hai to OK
         if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
             return True
-            
     except UserNotParticipant:
-        # User channel mein nahi hai, ab DB check karenge
-        pass
+        pass # User channel mein nahi hai
     except (PeerIdInvalid, ChannelInvalid):
-        # Bot restart hua hai ya channel access nahi hai
-        # Aise case mein hum DB check par rely karenge
+        # Bot restart hua hai ya channel access nahi hai -> DB Check karo
         logger.warning(f"⚠️ Peer Error for {channel_id} during FSub Check. Falling back to DB.")
     except Exception as e:
         logger.error(f"❌ FSub Check Error: {e}")
 
     # 2. DATABASE CHECK: Kya user ne Request bheji hai?
-    # (Agar "Request to Join" button dabaya tha aur bot ne restart ke baad cache kho diya)
     try:
         if await db.is_join_request_pending(user_id, channel_id):
             return True
@@ -104,8 +92,6 @@ def btn_parser(files, chat_id, query=None):
         btn_text = f"📂 {display_name} [{f_size}]"
         
         if link_id is not None:
-            # Format: get_LINKID_CHATID
-            # Link ID ke sath Chat ID bhejna zaroori hai group settings fetch karne ke liye
             url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             

@@ -1,7 +1,7 @@
 import asyncio
 import aiohttp
 from pyrogram import Client, filters, enums
-from pyrogram.errors import PeerIdInvalid, ChannelInvalid, FloodWait, UserNotParticipant
+from pyrogram.errors import PeerIdInvalid, ChannelInvalid, FloodWait
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from database.users_chats_db import db
 from utils import temp
@@ -29,7 +29,7 @@ async def check_shortener_link(domain, api):
     except: pass
     return False
 
-# --- /settings COMMAND (SMART & CRASH PROOF) ---
+# --- /settings COMMAND (RESTART & CACHE PROOF) ---
 @Client.on_message(filters.command("settings") & filters.private)
 async def settings_command(client, message):
     user_id = message.from_user.id
@@ -37,44 +37,33 @@ async def settings_command(client, message):
     
     user_groups = []
     
-    # 1. Fetch all groups from Database
-    # We iterate over the database cursor directly
+    # 1. Database se groups fetch karein
     async for group in db.groups.find({}):
         chat_id = group['id']
-        title = group.get('title', f"Group {chat_id}") 
+        # DB se saved title lein (fallback to ID if missing)
+        saved_title = group.get('title', f"Group {chat_id}") 
         
         try:
-            # 2. Smart Verification Logic
-            # Try to fetch member status to verify Admin/Owner
+            # 🟢 STEP 1: Admin Check (Live)
+            # Hum try karenge check karne ka ki user abhi bhi admin hai ya nahi
             member = await client.get_chat_member(chat_id, user_id)
-            
-            # 3. Strict Admin Check
             if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-                user_groups.append((title, chat_id))
+                user_groups.append((saved_title, chat_id))
         
-        except (PeerIdInvalid, ChannelInvalid):
-            # 4. Crash Prevention
-            # If bot restarted and doesn't recognize the peer, skip it to avoid crash
-            # Instead of stopping the whole command, we just move to the next group
-            continue
-        except UserNotParticipant:
-            # User is not in the group anymore, skip
-            continue
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
         except Exception as e:
-            print(f"Error loading settings for {chat_id}: {e}")
-            continue
+            # 🔴 STEP 2: Fallback (Agar Restart ki wajah se Error aaye)
+            # Agar 'PeerIdInvalid' ya connection error aaye, to hum DB wale data par bharosa karenge.
+            # Isse group list me show ho jayega bhale hi bot 'sula' hua ho.
+            # Hum "(Cached)" likh denge taaki pata chale ye live verify nahi hua hai.
+            user_groups.append((f"{saved_title} (Cached)", chat_id))
 
     await msg.delete()
     
     if not user_groups:
         return await message.reply_text(
             "❌ **No Connected Groups Found!**\n\n"
-            "**Possible Reasons:**\n"
-            "1. You are not an Admin in any registered group.\n"
-            "2. Bot restarted and needs a refresh (Send /connect in group).\n"
-            "3. I am not added to your groups."
+            "Bot kisi bhi group me connect nahi hai ya aap admin nahi hain.\n"
+            "Ek baar group me **/connect** likhein."
         )
 
     buttons = []
@@ -88,16 +77,13 @@ async def settings_command(client, message):
 async def main_settings_menu(client, query):
     chat_id = int(query.data.split("#")[1])
     
-    # Smart Title Fetching
-    title = "Unknown Group"
+    # Title Handle: Pehle Live try karein, fail ho to DB se lein
     try: 
         chat = await client.get_chat(chat_id)
         title = chat.title
     except: 
-        # Fallback to Database Title if live check fails
         group_data = await db.get_group_settings(chat_id)
-        if group_data:
-            title = group_data.get('title', "Unknown Group")
+        title = group_data.get('title', "Unknown Group")
 
     buttons = [
         [InlineKeyboardButton("💰 Earning Method", callback_data=f"set_earn#{chat_id}"),
@@ -118,8 +104,11 @@ async def fsub_configure_menu(client, query):
         group_data = await db.get_group_settings(chat_id)
         
         if not group_data:
-            # Fallback creation if missing
-            await db.add_group(chat_id, "Unknown Group")
+            # Fallback creation
+            try: chat = await client.get_chat(chat_id)
+            except: chat = None
+            title = chat.title if chat else "Unknown"
+            await db.add_group(chat_id, title)
             group_data = await db.get_group_settings(chat_id)
             
         raw_fsub = group_data.get('fsub_channels')
@@ -127,29 +116,25 @@ async def fsub_configure_menu(client, query):
         elif isinstance(raw_fsub, dict): fsub_channels = raw_fsub
         else: fsub_channels = {}
 
-        # Helper to safely get Title
-        async def get_safe_title(cid):
-            try:
-                chat = await client.get_chat(cid)
-                return f"📍{chat.title}", True
-            except:
-                return f"`{cid}`", False
-
         # SLOT 1
         s1_id = fsub_channels.get('1')
         s1_txt = "❌ Slot 1: Not Set"
         if s1_id:
-            title, live = await get_safe_title(s1_id)
-            status = "(Saved)" if not live else ""
-            s1_txt = f"✅ Slot 1: {title} {status}"
+            try:
+                chat = await client.get_chat(s1_id)
+                s1_txt = f"✅ Slot 1: 📍{chat.title} ({s1_id})"
+            except:
+                s1_txt = f"✅ Slot 1: `{s1_id}` (Saved)"
 
         # SLOT 2
         s2_id = fsub_channels.get('2')
         s2_txt = "❌ Slot 2: Not Set"
         if s2_id:
-            title, live = await get_safe_title(s2_id)
-            status = "(Saved)" if not live else ""
-            s2_txt = f"✅ Slot 2: {title} {status}"
+            try:
+                chat = await client.get_chat(s2_id)
+                s2_txt = f"✅ Slot 2: 📍{chat.title} ({s2_id})"
+            except:
+                s2_txt = f"✅ Slot 2: `{s2_id}` (Saved)"
 
         text = (
             f"⚙️ **Configure Request F-Sub Channels for:** `{chat_id}`\n\n"
@@ -175,7 +160,6 @@ async def fsub_configure_menu(client, query):
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
     except Exception as e:
-        print(f"FSub Menu Error: {e}")
         await query.answer("❌ Error: DB sync issue. Try again.", show_alert=True)
 
 # 2. SET SLOT INPUT

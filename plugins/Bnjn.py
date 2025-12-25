@@ -45,12 +45,16 @@ async def settings_command(client, message):
         
         try:
             # 🟢 STEP 1: Admin Check (Live)
+            # Hum try karenge check karne ka ki user abhi bhi admin hai ya nahi
             member = await client.get_chat_member(chat_id, user_id)
             if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
                 user_groups.append((saved_title, chat_id))
         
         except Exception as e:
-            # 🔴 STEP 2: Fallback
+            # 🔴 STEP 2: Fallback (Agar Restart ki wajah se Error aaye)
+            # Agar 'PeerIdInvalid' ya connection error aaye, to hum DB wale data par bharosa karenge.
+            # Isse group list me show ho jayega bhale hi bot 'sula' hua ho.
+            # Hum "(Cached)" likh denge taaki pata chale ye live verify nahi hua hai.
             user_groups.append((f"{saved_title} (Cached)", chat_id))
 
     await msg.delete()
@@ -73,6 +77,7 @@ async def settings_command(client, message):
 async def main_settings_menu(client, query):
     chat_id = int(query.data.split("#")[1])
     
+    # Title Handle: Pehle Live try karein, fail ho to DB se lein
     try: 
         chat = await client.get_chat(chat_id)
         title = chat.title
@@ -99,6 +104,7 @@ async def fsub_configure_menu(client, query):
         group_data = await db.get_group_settings(chat_id)
         
         if not group_data:
+            # Fallback creation
             try: chat = await client.get_chat(chat_id)
             except: chat = None
             title = chat.title if chat else "Unknown"
@@ -156,22 +162,37 @@ async def fsub_configure_menu(client, query):
     except Exception as e:
         await query.answer("❌ Error: DB sync issue. Try again.", show_alert=True)
 
-# 2. SET SLOT INPUT (MODIFIED: LISTEN DISABLED)
+# 2. SET SLOT INPUT
 @Client.on_callback_query(filters.regex(r"^set_fsub#"))
 async def set_fsub_input(client, query):
     _, chat_id, slot = query.data.split("#")
     chat_id = int(chat_id)
-    cancel_btn = [[InlineKeyboardButton("🔙 Back", callback_data=f"fsub_menu#{chat_id}")]]
+    cancel_btn = [[InlineKeyboardButton("❌ Cancel", callback_data=f"fsub_menu#{chat_id}")]]
     
-    # --- PYROMOD REMOVAL NOTICE ---
-    # As Pyromod is removed, client.listen() will not work.
     await query.message.edit_text(
-        f"⚠️ **Feature Disabled**\n\n"
-        f"Since Pyromod is removed, you cannot set IDs via chat input.\n"
-        f"Please update the database manually or reinstall Pyromod.",
+        f"👇 **Set F-Sub Channel for Slot {slot}**\n\nPlease send **Channel ID** (e.g. `-100xxxx`).\n⚠️ Bot must be Admin there.",
         reply_markup=InlineKeyboardMarkup(cancel_btn)
     )
-    return
+    
+    try:
+        input_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if not input_msg.text: return await query.message.edit_text("❌ Text only.", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        
+        try:
+            channel_id = int(input_msg.text.strip())
+            if not str(channel_id).startswith("-100"): channel_id = int("-100" + str(channel_id).replace("-", ""))
+        except: return await query.message.edit_text("❌ Invalid ID.", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        
+        # Save to DB
+        await db.update_fsub_channel(chat_id, slot, channel_id)
+        
+        await query.message.edit_text(f"✅ **Saved!**\nID: `{channel_id}`", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        await asyncio.sleep(1)
+        query.data = f"fsub_menu#{chat_id}"
+        await fsub_configure_menu(client, query)
+
+    except asyncio.TimeoutError:
+        await query.message.edit_text("❌ Timeout!", reply_markup=InlineKeyboardMarkup(cancel_btn))
 
 # 4. REMOVE SINGLE SLOT
 @Client.on_callback_query(filters.regex(r"^rem_fsub_one#"))
@@ -303,20 +324,29 @@ async def configure_slots(client, query):
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"set_smode#{chat_id}")])
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-# MODIFIED: LISTEN DISABLED
 @Client.on_callback_query(filters.regex(r"^add_slot#") | filters.regex(r"^edit_slot#"))
 async def input_slot_req(client, query):
     _, chat_id, slot = query.data.split("#")
     chat_id = int(chat_id)
-    cancel_btn = [[InlineKeyboardButton("🔙 Back", callback_data=f"set_slots#{chat_id}")]]
+    cancel_btn = [[InlineKeyboardButton("❌ Cancel", callback_data=f"set_slots#{chat_id}")]]
     
-    await query.message.edit_text(
-        f"⚠️ **Feature Disabled**\n\n"
-        f"Since Pyromod is removed, you cannot set URL/API via chat input.\n"
-        f"Please update the database manually or reinstall Pyromod.",
-        reply_markup=InlineKeyboardMarkup(cancel_btn)
-    )
-    return
+    await query.message.edit_text(f"Send **Domain** for Slot {slot}.\n(e.g. shareus.in)", reply_markup=InlineKeyboardMarkup(cancel_btn))
+    try:
+        d_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        domain = d_msg.text.strip()
+        await d_msg.delete()
+        
+        await query.message.edit_text(f"✅ Domain set.\nNow send **API Key** for Slot {slot}.", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        a_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        api = a_msg.text.strip()
+        await a_msg.delete()
+        
+        await db.add_shortener(chat_id, slot, domain, api)
+        await query.message.edit_text("✅ Saved!")
+        await asyncio.sleep(1)
+        query.data = f"set_slots#{chat_id}"
+        await configure_slots(client, query)
+    except: return
 
 @Client.on_callback_query(filters.regex(r"^del_slot#"))
 async def delete_slot(client, query):

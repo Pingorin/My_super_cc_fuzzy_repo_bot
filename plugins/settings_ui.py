@@ -88,7 +88,7 @@ async def main_settings_menu(client, query):
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🔒 FSUB SETTINGS (2 SLOTS) 
+# 🔒 FSUB SETTINGS (4 SLOTS) 
 # ==============================================================================
 
 # 1. FSUB CONFIGURE MENU
@@ -110,51 +110,46 @@ async def fsub_configure_menu(client, query):
         elif isinstance(raw_fsub, dict): fsub_channels = raw_fsub
         else: fsub_channels = {}
 
-        # SLOT 1
-        s1_id = fsub_channels.get('1')
-        s1_txt = "❌ Slot 1: Not Set"
-        if s1_id:
-            try:
-                chat = await client.get_chat(s1_id)
-                s1_txt = f"✅ Slot 1: 📍{chat.title} ({s1_id})"
-            except:
-                s1_txt = f"✅ Slot 1: `{s1_id}` (Saved)"
+        # Slots Read (1, 2, 3, 4)
+        s1 = fsub_channels.get('1')
+        s2 = fsub_channels.get('2')
+        s3 = fsub_channels.get('3')
+        s4 = fsub_channels.get('4')
 
-        # SLOT 2
-        s2_id = fsub_channels.get('2')
-        s2_txt = "❌ Slot 2: Not Set"
-        if s2_id:
-            try:
-                chat = await client.get_chat(s2_id)
-                s2_txt = f"✅ Slot 2: 📍{chat.title} ({s2_id})"
-            except:
-                s2_txt = f"✅ Slot 2: `{s2_id}` (Saved)"
+        # Status Texts
+        txt = f"⚙️ **F-Sub Settings for:** `{chat_id}`\n\n"
+        txt += f"1️⃣ Slot 1 (Req): `{s1 if s1 else 'Not Set'}`\n"
+        txt += f"2️⃣ Slot 2 (Req): `{s2 if s2 else 'Not Set'}`\n"
+        txt += f"3️⃣ Slot 3 (Dir): `{s3 if s3 else 'Not Set'}`\n"
+        txt += f"4️⃣ Slot 4 (Post): `{s4 if s4 else 'Not Set'}`\n"
 
-        text = (
-            f"⚙️ **Configure Request F-Sub Channels for:** `{chat_id}`\n\n"
-            f"{s1_txt}\n{s2_txt}\n\n"
-            f"👇 **Select an option below:**"
-        )
-        
         buttons = []
-        if s1_id:
-            buttons.append([InlineKeyboardButton("✏️ Edit Slot 1", callback_data=f"set_fsub#{chat_id}#1"), InlineKeyboardButton("🗑️ Clear Slot 1", callback_data=f"rem_fsub_one#{chat_id}#1")])
-        else:
-            buttons.append([InlineKeyboardButton("➕ Set Slot 1", callback_data=f"set_fsub#{chat_id}#1")])
+        
+        # Row 1: Slot 1
+        if s1: buttons.append([InlineKeyboardButton("✏️ Edit Slot 1", callback_data=f"set_fsub#{chat_id}#1"), InlineKeyboardButton("🗑️ Clear 1", callback_data=f"rem_fsub_one#{chat_id}#1")])
+        else: buttons.append([InlineKeyboardButton("➕ Set Slot 1", callback_data=f"set_fsub#{chat_id}#1")])
 
-        if s2_id:
-            buttons.append([InlineKeyboardButton("✏️ Edit Slot 2", callback_data=f"set_fsub#{chat_id}#2"), InlineKeyboardButton("🗑️ Clear Slot 2", callback_data=f"rem_fsub_one#{chat_id}#2")])
-        else:
-            buttons.append([InlineKeyboardButton("➕ Set Slot 2", callback_data=f"set_fsub#{chat_id}#2")])
+        # Row 2: Slot 2
+        if s2: buttons.append([InlineKeyboardButton("✏️ Edit Slot 2", callback_data=f"set_fsub#{chat_id}#2"), InlineKeyboardButton("🗑️ Clear 2", callback_data=f"rem_fsub_one#{chat_id}#2")])
+        else: buttons.append([InlineKeyboardButton("➕ Set Slot 2", callback_data=f"set_fsub#{chat_id}#2")])
 
-        if s1_id or s2_id:
-            buttons.append([InlineKeyboardButton("🗑️ Remove all", callback_data=f"rem_fsub_all#{chat_id}")])
+        # Row 3: Slot 3
+        if s3: buttons.append([InlineKeyboardButton("✏️ Edit Slot 3", callback_data=f"set_fsub#{chat_id}#3"), InlineKeyboardButton("🗑️ Clear 3", callback_data=f"rem_fsub_one#{chat_id}#3")])
+        else: buttons.append([InlineKeyboardButton("➕ Set Slot 3", callback_data=f"set_fsub#{chat_id}#3")])
+
+        # Row 4: Slot 4
+        if s4: buttons.append([InlineKeyboardButton("✏️ Edit Slot 4", callback_data=f"set_fsub#{chat_id}#4"), InlineKeyboardButton("🗑️ Clear 4", callback_data=f"rem_fsub_one#{chat_id}#4")])
+        else: buttons.append([InlineKeyboardButton("➕ Set Slot 4", callback_data=f"set_fsub#{chat_id}#4")])
+
+        if s1 or s2 or s3 or s4:
+            buttons.append([InlineKeyboardButton("🗑️ Remove All Slots", callback_data=f"rem_fsub_all#{chat_id}")])
 
         buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"set_main#{chat_id}")])
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+        
+        await query.message.edit_text(txt, reply_markup=InlineKeyboardMarkup(buttons))
 
     except Exception as e:
-        await query.answer("❌ Error: DB sync issue. Try again.", show_alert=True)
+        await query.answer(f"Error: {e}", show_alert=True)
 
 # 2. SET SLOT INPUT (MODIFIED: LISTEN DISABLED)
 @Client.on_callback_query(filters.regex(r"^set_fsub#"))

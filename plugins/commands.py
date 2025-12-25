@@ -311,6 +311,57 @@ async def check_fsub(client, user_id, message_obj):
 
 # --- 🎮 COMMAND HANDLERS ---
 
+# ✅ ADDED: PERSISTENT SETTINGS COMMAND (FIXES 'NO GROUPS FOUND' ISSUE)
+@Client.on_message(filters.command('settings'))
+async def settings(client, message):
+    user_id = message.from_user.id if message.from_user else None
+    if not user_id: return
+
+    # --- PM LOGIC ---
+    if message.chat.type == enums.ChatType.PRIVATE:
+        msg = await message.reply_text("<b>♻️ Fetching connected groups...</b>")
+        
+        # 1. Fetch from Database (Not Telegram Cache)
+        all_chats = await db.get_all_chats()
+        my_groups = []
+        
+        async for chat in all_chats:
+            try:
+                # 2. Force ID to Integer
+                chat_id = int(chat['id'])
+                
+                # 3. Get Title from DB (Fallback to 'Unknown' if missing)
+                chat_title = chat.get('title', 'Unknown Group')
+                
+                # 4. Check Admin Rights (Live Check)
+                member = await client.get_chat_member(chat_id, user_id)
+                
+                if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
+                    # Update title in dict for button (Important for display)
+                    chat['title'] = chat_title 
+                    my_groups.append(chat)
+            except Exception as e:
+                # Skip invalid groups (PeerIdInvalid, Kicked, etc.) to prevent crash
+                continue
+        
+        if not my_groups:
+            await msg.edit(
+                "<b>❌ No Connected Groups Found!</b>\n\n"
+                "Possible Reasons:\n"
+                "1. You are not an Admin in any registered group.\n"
+                "2. Bot is not an Admin in the group.\n"
+                "3. Database needs a refresh (Send /connect in your group)."
+            )
+            return
+
+        btn = []
+        for group in my_groups:
+            btn.append([InlineKeyboardButton(f"{group['title']}", callback_data=f"open_settings#{group['id']}")])
+        btn.append([InlineKeyboardButton('Close ❌', callback_data='close_data')])
+        
+        await msg.edit("<b>⚙️ Select Group to Configure:</b>", reply_markup=InlineKeyboardMarkup(btn))
+        return
+
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start_handler(client, message):
     # --- Private Chat Logic ---

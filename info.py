@@ -8,13 +8,7 @@ DATABASE_URI = os.environ.get("DATABASE_URI", "apna_mongodb_url")
 
 # 👇 Ye Naya Variable Add Karein (Zaruri Hai)
 DATABASE_NAME = os.environ.get("DATABASE_NAME", "MyBotDB")
-# Agar aap same DB use karna chahte hain to isse khali chhod dein
-USER_DB_URI = os.environ.get("USER_DB_URI", "")
 
-# Agar User DB alag se nahi diya, to fallback karke Main DB use karega
-if not USER_DB_URI:
-    USER_DB_URI = DATABASE_URI
-  
 # Optional
 ADMINS = [int(i) for i in os.environ.get("ADMINS", "").split(" ")] if os.environ.get("ADMINS") else []
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0")) # Agar log channel nahi hai to 0 rakhein

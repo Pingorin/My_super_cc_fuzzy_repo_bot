@@ -4,11 +4,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError
 from info import DATABASE_URI, DATABASE_NAME
 
-logger = logging.getLogger(__name__)
-
 class MediaDB:
     def __init__(self, uri, database_name):
-        # ✅ Connection 1: Using DATABASE_URI (Exclusively for Files)
         self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         
@@ -17,7 +14,6 @@ class MediaDB:
         self.counters = self.db.counters
 
     async def ensure_indexes(self):
-        # Regular indexes for fallback search
         await self.search_col.create_index("file_name")
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
@@ -32,22 +28,9 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
-    # --- 🧹 TEXT CLEANER HELPER (Optimized) ---
-    @staticmethod
-    def clean_text(text):
-        if not text: return ""
-        # Remove specific channel tags or usernames
-        text = re.sub(r"\[@RunningMoviesHD\]", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"@\w+", "", text)
-        # Replace separators with space
-        text = re.sub(r"[-_.]", " ", text)
-        # Remove extra spaces
-        return re.sub(r"\s+", " ", text).strip()
-
     async def save_batch(self, items):
         if not items: return 0, 0 
         
-        # 1. Filter out duplicates based on file_unique_id
         unique_ids = [media.file_unique_id for media, msg in items]
         try:
             existing_docs = await self.data_col.find({
@@ -66,7 +49,6 @@ class MediaDB:
         if not new_items: return 0, pre_duplicate_count 
             
         count = len(new_items)
-        # Get Batch Sequence IDs
         end_sequence = await self.get_next_sequence_value("file_id_counter", increment=count)
         start_sequence = end_sequence - count + 1
         
@@ -75,21 +57,26 @@ class MediaDB:
         current_id = start_sequence
         
         for media, message in new_items:
-            # Clean File Name
-            file_name = self.clean_text(media.file_name)
+            def clean_text(text):
+                if not text: return ""
+                text = re.sub(r"\[@RunningMoviesHD\]", "", text, flags=re.IGNORECASE)
+                text = re.sub(r"@\w+", "", text)
+                text = re.sub(r"[-_]", " ", text)
+                return re.sub(r"\s+", " ", text).strip()
+
+            file_name = clean_text(media.file_name)
             if not file_name: file_name = "Unknown File"
 
-            # Clean Caption
             caption = message.caption.html if message.caption else None
             if caption:
-                caption = self.clean_text(caption)
-                # Keep only relevant part before extension (optional, usually good for movies)
+                caption = clean_text(caption)
                 regex = r"(?i)(.*?)(\.mkv|\.mp4|\.avi|\.webm|\.m4v|\.flv)"
                 match = re.search(regex, caption, re.DOTALL)
                 if match:
                     caption = match.group(1) + match.group(2)
+                    if "<b>" in caption and "</b>" not in caption: caption += "</b>"
+                    if "<i>" in caption and "</i>" not in caption: caption += "</i>"
 
-            # Doc 1: Internal IDs (Reference)
             data_docs.append({
                 '_id': current_id,
                 'msg_id': message.id,
@@ -98,7 +85,6 @@ class MediaDB:
                 'file_unique_id': media.file_unique_id
             })
             
-            # Doc 2: Searchable Metadata (For Atlas Search)
             search_docs.append({
                 'file_name': file_name,
                 'file_size': media.file_size, 
@@ -110,7 +96,6 @@ class MediaDB:
         saved_count = 0
         failed_indices = []
         
-        # Insert Data
         if data_docs:
             try:
                 await self.data_col.insert_many(data_docs, ordered=False)
@@ -124,7 +109,6 @@ class MediaDB:
                 print(f"❌ Critical Error Saving FILES_DATA: {e}")
                 return 0, count + pre_duplicate_count
 
-            # Insert Search Index (Only if Data insert succeeded)
             if saved_count > 0:
                 valid_search_docs = []
                 for i, doc in enumerate(search_docs):
@@ -141,12 +125,13 @@ class MediaDB:
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    # 🚀 UPDATED SEARCH LOGIC (STRICTER + ROBUST) 🚀
+    # 🚀 UPDATED SEARCH LOGIC (STRICTER) 🚀
     async def get_search_results(self, query):
         try:
+            # Query ko shabdon me todo (Split by space)
             words = query.split()
             
-            # 1. Single Word Query -> Standard Fuzzy
+            # Agar 1 hi shabd hai, to purana logic use karo
             if len(words) <= 1:
                 search_stage = {
                     "$search": {
@@ -158,15 +143,16 @@ class MediaDB:
                         }
                     }
                 }
-            # 2. Multi-Word Query -> Strict Compound (All words must match)
             else:
+                # Agar multiple words hain (e.g., "The Game")
+                # To hum "Compound" use karenge taki SAARE words match hona zaruri ho
                 must_clauses = []
                 for word in words:
                     must_clauses.append({
                         "text": {
                             "query": word,
                             "path": ["file_name", "caption"],
-                            "fuzzy": {"maxEdits": 1} # Stricter fuzzy for multi-word
+                            "fuzzy": {"maxEdits": 1} # Strictness: Multi-word me typo tolerance kam rakha hai
                         }
                     })
                 
@@ -174,7 +160,7 @@ class MediaDB:
                     "$search": {
                         "index": "default",
                         "compound": {
-                            "must": must_clauses
+                            "must": must_clauses # ✅ 'must' means ALL words are required
                         }
                     }
                 }
@@ -185,13 +171,8 @@ class MediaDB:
             return files
             
         except Exception as e:
-            # Fallback to Regex if Atlas Search fails (or Index doesn't exist)
-            # print(f"⚠️ Atlas Search Error (Using Regex): {e}") # Uncomment for debug
-            
-            # Escape special regex chars from query to prevent crashes
-            safe_query = re.escape(query)
-            regex = re.compile(safe_query, re.IGNORECASE)
-            
+            print(f"Atlas Search Error: {e}")
+            regex = re.compile(query, re.IGNORECASE)
             cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})
             cursor.sort('$natural', -1)
             return await cursor.to_list(length=10)
@@ -206,5 +187,4 @@ class MediaDB:
         except:
             return 0
 
-# Initialize with DATABASE_URI (The primary DB for Files)
 Media = MediaDB(DATABASE_URI, DATABASE_NAME)

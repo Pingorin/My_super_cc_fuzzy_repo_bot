@@ -1,4 +1,4 @@
-import pyromod.listen
+# import pyromod.listen  <-- Removed as per instruction
 import logging
 import logging.config
 from pyrogram import Client, __version__

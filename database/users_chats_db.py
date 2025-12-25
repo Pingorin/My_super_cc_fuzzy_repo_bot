@@ -1,5 +1,6 @@
 import motor.motor_asyncio
 import time
+# ✅ CHANGED: Imported USER_DB_URI for separate User/Group Database
 from info import USER_DB_URI, DATABASE_NAME
 
 class UserChatDB:
@@ -17,22 +18,15 @@ class UserChatDB:
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ ADDED: This fixes the 'add_chat' Attribute Error
-    async def add_chat(self, chat_id, title):
-        """
-        Saves Group ID and Title. Uses Upsert to handle updates.
-        Replaces the old add_group logic for simpler syncing.
-        """
-        await self.groups.update_one(
-            {'id': int(chat_id)},
-            {'$set': {'title': title, 'id': int(chat_id)}},
-            upsert=True
-        )
+    # ✅ MODIFIED: Accepts 'title' to save Group Name (Restart Proof Logic)
+    async def add_group(self, id, title):
+        group = await self.groups.find_one({'id': int(id)})
         
-        # Check if default settings exist, if not, set them
-        group = await self.groups.find_one({'id': int(chat_id)})
-        if not group or not group.get('earning_method'):
+        if not group:
+            # If new group, save Default Settings + Title
             default_settings = {
+                'id': int(id),
+                'title': title, # ✅ Save Title
                 'earning_method': 'shortlink', 
                 'shortener_mode': 'dynamic',   
                 'shorteners': {},              
@@ -46,19 +40,13 @@ class UserChatDB:
                 'time_gap1': 300,
                 'time_gap2': 300
             }
-            await self.groups.update_one({'id': int(chat_id)}, {'$set': default_settings})
-
-    # Backward compatibility wrapper
-    async def add_group(self, chat_id, title="Unknown Group"):
-        await self.add_chat(chat_id, title)
-
-    # ✅ ADDED: Helper to fetch all groups for Settings Menu
-    async def get_all_chats(self):
-        """Returns cursor for all saved groups (used in Settings UI)"""
-        return self.groups.find({})
+            await self.groups.insert_one(default_settings)
+        else:
+            # If group exists, update the Title (in case it changed)
+            await self.groups.update_one({'id': int(id)}, {'$set': {'title': title}})
 
     # --- ⚙️ GROUP SETTINGS HELPERS ---
-
+    
     async def get_group_settings(self, id):
         return await self.groups.find_one({'id': int(id)})
 
@@ -199,24 +187,15 @@ class UserChatDB:
 
     # --- 🔥 ADVANCED FSUB PENDING LOGIC 🔥 ---
     
-    async def add_join_request(self, user_id, channel_id):
-        """Adds a pending request with a timestamp."""
+    async def add_pending_request(self, user_id, channel_id):
         try:
             await self.fsub_pending.update_one(
                 {'_id': f"{user_id}_{channel_id}"},
-                {'$set': {
-                    'user_id': int(user_id), 
-                    'chat_id': int(channel_id),
-                    'requested_at': time.time()
-                }},
+                {'$set': {'user_id': int(user_id), 'chat_id': int(channel_id)}},
                 upsert=True
             )
         except Exception as e:
-            print(f"Error adding join request: {e}")
-
-    # Backward compatibility alias
-    async def add_pending_request(self, user_id, channel_id):
-        await self.add_join_request(user_id, channel_id)
+            print(f"Error adding pending request: {e}")
 
     async def remove_pending_request(self, user_id, channel_id):
         try:
@@ -224,17 +203,12 @@ class UserChatDB:
         except Exception as e:
             print(f"Error removing pending request: {e}")
 
-    async def is_join_request_pending(self, user_id, channel_id):
-        """Checks if a user has a pending join request."""
+    async def is_user_pending(self, user_id, channel_id):
         try:
             found = await self.fsub_pending.find_one({'_id': f"{user_id}_{channel_id}"})
             return bool(found)
         except:
             return False
-    
-    # Backward compatibility alias
-    async def is_user_pending(self, user_id, channel_id):
-        return await self.is_join_request_pending(user_id, channel_id)
 
 # ✅ INITIALIZATION: Using USER_DB_URI for the second database
 db = UserChatDB(USER_DB_URI, DATABASE_NAME)

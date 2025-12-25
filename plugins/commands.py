@@ -10,7 +10,7 @@ import info
 from info import ADMINS, IS_VERIFY
 from utils import temp, get_shortlink 
 from Script import script 
-from plugins.helper_fsub import get_fsub_status  # ✅ Imported Helper for Advanced Logic
+from utils import get_fsub_status # ✅ CORRECT IMPORT
 
 # Configure Logging
 logger = logging.getLogger(__name__)

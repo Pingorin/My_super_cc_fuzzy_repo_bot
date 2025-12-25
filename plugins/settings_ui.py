@@ -40,7 +40,6 @@ async def settings_command(client, message):
     # 1. Database se groups fetch karein
     async for group in db.groups.find({}):
         chat_id = group['id']
-        # DB se saved title lein (fallback to ID if missing)
         saved_title = group.get('title', f"Group {chat_id}") 
         
         try:
@@ -110,7 +109,7 @@ async def fsub_configure_menu(client, query):
         elif isinstance(raw_fsub, dict): fsub_channels = raw_fsub
         else: fsub_channels = {}
 
-        # Slots Read (1, 2, 3, 4)
+        # Slots Read
         s1 = fsub_channels.get('1')
         s2 = fsub_channels.get('2')
         s3 = fsub_channels.get('3')
@@ -125,24 +124,23 @@ async def fsub_configure_menu(client, query):
 
         buttons = []
         
-        # Row 1: Slot 1
-        if s1: buttons.append([InlineKeyboardButton("✏️ Edit Slot 1", callback_data=f"set_fsub#{chat_id}#1"), InlineKeyboardButton("🗑️ Clear 1", callback_data=f"rem_fsub_one#{chat_id}#1")])
-        else: buttons.append([InlineKeyboardButton("➕ Set Slot 1", callback_data=f"set_fsub#{chat_id}#1")])
+        # Row 1
+        btn1 = []
+        if s1: btn1.append(InlineKeyboardButton("🗑 1", callback_data=f"rem_fsub_one#{chat_id}#1"))
+        else: btn1.append(InlineKeyboardButton("➕ Set 1", callback_data=f"set_fsub#{chat_id}#1"))
+        
+        if s2: btn1.append(InlineKeyboardButton("🗑 2", callback_data=f"rem_fsub_one#{chat_id}#2"))
+        else: btn1.append(InlineKeyboardButton("➕ Set 2", callback_data=f"set_fsub#{chat_id}#2"))
+        buttons.append(btn1)
 
-        # Row 2: Slot 2
-        if s2: buttons.append([InlineKeyboardButton("✏️ Edit Slot 2", callback_data=f"set_fsub#{chat_id}#2"), InlineKeyboardButton("🗑️ Clear 2", callback_data=f"rem_fsub_one#{chat_id}#2")])
-        else: buttons.append([InlineKeyboardButton("➕ Set Slot 2", callback_data=f"set_fsub#{chat_id}#2")])
-
-        # Row 3: Slot 3
-        if s3: buttons.append([InlineKeyboardButton("✏️ Edit Slot 3", callback_data=f"set_fsub#{chat_id}#3"), InlineKeyboardButton("🗑️ Clear 3", callback_data=f"rem_fsub_one#{chat_id}#3")])
-        else: buttons.append([InlineKeyboardButton("➕ Set Slot 3", callback_data=f"set_fsub#{chat_id}#3")])
-
-        # Row 4: Slot 4
-        if s4: buttons.append([InlineKeyboardButton("✏️ Edit Slot 4", callback_data=f"set_fsub#{chat_id}#4"), InlineKeyboardButton("🗑️ Clear 4", callback_data=f"rem_fsub_one#{chat_id}#4")])
-        else: buttons.append([InlineKeyboardButton("➕ Set Slot 4", callback_data=f"set_fsub#{chat_id}#4")])
-
-        if s1 or s2 or s3 or s4:
-            buttons.append([InlineKeyboardButton("🗑️ Remove All Slots", callback_data=f"rem_fsub_all#{chat_id}")])
+        # Row 2 (Slot 3 & 4)
+        btn2 = []
+        if s3: btn2.append(InlineKeyboardButton("🗑 3", callback_data=f"rem_fsub_one#{chat_id}#3"))
+        else: btn2.append(InlineKeyboardButton("➕ Set 3", callback_data=f"set_fsub#{chat_id}#3"))
+        
+        if s4: btn2.append(InlineKeyboardButton("🗑 4", callback_data=f"rem_fsub_one#{chat_id}#4"))
+        else: btn2.append(InlineKeyboardButton("➕ Set 4", callback_data=f"set_fsub#{chat_id}#4"))
+        buttons.append(btn2)
 
         buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"set_main#{chat_id}")])
         
@@ -151,28 +149,82 @@ async def fsub_configure_menu(client, query):
     except Exception as e:
         await query.answer(f"Error: {e}", show_alert=True)
 
-# 2. SET SLOT INPUT (MODIFIED: LISTEN DISABLED)
+# 2. SET SLOT INPUT (Interactive Listen)
 @Client.on_callback_query(filters.regex(r"^set_fsub#"))
 async def set_fsub_input(client, query):
     _, chat_id, slot = query.data.split("#")
     chat_id = int(chat_id)
-    cancel_btn = [[InlineKeyboardButton("🔙 Back", callback_data=f"fsub_menu#{chat_id}")]]
+    user_id = query.from_user.id
     
-    # --- PYROMOD REMOVAL NOTICE ---
-    # As Pyromod is removed, client.listen() will not work.
+    # Prompt User
     await query.message.edit_text(
-        f"⚠️ **Feature Disabled**\n\n"
-        f"Since Pyromod is removed, you cannot set IDs via chat input.\n"
-        f"Please update the database manually or reinstall Pyromod.",
-        reply_markup=InlineKeyboardMarkup(cancel_btn)
+        f"🆔 **Set Slot {slot}**\n\n"
+        "Forward a message from the Target Channel OR send the Channel ID/Username.\n"
+        "⚠️ **Note:** Bot must be Admin in that channel!",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data=f"fsub_menu#{chat_id}")]])
     )
-    return
+    
+    # Listen for Input
+    try:
+        msg = await client.listen(user_id, timeout=60)
+    except asyncio.TimeoutError:
+        await query.message.edit_text("❌ **Timeout!** Too slow.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"fsub_menu#{chat_id}")]]))
+        return
+
+    # Process Input
+    if msg.text or msg.forward_from_chat:
+        try:
+            # Get Chat ID
+            if msg.forward_from_chat:
+                target_chat = msg.forward_from_chat
+            else:
+                target_chat = await client.get_chat(msg.text)
+            
+            # Verify Admin Status
+            try:
+                me = await client.get_me()
+                member = await client.get_chat_member(target_chat.id, me.id)
+                if not member.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
+                    await msg.reply("⚠️ **Warning:** Bot is NOT admin in this channel. Links might fail.")
+            except:
+                pass # Continue anyway
+
+            # Save to Database
+            group_data = await db.get_group_settings(chat_id)
+            fsub_channels = group_data.get('fsub_channels', {})
+            if not isinstance(fsub_channels, dict): fsub_channels = {}
+            
+            fsub_channels[str(slot)] = int(target_chat.id)
+            await db.update_group_settings(chat_id, {'fsub_channels': fsub_channels})
+            
+            await msg.reply(f"✅ **Saved!**\nSlot {slot}: {target_chat.title} (`{target_chat.id}`)")
+            
+            # Return to Menu
+            # Hum wapas menu call kar rahe hain naye message ke roop me
+            try:
+                # Fake query object logic workaround for simple display
+                # Best way: Just show menu again
+                await fsub_configure_menu(client, query) # Might act on old message
+            except:
+                pass
+
+        except Exception as e:
+            await msg.reply(f"❌ **Error:** Invalid Channel or Bot cannot access it.\n`{e}`")
+    else:
+        await msg.reply("❌ Invalid input type.")
 
 # 4. REMOVE SINGLE SLOT
 @Client.on_callback_query(filters.regex(r"^rem_fsub_one#"))
 async def remove_fsub_one(client, query):
     _, chat_id, slot = query.data.split("#")
-    await db.remove_fsub_channel(int(chat_id), slot)
+    chat_id = int(chat_id)
+    
+    group_data = await db.get_group_settings(chat_id)
+    fsub_channels = group_data.get('fsub_channels', {})
+    if isinstance(fsub_channels, dict) and str(slot) in fsub_channels:
+        del fsub_channels[str(slot)]
+        await db.update_group_settings(chat_id, {'fsub_channels': fsub_channels})
+    
     await query.answer(f"Slot {slot} Cleared!", show_alert=True)
     await fsub_configure_menu(client, query)
 
@@ -180,7 +232,7 @@ async def remove_fsub_one(client, query):
 @Client.on_callback_query(filters.regex(r"^rem_fsub_all#"))
 async def remove_fsub_all(client, query):
     chat_id = int(query.data.split("#")[1])
-    await db.remove_all_fsub_channels(chat_id)
+    await db.update_group_settings(chat_id, {'fsub_channels': {}})
     await query.answer("All Fsub Channels Removed!", show_alert=True)
     await fsub_configure_menu(client, query)
 
@@ -305,6 +357,8 @@ async def input_slot_req(client, query):
     chat_id = int(chat_id)
     cancel_btn = [[InlineKeyboardButton("🔙 Back", callback_data=f"set_slots#{chat_id}")]]
     
+    # --- PYROMOD REMOVAL NOTICE ---
+    # As Pyromod is removed, client.listen() will not work.
     await query.message.edit_text(
         f"⚠️ **Feature Disabled**\n\n"
         f"Since Pyromod is removed, you cannot set URL/API via chat input.\n"

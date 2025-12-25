@@ -311,7 +311,7 @@ async def check_fsub(client, user_id, message_obj):
 
 # --- 🎮 COMMAND HANDLERS ---
 
-# ✅ UPDATED: PERSISTENT SETTINGS COMMAND (MATCHING PREVIOUS REPO LOGIC)
+# ✅ UPDATED: PERSISTENT SETTINGS COMMAND (WITH SILENT REFRESH)
 @Client.on_message(filters.command('settings'))
 async def settings(client, message):
     user_id = message.from_user.id if message.from_user else None
@@ -320,6 +320,15 @@ async def settings(client, message):
     # --- PM LOGIC ---
     if message.chat.type == enums.ChatType.PRIVATE:
         msg = await message.reply_text("<b>♻️ ᴄʜᴇᴄᴋɪɴɢ ʏᴏᴜʀ ᴀᴅᴍɪɴ ʀɪɢʜᴛs ɪɴ ᴀʟʟ ɢʀᴏᴜᴘs... ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...</b>")
+
+        # 🔄 SILENT CACHE REFRESH: This forces the bot to fetch all dialogs.
+        # This is critical for Render/Heroku where the session file is lost on restart.
+        # It populates the cache so 'get_chat_member' doesn't fail with PeerIdInvalid.
+        try:
+            async for dialog in client.get_dialogs():
+                pass 
+        except Exception:
+            pass
         
         all_chats = await db.get_all_chats()
         my_groups = []
@@ -337,7 +346,7 @@ async def settings(client, message):
                     chat['title'] = chat.get('title', 'Unknown Group')
                     my_groups.append(chat)
             except Exception:
-                # 4. Silent Fail (Pass) - This is the key logic from the previous repo
+                # 4. Silent Fail (Pass)
                 pass
         
         if not my_groups:

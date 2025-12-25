@@ -1,7 +1,6 @@
-pyrogram
+pyrofork
 tgcrypto
 motor
 dnspython
 aiohttp
 pytz
-pyromod

@@ -8,7 +8,8 @@ from database.users_chats_db import db
 from database.ia_filterdb import Media
 import info 
 from info import ADMINS, IS_VERIFY
-from utils import temp, get_shortlink 
+# 🔥 ADDED check_fsub_4_status HERE
+from utils import temp, get_shortlink, check_fsub_4_status
 from Script import script 
 
 # Configure Logging
@@ -369,6 +370,32 @@ async def start_handler(client, message):
             # Check Verification Status
             is_all_clear = await check_verification(client, message.from_user.id, src_chat_id, link_id, message)
             if not is_all_clear: return 
+
+            # -----------------------------------------------------------
+            # 🔥 SLOT 4 (POST-VERIFY) CHECK START 🔥
+            # -----------------------------------------------------------
+            
+            fsub_4_status, id_4 = await check_fsub_4_status(client, message.from_user.id, src_chat_id)
+        
+            if id_4 and fsub_4_status == "NOT_JOINED":
+                try:
+                    # Request Link Generate
+                    link = await client.create_chat_invite_link(id_4, creates_join_request=True)
+                    btn = [
+                        [InlineKeyboardButton("📢 Join Final Channel", url=link.invite_link)],
+                        [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={message.command[1]}")]
+                    ]
+                    
+                    await message.reply_text(
+                        f"🛑 **Almost There!**\n\nFile lene ke liye bas ye aakhri channel join karein aur 'Try Again' dabayein.",
+                        reply_markup=InlineKeyboardMarkup(btn)
+                    )
+                    return # Code yahan ruk jayega, file send nahi hogi
+                except Exception as e:
+                    logger.error(f"Slot 4 Error: {e}")
+            # -----------------------------------------------------------
+            # 🔥 SLOT 4 CHECK END 🔥
+            # -----------------------------------------------------------
 
             # Send File
             file_data = await Media.get_file_details(link_id)

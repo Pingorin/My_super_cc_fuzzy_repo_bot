@@ -311,7 +311,7 @@ async def check_fsub(client, user_id, message_obj):
 
 # --- 🎮 COMMAND HANDLERS ---
 
-# ✅ UPDATED: PERSISTENT SETTINGS COMMAND (WITH SILENT REFRESH)
+# ✅ UPDATED: PERSISTENT SETTINGS COMMAND (WITH CACHE RELOAD FIX)
 @Client.on_message(filters.command('settings'))
 async def settings(client, message):
     user_id = message.from_user.id if message.from_user else None
@@ -320,16 +320,17 @@ async def settings(client, message):
     # --- PM LOGIC ---
     if message.chat.type == enums.ChatType.PRIVATE:
         msg = await message.reply_text("<b>♻️ ᴄʜᴇᴄᴋɪɴɢ ʏᴏᴜʀ ᴀᴅᴍɪɴ ʀɪɢʜᴛs ɪɴ ᴀʟʟ ɢʀᴏᴜᴘs... ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...</b>")
-
-        # 🔄 SILENT CACHE REFRESH: This forces the bot to fetch all dialogs.
-        # This is critical for Render/Heroku where the session file is lost on restart.
-        # It populates the cache so 'get_chat_member' doesn't fail with PeerIdInvalid.
+        
+        # ✅ THE MAGIC FIX: FORCE REFRESH SESSION CACHE
+        # This loop fetches the list of groups the bot is in from Telegram Server.
+        # This restores the 'Access Hash' after a restart on Render.
         try:
             async for dialog in client.get_dialogs():
                 pass 
-        except Exception:
+        except Exception as e:
+            print(f"Cache Refresh Error: {e}")
             pass
-        
+
         all_chats = await db.get_all_chats()
         my_groups = []
         
@@ -339,6 +340,7 @@ async def settings(client, message):
                 chat_id = int(chat['id'])
                 
                 # 2. Check Admin Rights (Live Check)
+                # Since we refreshed cache above, this will now succeed!
                 member = await client.get_chat_member(chat_id, user_id)
                 
                 if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:

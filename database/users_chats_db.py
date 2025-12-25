@@ -1,6 +1,5 @@
 import motor.motor_asyncio
 import time
-# ✅ CHANGED: Imported USER_DB_URI for separate User/Group Database
 from info import USER_DB_URI, DATABASE_NAME
 
 class UserChatDB:
@@ -20,13 +19,17 @@ class UserChatDB:
 
     # ✅ MODIFIED: Accepts 'title' to save Group Name (Restart Proof Logic)
     async def add_group(self, id, title):
-        group = await self.groups.find_one({'id': int(id)})
+        # Update Title if exists, Insert if new (Upsert)
+        await self.groups.update_one(
+            {'id': int(id)},
+            {'$set': {'title': title, 'id': int(id)}},
+            upsert=True
+        )
         
-        if not group:
-            # If new group, save Default Settings + Title
+        # Check if default settings exist, if not, set them (without overwriting title)
+        group = await self.groups.find_one({'id': int(id)})
+        if not group.get('earning_method'):
             default_settings = {
-                'id': int(id),
-                'title': title, # ✅ Save Title
                 'earning_method': 'shortlink', 
                 'shortener_mode': 'dynamic',   
                 'shorteners': {},              
@@ -40,10 +43,11 @@ class UserChatDB:
                 'time_gap1': 300,
                 'time_gap2': 300
             }
-            await self.groups.insert_one(default_settings)
-        else:
-            # If group exists, update the Title (in case it changed)
-            await self.groups.update_one({'id': int(id)}, {'$set': {'title': title}})
+            await self.groups.update_one({'id': int(id)}, {'$set': default_settings})
+
+    # ✅ ADDED: Helper to fetch all groups for Settings Menu
+    async def get_all_chats(self):
+        return self.groups.find({})
 
     # --- ⚙️ GROUP SETTINGS HELPERS ---
     
@@ -187,15 +191,24 @@ class UserChatDB:
 
     # --- 🔥 ADVANCED FSUB PENDING LOGIC 🔥 ---
     
-    async def add_pending_request(self, user_id, channel_id):
+    async def add_join_request(self, user_id, channel_id):
+        """Adds a pending request with a timestamp."""
         try:
             await self.fsub_pending.update_one(
                 {'_id': f"{user_id}_{channel_id}"},
-                {'$set': {'user_id': int(user_id), 'chat_id': int(channel_id)}},
+                {'$set': {
+                    'user_id': int(user_id), 
+                    'chat_id': int(channel_id),
+                    'requested_at': time.time()
+                }},
                 upsert=True
             )
         except Exception as e:
-            print(f"Error adding pending request: {e}")
+            print(f"Error adding join request: {e}")
+
+    # (Kept for backward compatibility)
+    async def add_pending_request(self, user_id, channel_id):
+        await self.add_join_request(user_id, channel_id)
 
     async def remove_pending_request(self, user_id, channel_id):
         try:
@@ -203,7 +216,8 @@ class UserChatDB:
         except Exception as e:
             print(f"Error removing pending request: {e}")
 
-    async def is_user_pending(self, user_id, channel_id):
+    async def is_join_request_pending(self, user_id, channel_id):
+        """Checks if a user has a pending join request."""
         try:
             found = await self.fsub_pending.find_one({'_id': f"{user_id}_{channel_id}"})
             return bool(found)

@@ -1,3 +1,4 @@
+import pyromod.listen
 import logging
 import logging.config
 from pyrogram import Client, __version__
@@ -23,7 +24,7 @@ logging.getLogger("pyrogram").setLevel(logging.ERROR)
 class Bot(Client):
     def __init__(self):
         super().__init__(
-            name='aks',  # Updated name to match typical setups
+            name='my_bot',
             api_id=API_ID,
             api_hash=API_HASH,
             bot_token=BOT_TOKEN,
@@ -34,63 +35,34 @@ class Bot(Client):
 
     async def start(self):
         st = time.time()
-        temp.START_TIME = st  # Aaj_elsa_bot_s style startup time
-        
-        # Database Connect & Banned Data Load
-        b_users, b_chats = await db.get_banned()
-        temp.BANNED_USERS = b_users
-        temp.BANNED_CHATS = b_chats
-        
+        # Database Connect
+        await db.get_banned() # Banned users load karna
         await super().start()
-        
-        # Indexes Ensure Karna (Zaroori for search)
-        await Media.ensure_indexes()
         
         me = await self.get_me()
         temp.ME = me.id
-        temp.U_NAME = me.username
+        temp.U_NAME = me.username # ✅ Ye verification link ke liye zaruri hai
         temp.B_NAME = me.first_name
         self.username = '@' + me.username
         
         print(f"{me.first_name} is started now ❤️")
         
-        # Web Server Start
+        # Web Server Start (Uptime ke liye)
         app = web.AppRunner(await web_server())
         await app.setup()
         bind_address = "0.0.0.0"
         await web.TCPSite(app, bind_address, PORT).start()
         
-        # Restart Log
+        # Log Channel Message
         if LOG_CHANNEL:
             try:
-                tz = pytz.timezone('Asia/Kolkata')
-                today = datetime.date.today()
-                now = datetime.datetime.now(tz)
-                timee = now.strftime("%H:%M:%S %p")
-                await self.send_message(chat_id=LOG_CHANNEL, text=f"<b>{me.mention} ʀᴇsᴛᴀʀᴛᴇᴅ 🤖\n\n📆 ᴅᴀᴛᴇ - <code>{today}</code>\n🕙 ᴛɪᴍᴇ - <code>{timee}</code></b>")
-            except Exception as e:
-                print(f"Log Channel Error: {e}")
+                await self.send_message(chat_id=LOG_CHANNEL, text=f"<b>{me.mention} ʀᴇsᴛᴀʀᴛᴇᴅ 🤖</b>")
+            except:
+                print("Log Channel ID galat hai ya bot admin nahi hai wahan.")
 
     async def stop(self, *args):
         await super().stop()
         print("Bot stopped.")
-
-    # Iter messages helper (Aaj_elsa_bot_s style)
-    async def iter_messages(
-        self,
-        chat_id: Union[int, str],
-        limit: int,
-        offset: int = 0,
-    ) -> Optional[AsyncGenerator["types.Message", None]]:
-        current = offset
-        while True:
-            new_diff = min(200, limit - current)
-            if new_diff <= 0:
-                return
-            messages = await self.get_messages(chat_id, list(range(current, current+new_diff+1)))
-            for message in messages:
-                yield message
-                current += 1
 
 if __name__ == "__main__":
     app = Bot()

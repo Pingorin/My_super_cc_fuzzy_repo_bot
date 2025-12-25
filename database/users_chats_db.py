@@ -17,18 +17,21 @@ class UserChatDB:
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ MODIFIED: Accepts 'title' to save Group Name (Restart Proof Logic)
-    async def add_group(self, id, title):
-        # Update Title if exists, Insert if new (Upsert)
+    # ✅ ADDED: This fixes the 'add_chat' Attribute Error
+    async def add_chat(self, chat_id, title):
+        """
+        Saves Group ID and Title. Uses Upsert to handle updates.
+        Replaces the old add_group logic for simpler syncing.
+        """
         await self.groups.update_one(
-            {'id': int(id)},
-            {'$set': {'title': title, 'id': int(id)}},
+            {'id': int(chat_id)},
+            {'$set': {'title': title, 'id': int(chat_id)}},
             upsert=True
         )
         
-        # Check if default settings exist, if not, set them (without overwriting title)
-        group = await self.groups.find_one({'id': int(id)})
-        if not group.get('earning_method'):
+        # Check if default settings exist, if not, set them
+        group = await self.groups.find_one({'id': int(chat_id)})
+        if not group or not group.get('earning_method'):
             default_settings = {
                 'earning_method': 'shortlink', 
                 'shortener_mode': 'dynamic',   
@@ -43,14 +46,19 @@ class UserChatDB:
                 'time_gap1': 300,
                 'time_gap2': 300
             }
-            await self.groups.update_one({'id': int(id)}, {'$set': default_settings})
+            await self.groups.update_one({'id': int(chat_id)}, {'$set': default_settings})
+
+    # Backward compatibility wrapper
+    async def add_group(self, chat_id, title="Unknown Group"):
+        await self.add_chat(chat_id, title)
 
     # ✅ ADDED: Helper to fetch all groups for Settings Menu
     async def get_all_chats(self):
+        """Returns cursor for all saved groups (used in Settings UI)"""
         return self.groups.find({})
 
     # --- ⚙️ GROUP SETTINGS HELPERS ---
-    
+
     async def get_group_settings(self, id):
         return await self.groups.find_one({'id': int(id)})
 
@@ -206,7 +214,7 @@ class UserChatDB:
         except Exception as e:
             print(f"Error adding join request: {e}")
 
-    # (Kept for backward compatibility)
+    # Backward compatibility alias
     async def add_pending_request(self, user_id, channel_id):
         await self.add_join_request(user_id, channel_id)
 

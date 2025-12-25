@@ -35,25 +35,37 @@ class Bot(Client):
 
     async def start(self):
         st = time.time()
-        # Database Connect
-        await db.get_banned() # Banned users load karna
+        
+        # 1. Banned Users Load
+        await db.get_banned() 
+        
+        # 2. Start Client
         await super().start()
         
         me = await self.get_me()
         temp.ME = me.id
-        temp.U_NAME = me.username # ✅ Ye verification link ke liye zaruri hai
+        temp.U_NAME = me.username 
         temp.B_NAME = me.first_name
         self.username = '@' + me.username
         
         print(f"{me.first_name} is started now ❤️")
         
-        # Web Server Start (Uptime ke liye)
+        # 3. ✅ DATABASE CACHE WARMUP (Auto-Sync Fix)
+        # This ensures DB connection is active immediately after restart
+        try:
+            # Just calling this initializes the cursor and connection
+            await db.get_all_chats()
+            print("✅ Database Connected & Groups Cached Successfully")
+        except Exception as e:
+            print(f"❌ DB Cache Error (Non-Critical): {e}")
+
+        # 4. Web Server Start (For Uptime/Heroku)
         app = web.AppRunner(await web_server())
         await app.setup()
         bind_address = "0.0.0.0"
         await web.TCPSite(app, bind_address, PORT).start()
         
-        # Log Channel Message
+        # 5. Log Channel Notification
         if LOG_CHANNEL:
             try:
                 await self.send_message(chat_id=LOG_CHANNEL, text=f"<b>{me.mention} ʀᴇsᴛᴀʀᴛᴇᴅ 🤖</b>")

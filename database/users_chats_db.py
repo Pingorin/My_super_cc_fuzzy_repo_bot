@@ -223,6 +223,10 @@ class UserChatDB:
             return bool(found)
         except:
             return False
+    
+    # Backward compatibility alias
+    async def is_user_pending(self, user_id, channel_id):
+        return await self.is_join_request_pending(user_id, channel_id)
 
 # ✅ INITIALIZATION: Using USER_DB_URI for the second database
 db = UserChatDB(USER_DB_URI, DATABASE_NAME)

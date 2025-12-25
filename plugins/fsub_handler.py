@@ -7,8 +7,8 @@ from utils import temp
 @Client.on_chat_join_request()
 async def join_req_handler(client: Client, request: ChatJoinRequest):
     try:
-        # ✅ User ko Pending List me daalo (Uses the new timestamp logic)
-        await db.add_join_request(request.from_user.id, request.chat.id)
+        # User ko Pending List me daalo
+        await db.add_pending_request(request.from_user.id, request.chat.id)
     except Exception as e:
         print(f"Join Request Error: {e}")
 
@@ -22,14 +22,14 @@ async def member_update_handler(client: Client, update: ChatMemberUpdated):
         chat_id = update.chat.id
         new_status = update.new_chat_member.status
         
-        # ✅ Check karo ki kya ye user Database me 'Pending' tha?
-        was_pending = await db.is_join_request_pending(user_id, chat_id)
+        # Check karo ki kya ye user Database me 'Pending' tha?
+        was_pending = await db.is_user_pending(user_id, chat_id)
 
         # --- CASE 1: APPROVED (MEMBER) ---
         if new_status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR]:
             if was_pending:
                 await db.remove_pending_request(user_id, chat_id)
-                # Approve hone par success message
+                # Optional: Approve hone par badhai message
                 try: await client.send_message(user_id, "✅ **Your request has been approved!**\nYou can now access the files.")
                 except: pass
 
@@ -41,7 +41,8 @@ async def member_update_handler(client: Client, update: ChatMemberUpdated):
                 
                 # 2. 🔥 USER KO TURANT MESSAGE BHEJO (With Button) 🔥
                 try:
-                    # Link generate karo (creates_join_request=True is important)
+                    # Link generate karo
+                    chat_info = await client.get_chat(chat_id)
                     link_obj = await client.create_chat_invite_link(chat_id, creates_join_request=True)
                     link = link_obj.invite_link
                     
@@ -52,7 +53,7 @@ async def member_update_handler(client: Client, update: ChatMemberUpdated):
                     
                     await client.send_message(
                         chat_id=user_id,
-                        text="❌ **Your Join Request was Declined.**\n\nAdmin has dismissed your request (or you left).\nYou need to request again to access the files.",
+                        text="❌ **Your Join Request was Declined.**\n\nAdmin has dismissed your request.\nYou need to request again to access the files.",
                         reply_markup=InlineKeyboardMarkup(btn)
                     )
                 except Exception as e:

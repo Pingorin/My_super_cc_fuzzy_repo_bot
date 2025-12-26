@@ -1,10 +1,8 @@
 import asyncio
 import aiohttp
 from pyrogram import Client, filters, enums
-from pyrogram.errors import PeerIdInvalid, ChannelInvalid, FloodWait
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
-from utils import temp
 import info
 
 # --- HELPER: Time Convertor ---
@@ -29,37 +27,26 @@ async def check_shortener_link(domain, api):
     except: pass
     return False
 
-# --- /settings COMMAND (RESTART & CACHE PROOF) ---
+# --- /settings COMMAND ---
 @Client.on_message(filters.command("settings") & filters.private)
 async def settings_command(client, message):
     user_id = message.from_user.id
     msg = await message.reply_text("🔄 **Loading your groups...**")
     
     user_groups = []
-    
-    # 1. Database se groups fetch karein
     async for group in db.groups.find({}):
         chat_id = group['id']
         saved_title = group.get('title', f"Group {chat_id}") 
-        
         try:
-            # 🟢 STEP 1: Admin Check (Live)
             member = await client.get_chat_member(chat_id, user_id)
             if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
                 user_groups.append((saved_title, chat_id))
-        
-        except Exception as e:
-            # 🔴 STEP 2: Fallback
+        except:
             user_groups.append((f"{saved_title} (Cached)", chat_id))
 
     await msg.delete()
-    
     if not user_groups:
-        return await message.reply_text(
-            "❌ **No Connected Groups Found!**\n\n"
-            "Bot kisi bhi group me connect nahi hai ya aap admin nahi hain.\n"
-            "Ek baar group me **/connect** likhein."
-        )
+        return await message.reply_text("❌ **No Connected Groups Found!**")
 
     buttons = []
     for title, chat_id in user_groups:
@@ -67,11 +54,10 @@ async def settings_command(client, message):
     
     await message.reply_text("⚙️ **Select a Group:**", reply_markup=InlineKeyboardMarkup(buttons))
 
-# --- MAIN MENUS ---
+# --- MAIN MENU ---
 @Client.on_callback_query(filters.regex(r"^set_main#"))
 async def main_settings_menu(client, query):
     chat_id = int(query.data.split("#")[1])
-    
     try: 
         chat = await client.get_chat(chat_id)
         title = chat.title
@@ -87,10 +73,8 @@ async def main_settings_menu(client, query):
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🔒 FSUB SETTINGS (4 SLOTS) 
+# 🔥 ADVANCED FSUB MENU (Repo 2 Style Layout)
 # ==============================================================================
-
-# 1. FSUB CONFIGURE MENU
 @Client.on_callback_query(filters.regex(r"^fsub_menu#"))
 async def fsub_configure_menu(client, query):
     try:
@@ -98,10 +82,7 @@ async def fsub_configure_menu(client, query):
         group_data = await db.get_group_settings(chat_id)
         
         if not group_data:
-            try: chat = await client.get_chat(chat_id)
-            except: chat = None
-            title = chat.title if chat else "Unknown"
-            await db.add_group(chat_id, title)
+            await db.add_group(chat_id, "Unknown")
             group_data = await db.get_group_settings(chat_id)
             
         raw_fsub = group_data.get('fsub_channels')
@@ -115,32 +96,32 @@ async def fsub_configure_menu(client, query):
         s3 = fsub_channels.get('3')
         s4 = fsub_channels.get('4')
 
-        # Status Texts
-        txt = f"⚙️ **F-Sub Settings for:** `{chat_id}`\n\n"
-        txt += f"1️⃣ Slot 1 (Req): `{s1 if s1 else 'Not Set'}`\n"
-        txt += f"2️⃣ Slot 2 (Req): `{s2 if s2 else 'Not Set'}`\n"
-        txt += f"3️⃣ Slot 3 (Dir): `{s3 if s3 else 'Not Set'}`\n"
-        txt += f"4️⃣ Slot 4 (Post): `{s4 if s4 else 'Not Set'}`\n"
+        # Status Text (Sajawat Repo 2 Jaisi)
+        txt = f"⚙️ **Advanced Force Subscribe**\n\n"
+        txt += f"1️⃣ **Slot 1 (Request):** `{s1 if s1 else '❌ Not Set'}`\n"
+        txt += f"2️⃣ **Slot 2 (Request):** `{s2 if s2 else '❌ Not Set'}`\n"
+        txt += f"3️⃣ **Slot 3 (Normal):** `{s3 if s3 else '❌ Not Set'}`\n"
+        txt += f"➖➖➖➖➖➖➖➖➖➖\n"
+        txt += f"4️⃣ **Slot 4 (Post-Verify):** `{s4 if s4 else '❌ Not Set'}`\n\n"
+        txt += "👇 **Click below to change:**"
 
         buttons = []
         
-        # Row 1
+        # Row 1: Slot 1 & 2 (Ek Saath)
         btn1 = []
-        if s1: btn1.append(InlineKeyboardButton("🗑 1", callback_data=f"rem_fsub_one#{chat_id}#1"))
-        else: btn1.append(InlineKeyboardButton("➕ Set 1", callback_data=f"set_fsub#{chat_id}#1"))
-        
-        if s2: btn1.append(InlineKeyboardButton("🗑 2", callback_data=f"rem_fsub_one#{chat_id}#2"))
-        else: btn1.append(InlineKeyboardButton("➕ Set 2", callback_data=f"set_fsub#{chat_id}#2"))
+        btn1.append(InlineKeyboardButton(f"{'✏️' if s1 else '➕'} Set 1", callback_data=f"set_fsub#{chat_id}#1"))
+        btn1.append(InlineKeyboardButton(f"{'✏️' if s2 else '➕'} Set 2", callback_data=f"set_fsub#{chat_id}#2"))
         buttons.append(btn1)
 
-        # Row 2 (Slot 3 & 4)
-        btn2 = []
-        if s3: btn2.append(InlineKeyboardButton("🗑 3", callback_data=f"rem_fsub_one#{chat_id}#3"))
-        else: btn2.append(InlineKeyboardButton("➕ Set 3", callback_data=f"set_fsub#{chat_id}#3"))
-        
-        if s4: btn2.append(InlineKeyboardButton("🗑 4", callback_data=f"rem_fsub_one#{chat_id}#4"))
-        else: btn2.append(InlineKeyboardButton("➕ Set 4", callback_data=f"set_fsub#{chat_id}#4"))
-        buttons.append(btn2)
+        # Row 2: Slot 3 (Normal) - Iske saath hi
+        buttons.append([InlineKeyboardButton(f"{'✏️' if s3 else '➕'} Set Slot 3 (Normal)", callback_data=f"set_fsub#{chat_id}#3")])
+
+        # Row 3: Slot 4 (Post Verification - Alag se highlighted)
+        buttons.append([InlineKeyboardButton(f"{'✏️' if s4 else '➕'} Set Post-Verify (Slot 4)", callback_data=f"set_fsub#{chat_id}#4")])
+
+        # Clear Buttons (Agar koi set hai to hi dikhega)
+        if s1 or s2 or s3 or s4:
+            buttons.append([InlineKeyboardButton("🗑️ Remove All Slots", callback_data=f"rem_fsub_all#{chat_id}")])
 
         buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"set_main#{chat_id}")])
         
@@ -149,46 +130,37 @@ async def fsub_configure_menu(client, query):
     except Exception as e:
         await query.answer(f"Error: {e}", show_alert=True)
 
-# 2. SET SLOT INPUT (Interactive Listen)
+# 2. SET SLOT INPUT (Interactive Listen Enabled)
 @Client.on_callback_query(filters.regex(r"^set_fsub#"))
 async def set_fsub_input(client, query):
     _, chat_id, slot = query.data.split("#")
     chat_id = int(chat_id)
     user_id = query.from_user.id
     
-    # Prompt User
+    slot_name = "Normal" if slot == "3" else "Post-Verify" if slot == "4" else "Request"
+    
     await query.message.edit_text(
-        f"🆔 **Set Slot {slot}**\n\n"
-        "Forward a message from the Target Channel OR send the Channel ID/Username.\n"
-        "⚠️ **Note:** Bot must be Admin in that channel!",
+        f"🆔 **Set Slot {slot} ({slot_name})**\n\n"
+        "**Target Channel se koi bhi message Forward karein**\n"
+        "YA Channel ID/Username bhejein.\n\n"
+        "⚠️ **Dhyan dein:** Bot wahan Admin hona chahiye!",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data=f"fsub_menu#{chat_id}")]])
     )
     
-    # Listen for Input
     try:
+        # Listening for input (Repo 2 Style)
         msg = await client.listen(user_id, timeout=60)
     except asyncio.TimeoutError:
         await query.message.edit_text("❌ **Timeout!** Too slow.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"fsub_menu#{chat_id}")]]))
         return
 
-    # Process Input
     if msg.text or msg.forward_from_chat:
         try:
-            # Get Chat ID
             if msg.forward_from_chat:
                 target_chat = msg.forward_from_chat
             else:
                 target_chat = await client.get_chat(msg.text)
             
-            # Verify Admin Status
-            try:
-                me = await client.get_me()
-                member = await client.get_chat_member(target_chat.id, me.id)
-                if not member.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
-                    await msg.reply("⚠️ **Warning:** Bot is NOT admin in this channel. Links might fail.")
-            except:
-                pass # Continue anyway
-
             # Save to Database
             group_data = await db.get_group_settings(chat_id)
             fsub_channels = group_data.get('fsub_channels', {})
@@ -197,38 +169,19 @@ async def set_fsub_input(client, query):
             fsub_channels[str(slot)] = int(target_chat.id)
             await db.update_group_settings(chat_id, {'fsub_channels': fsub_channels})
             
-            await msg.reply(f"✅ **Saved!**\nSlot {slot}: {target_chat.title} (`{target_chat.id}`)")
+            await msg.reply(f"✅ **Saved!**\nSlot {slot}: {target_chat.title}")
             
-            # Return to Menu
-            # Hum wapas menu call kar rahe hain naye message ke roop me
-            try:
-                # Fake query object logic workaround for simple display
-                # Best way: Just show menu again
-                await fsub_configure_menu(client, query) # Might act on old message
-            except:
-                pass
+            # Wapas Menu par le jao
+            await fsub_configure_menu(client, query) 
 
         except Exception as e:
-            await msg.reply(f"❌ **Error:** Invalid Channel or Bot cannot access it.\n`{e}`")
+            await msg.reply(f"❌ **Error:** Invalid Channel.\nMake sure bot is admin there.\n`{e}`")
+            await fsub_configure_menu(client, query) 
     else:
-        await msg.reply("❌ Invalid input type.")
+        await msg.reply("❌ Invalid input.")
+        await fsub_configure_menu(client, query) 
 
-# 4. REMOVE SINGLE SLOT
-@Client.on_callback_query(filters.regex(r"^rem_fsub_one#"))
-async def remove_fsub_one(client, query):
-    _, chat_id, slot = query.data.split("#")
-    chat_id = int(chat_id)
-    
-    group_data = await db.get_group_settings(chat_id)
-    fsub_channels = group_data.get('fsub_channels', {})
-    if isinstance(fsub_channels, dict) and str(slot) in fsub_channels:
-        del fsub_channels[str(slot)]
-        await db.update_group_settings(chat_id, {'fsub_channels': fsub_channels})
-    
-    await query.answer(f"Slot {slot} Cleared!", show_alert=True)
-    await fsub_configure_menu(client, query)
-
-# 5. REMOVE ALL SLOTS
+# 3. REMOVE ALL SLOTS
 @Client.on_callback_query(filters.regex(r"^rem_fsub_all#"))
 async def remove_fsub_all(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -350,21 +303,11 @@ async def configure_slots(client, query):
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"set_smode#{chat_id}")])
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-# MODIFIED: LISTEN DISABLED
 @Client.on_callback_query(filters.regex(r"^add_slot#") | filters.regex(r"^edit_slot#"))
 async def input_slot_req(client, query):
     _, chat_id, slot = query.data.split("#")
-    chat_id = int(chat_id)
-    cancel_btn = [[InlineKeyboardButton("🔙 Back", callback_data=f"set_slots#{chat_id}")]]
-    
-    # --- PYROMOD REMOVAL NOTICE ---
-    # As Pyromod is removed, client.listen() will not work.
-    await query.message.edit_text(
-        f"⚠️ **Feature Disabled**\n\n"
-        f"Since Pyromod is removed, you cannot set URL/API via chat input.\n"
-        f"Please update the database manually or reinstall Pyromod.",
-        reply_markup=InlineKeyboardMarkup(cancel_btn)
-    )
+    # Redirect to interactive input
+    await set_fsub_input(client, query)
     return
 
 @Client.on_callback_query(filters.regex(r"^del_slot#"))

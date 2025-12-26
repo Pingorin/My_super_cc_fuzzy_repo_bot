@@ -6,16 +6,25 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# --- 1. JOIN REQUEST LISTENER ---
+# ==============================================================================
+# 1. JOIN REQUEST LISTENER (Component 1)
+# Trigger: Jab user "Request to Join" button dabata hai.
+# Action: User ko Database ki 'Pending' list mein add karte hain.
+# ==============================================================================
 @Client.on_chat_join_request()
 async def join_req_handler(client: Client, request: ChatJoinRequest):
     try:
-        # Request aate hi DB me 'Pending' mark karein
+        # User ID aur Channel ID ko DB me save karo (Status: Pending)
         await db.add_pending_request(request.from_user.id, request.chat.id)
+        logger.info(f"➕ Pending Request Added: User {request.from_user.id} in Chat {request.chat.id}")
     except Exception as e:
         logger.error(f"Join Request Error: {e}")
 
-# --- 2. STATUS UPDATE LISTENER (LOGGING & CLEANUP) ---
+# ==============================================================================
+# 2. MEMBER UPDATE HANDLER (Component 2: Cleanup & Logging)
+# Trigger: Jab Admin approve/decline karta hai, ya user leave karta hai.
+# Action: User ko 'Pending' list se remove karte hain.
+# ==============================================================================
 @Client.on_chat_member_updated()
 async def member_update_handler(client: Client, update: ChatMemberUpdated):
     try:
@@ -25,15 +34,26 @@ async def member_update_handler(client: Client, update: ChatMemberUpdated):
         chat_id = update.chat.id
         new_status = update.new_chat_member.status
         
-        # Agar status abhi bhi Restricted (Pending) hai, toh kuch mat karo
+        # ⚠️ CRITICAL CHECK:
+        # Agar status 'RESTRICTED' hai, iska matlab user abhi bhi REQUESTED state me ho sakta hai.
+        # Isliye hum use DB se REMOVE NAHI karenge.
         if new_status == enums.ChatMemberStatus.RESTRICTED:
             return
 
-        # Agar Approved, Left, ya Banned hua hai, toh DB se hata do
-        await db.remove_pending_request(user_id, chat_id)
+        # Agar status MEMBER, ADMIN, LEFT, ya BANNED ho gaya, 
+        # iska matlab Request process khatam ho gayi. DB clean karo.
+        if new_status in [
+            enums.ChatMemberStatus.MEMBER,
+            enums.ChatMemberStatus.ADMINISTRATOR,
+            enums.ChatMemberStatus.OWNER,
+            enums.ChatMemberStatus.LEFT,
+            enums.ChatMemberStatus.BANNED
+        ]:
+            await db.remove_pending_request(user_id, chat_id)
+            # logger.info(f"➖ Pending Removed: {user_id} (Status: {new_status})")
 
-        # --- LOGGING LOGIC (Repo 2 Style) ---
-        # Sirf tab log karo agar user pehle 'Restricted' (Pending) tha
+        # --- LOGGING TO CHANNEL ---
+        # Sirf tab log karo agar user pehle 'Restricted' (Pending request) tha
         if LOG_CHANNEL and update.old_chat_member and update.old_chat_member.status == enums.ChatMemberStatus.RESTRICTED:
             
             admin = update.from_user 
@@ -41,19 +61,19 @@ async def member_update_handler(client: Client, update: ChatMemberUpdated):
             chat_title = update.chat.title
             log_msg = ""
 
-            # CASE 1: REJECTED / LEFT
+            # CASE A: REJECTED / LEFT
             if new_status == enums.ChatMemberStatus.LEFT:
-                # Agar User ne khud cancel kiya
+                # Agar Admin user available hai aur User ID same hai -> User ne khud cancel kiya
                 if admin and user and admin.id == user.id:
-                    log_msg = f"**User {user.mention} cancelled their join request for {chat_title}.**"
-                # Agar Admin ne decline kiya
+                    log_msg = f"❌ **Request Cancelled**\n👤 User: {user.mention}\n📍 Chat: {chat_title}"
+                # Agar Admin alag hai -> Admin ne Decline kiya
                 elif user:
-                    log_msg = f"**Join request for {user.mention} in {chat_title} was declined.**"
+                    log_msg = f"🚫 **Request Declined**\n👤 User: {user.mention}\n📍 Chat: {chat_title}"
 
-            # CASE 2: APPROVED
+            # CASE B: APPROVED
             elif new_status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR]:
                  if user:
-                    log_msg = f"**User {user.mention} was approved in {chat_title}.**"
+                    log_msg = f"✅ **Request Approved**\n👤 User: {user.mention}\n📍 Chat: {chat_title}"
             
             # Send Log to Channel
             if log_msg:
@@ -63,7 +83,8 @@ async def member_update_handler(client: Client, update: ChatMemberUpdated):
     except Exception as e:
         logger.error(f"Member Update Error: {e}")
 
-# --- 3. CLEAR CACHE COMMAND ---
+# --- 3. CLEAR CACHE COMMAND (Optional Utility) ---
 @Client.on_message(filters.command("delreq") & filters.private & filters.user(ADMINS))
 async def del_requests(client, message):
-    await message.reply("<b>ℹ️ Join Request Cache clear karne ke liye Database function check karein.</b>")
+    # Yeh bas ek dummy response hai, asli cleanup automatic hota hai upar wale handler se.
+    await message.reply("<b>ℹ️ Note:</b> Join Requests automatically manage hoti hain via Database.\nManual delete ki zaroorat nahi hai.")

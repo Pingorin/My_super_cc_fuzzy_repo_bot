@@ -222,9 +222,15 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(f"⚠️ **Alert:** Shortener {site} is down. Skipping Level {level}... ⏩")
         return "SKIP"
 
-# --- 🔥 ADVANCED FSUB CHECK (Component 3) ---
+# --- 🔥 FSUB CHECK LOGIC (Slots 1, 2, 3) ---
 
 async def check_fsub(client, user_id, message_obj):
+    """
+    Checks Slots 1, 2, and 3.
+    Slot 3 = Normal Join (Must Join, No Pending).
+    Slot 1 & 2 = Force Request (Pending Allowed).
+    Slot 4 = Skipped here (Checked later).
+    """
     src_chat_id = None
     if len(message_obj.command) > 1:
         try:
@@ -241,7 +247,7 @@ async def check_fsub(client, user_id, message_obj):
     fsub_channels = group_settings.get('fsub_channels')
     if not isinstance(fsub_channels, dict): return True 
 
-    # Loop through Slots 1, 2, 3 (Skip 4)
+    # Loop through Slots
     for slot, channel_id in fsub_channels.items():
         if str(slot) == "4": continue # Slot 4 is checked AFTER verification
         
@@ -249,43 +255,64 @@ async def check_fsub(client, user_id, message_obj):
             channel_id = int(channel_id)
         except: continue
 
-        # 1️⃣ CASE 1: CHECK MEMBER (Direct API Check)
+        # 1️⃣ COMMON MEMBER CHECK (For all slots 1, 2, 3)
         try:
             member = await client.get_chat_member(channel_id, user_id)
             if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
-                continue # Access Granted, check next
+                continue # User is member, Next!
         except UserNotParticipant:
-            pass # Not a member, check pending
+            pass # Not a member
         except Exception:
-            continue # Bot might not be admin, skip
+            continue # Bot might not be admin, skip to prevent block
 
-        # 2️⃣ CASE 2: CHECK PENDING (Database Check)
-        if await db.is_user_pending(user_id, channel_id):
-            continue # Pending request found, Access Granted
+        # 2️⃣ SLOT 3 LOGIC (NORMAL JOIN)
+        if str(slot) == "3":
+            # No Pending Check here. User MUST join.
+            try:
+                # Normal Invite Link (No Join Request)
+                invite = await client.create_chat_invite_link(channel_id)
+                
+                btn = [
+                    [InlineKeyboardButton(f"📢 Join Channel {slot}", url=invite.invite_link)],
+                    [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={message_obj.command[1]}")]
+                ]
+                
+                await message_obj.reply_text(
+                    f"⚠️ **Access Denied!**\n\n"
+                    f"Please join **Channel {slot}** to continue.\n\n"
+                    f"👇 Join karke **Try Again** dabayein.",
+                    reply_markup=InlineKeyboardMarkup(btn)
+                )
+                return False 
+            except Exception as e:
+                print(f"Slot 3 Error: {e}")
+                pass
 
-        # 3️⃣ CASE 3: NEITHER MEMBER NOR PENDING -> BLOCK ACCESS
-        try:
-            try: await client.get_chat(channel_id)
-            except: pass 
-            
-            # Create "Request to Join" Link
-            link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=True)
-            link = link_obj.invite_link
-            
-            btn = [
-                [InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=link)],
-                [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={message_obj.command[1]}")]
-            ]
+        # 3️⃣ SLOT 1 & 2 LOGIC (FORCE REQUEST)
+        else:
+            # Check Pending Database
+            if await db.is_user_pending(user_id, channel_id):
+                continue # User requested, Access Granted
 
-            await message_obj.reply_text(
-                f"⚠️ **Access Denied!**\n\n"
-                f"You must **Request to Join** our update channel (Slot {slot}) to access this file.\n\n"
-                f"1️⃣ Click **Request to Join**\n"
-                f"2️⃣ Click **Try Again** immediately (No need to wait for approval).",
-                reply_markup=InlineKeyboardMarkup(btn)
-            )
-            return False 
-        except: continue
+            try:
+                # Force Request Link
+                invite = await client.create_chat_invite_link(channel_id, creates_join_request=True)
+                
+                btn = [
+                    [InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=invite.invite_link)],
+                    [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={message_obj.command[1]}")]
+                ]
+                
+                await message_obj.reply_text(
+                    f"⚠️ **Access Denied!**\n\n"
+                    f"You must **Request to Join** Channel {slot}.\n\n"
+                    f"1️⃣ Click **Request to Join**\n"
+                    f"2️⃣ Click **Try Again** immediately.",
+                    reply_markup=InlineKeyboardMarkup(btn)
+                )
+                return False 
+            except Exception as e:
+                pass
 
     return True
 
@@ -296,7 +323,8 @@ async def start_handler(client, message):
     # --- Private Chat Logic ---
     if message.chat.type == enums.ChatType.PRIVATE:
         await db.add_user(message.from_user.id)
-        # We generally check Fsub here, BUT if it is 'get_' or 'verify_', we handle it inside those blocks for sequential flow
+        
+        # General Fsub Check for start command (excluding get/verify)
         if len(message.command) > 1 and not (message.command[1].startswith("verify_") or message.command[1].startswith("get_")):
             if not await check_fsub(client, message.from_user.id, message): return 
 
@@ -306,7 +334,7 @@ async def start_handler(client, message):
             return await message.reply("✅ Bot is Alive & Settings Saved!")
 
     # -------------------------------------------------------------------------
-    # 2. VERIFICATION RETURN LOGIC (Verify karke wapas aane par)
+    # 2. VERIFICATION RETURN LOGIC (User Returns from Shortener)
     # -------------------------------------------------------------------------
     if len(message.command) > 1 and message.command[1].startswith("verify_"):
         try:
@@ -324,7 +352,7 @@ async def start_handler(client, message):
             
             # Check if COMPLETE verification is done
             if await check_verification(client, message.from_user.id, verify_chatid, link_id, message):
-                # Send user back to 'get' command to trigger Slot 4 check
+                # ✅ Verified. Send button to 'get' command to trigger Slot 4 check
                 btn = [[InlineKeyboardButton("📂 Get Your File Now", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{verify_chatid}")]]
                 await message.reply(f"✅ **Verification Verified!**\n\nAb niche button par click karke file lein.", reply_markup=InlineKeyboardMarkup(btn))
             return
@@ -340,23 +368,23 @@ async def start_handler(client, message):
             src_chat_id = data[2] if len(data) > 2 else str(message.chat.id)
             
             # ==================================================================
-            # 🛑 STEP 1: NORMAL FSUB (SLOTS 1, 2, 3)
+            # 🛑 STEP 1: FSUB 1, 2, 3 CHECK
             # ==================================================================
-            # Ye sabse pehle chalega. Agar user Slot 1-3 me nahi hai, to yahi ruk jayega.
+            # Checks Slots 1, 2 (Request) and Slot 3 (Normal).
             if not await check_fsub(client, message.from_user.id, message):
                 return 
 
             # ==================================================================
             # 🛑 STEP 2: SHORTENER VERIFICATION
             # ==================================================================
-            # Agar Step 1 pass hai, tab verify check hoga.
+            # If Step 1 pass, check Verification.
             if not await check_verification(client, message.from_user.id, src_chat_id, link_id, message): 
                 return 
 
             # ==================================================================
             # 🛑 STEP 3: SLOT 4 (FINAL CHANNEL) CHECK
             # ==================================================================
-            # Agar Step 1 & 2 pass hain, tab Final Channel check hoga.
+            # If Step 1 & 2 pass, Check Slot 4 (Force Request).
             fsub_4_status, id_4 = await check_fsub_4_status(client, message.from_user.id, src_chat_id)
             
             if id_4 and fsub_4_status == "NOT_JOINED":
@@ -368,7 +396,7 @@ async def start_handler(client, message):
 
                 btn = [
                     [InlineKeyboardButton("📢 Join Final Channel", url=invite.invite_link)],
-                    # 'I Have Joined' dabane par wapas yahi loop chalega -> All steps check -> File
+                    # 'I Have Joined' triggers this whole loop again: Steps 1, 2, 3 -> File
                     [InlineKeyboardButton("✅ I Have Joined - Get File", url=f"https://t.me/{temp.U_NAME}?start={message.command[1]}")]
                 ]
                 

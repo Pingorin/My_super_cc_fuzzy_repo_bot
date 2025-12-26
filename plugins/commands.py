@@ -1,14 +1,11 @@
-import os
 import logging
 import time
-import asyncio
 from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
 from database.ia_filterdb import Media
 import info 
 from info import ADMINS, IS_VERIFY
-# 🔥 ADDED check_fsub_4_status HERE
 from utils import temp, get_shortlink, check_fsub_4_status
 from Script import script 
 
@@ -318,8 +315,8 @@ async def start_handler(client, message):
     if message.chat.type == enums.ChatType.PRIVATE:
         await db.add_user(message.from_user.id)
         
-        # 🛑 FSUB CHECK (First Priority)
-        if len(message.command) > 1:
+        # 🛑 FSUB CHECK (First Priority - Normal Slots 1, 2, 3)
+        if len(message.command) > 1 and not message.command[1].startswith("verify_"):
             is_allowed = await check_fsub(client, message.from_user.id, message)
             if not is_allowed: return 
 
@@ -349,14 +346,7 @@ async def start_handler(client, message):
             is_all_clear = await check_verification(client, message.from_user.id, chat_id, link_id, message)
             
             if is_all_clear:
-                await message.reply(f"✅ **Verification Successful!**\n\nAccess Granted. 📂")
-                if link_id != 0:
-                    file_data = await Media.get_file_details(link_id)
-                    search_data = await Media.search_col.find_one({'link_id': link_id})
-                    if file_data and file_data.get('file_id'):
-                        caption = search_data.get('caption', f"📂 <b>{search_data.get('file_name')}</b>")
-                        try: await client.send_cached_media(chat_id=message.from_user.id, file_id=file_data.get('file_id'), caption=f"{caption}\n{script.CUSTOM_FOOTER}", parse_mode=enums.ParseMode.HTML)
-                        except Exception as e: await message.reply(f"❌ Error sending file: `{e}`")
+                await message.reply(f"✅ **Verification Complete!**\nAb File lene ke liye **Try Again** par click karein ya Link wapas open karein.")
             return
         except Exception as e: return await message.reply(f"❌ Error during verification: {e}")
 
@@ -367,32 +357,40 @@ async def start_handler(client, message):
             link_id = int(data[1])
             src_chat_id = data[2] if len(data) > 2 else str(message.chat.id)
             
-            # Check Verification Status
+            # 1. Check Shortener Verification Status First
             is_all_clear = await check_verification(client, message.from_user.id, src_chat_id, link_id, message)
             if not is_all_clear: return 
 
             # -----------------------------------------------------------
             # 🔥 SLOT 4 (POST-VERIFY) CHECK START 🔥
             # -----------------------------------------------------------
-            
             fsub_4_status, id_4 = await check_fsub_4_status(client, message.from_user.id, src_chat_id)
-        
+            
+            # Agar Slot 4 set hai aur User Joined nahi hai
             if id_4 and fsub_4_status == "NOT_JOINED":
                 try:
-                    # Request Link Generate
-                    link = await client.create_chat_invite_link(id_4, creates_join_request=True)
-                    btn = [
-                        [InlineKeyboardButton("📢 Join Final Channel", url=link.invite_link)],
-                        [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={message.command[1]}")]
-                    ]
-                    
-                    await message.reply_text(
-                        f"🛑 **Almost There!**\n\nFile lene ke liye bas ye aakhri channel join karein aur 'Try Again' dabayein.",
-                        reply_markup=InlineKeyboardMarkup(btn)
-                    )
-                    return # Code yahan ruk jayega, file send nahi hogi
+                    invite = await client.create_chat_invite_link(id_4, creates_join_request=True)
                 except Exception as e:
-                    logger.error(f"Slot 4 Error: {e}")
+                    await message.reply(f"❌ **Config Error:** Bot cannot generate link for Slot 4 Channel.\n`{e}`")
+                    return
+
+                # Buttons setup
+                btn = [
+                    [InlineKeyboardButton("📢 Join Final Channel (Last Step)", url=invite.invite_link)],
+                    # 'Try Again' wapas yahi loop chalayega. Verify pass hoga, bas Fsub check hoga.
+                    [InlineKeyboardButton("✅ I Have Joined - Get File", url=f"https://t.me/{temp.U_NAME}?start={message.command[1]}")]
+                ]
+                
+                await message.reply_text(
+                    text=(
+                        "🛑 **One Last Step!**\n\n"
+                        "Shortener Verification ✅ **Done!**\n"
+                        "File receive karne ke liye bas ye **Final Channel** join karein.\n\n"
+                        "👇 **Join karke niche button dabayein:**"
+                    ),
+                    reply_markup=InlineKeyboardMarkup(btn)
+                )
+                return # ⛔ YAHAN RUK JAYEGA (File send nahi hogi)
             # -----------------------------------------------------------
             # 🔥 SLOT 4 CHECK END 🔥
             # -----------------------------------------------------------

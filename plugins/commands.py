@@ -2,7 +2,7 @@ import logging
 import time
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import UserNotParticipant # Required for Advanced Fsub
+from pyrogram.errors import UserNotParticipant
 from database.users_chats_db import db
 from database.ia_filterdb import Media
 import info 
@@ -17,17 +17,6 @@ logger = logging.getLogger(__name__)
 START_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg"
 
 # --- 🛠️ HELPER FUNCTIONS ---
-
-def get_size(size):
-    """Converts bytes to human readable format."""
-    if not size: return "0 B"
-    power = 2**10
-    n = 0
-    power_labels = {0 : '', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
-    while size > power:
-        size /= power
-        n += 1
-    return f"{size:.2f} {power_labels[n]}B"
 
 async def send_shortener_alert(client, chat_id, site_domain):
     """Sends an alert to admins if a shortener fails."""
@@ -237,7 +226,6 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
 
 async def check_fsub(client, user_id, message_obj):
     src_chat_id = None
-    # Parse source chat ID
     if len(message_obj.command) > 1:
         try:
             parts = message_obj.command[1].split("_")
@@ -253,7 +241,7 @@ async def check_fsub(client, user_id, message_obj):
     fsub_channels = group_settings.get('fsub_channels')
     if not isinstance(fsub_channels, dict): return True 
 
-    # Loop through configured slots
+    # Loop through Slots 1, 2, 3 (Skip 4)
     for slot, channel_id in fsub_channels.items():
         if str(slot) == "4": continue # Slot 4 is checked AFTER verification
         
@@ -269,7 +257,7 @@ async def check_fsub(client, user_id, message_obj):
         except UserNotParticipant:
             pass # Not a member, check pending
         except Exception:
-            continue # Bot might not be admin or other error, skip to avoid blocking
+            continue # Bot might not be admin, skip
 
         # 2️⃣ CASE 2: CHECK PENDING (Database Check)
         if await db.is_user_pending(user_id, channel_id):
@@ -308,7 +296,7 @@ async def start_handler(client, message):
     # --- Private Chat Logic ---
     if message.chat.type == enums.ChatType.PRIVATE:
         await db.add_user(message.from_user.id)
-        # Normal Slots (1, 2, 3) check - Agar command verify ya get nahi hai
+        # We generally check Fsub here, BUT if it is 'get_' or 'verify_', we handle it inside those blocks for sequential flow
         if len(message.command) > 1 and not (message.command[1].startswith("verify_") or message.command[1].startswith("get_")):
             if not await check_fsub(client, message.from_user.id, message): return 
 
@@ -318,7 +306,7 @@ async def start_handler(client, message):
             return await message.reply("✅ Bot is Alive & Settings Saved!")
 
     # -------------------------------------------------------------------------
-    # 2. VERIFICATION RETURN LOGIC (Jab user Shortener se wapas aata hai)
+    # 2. VERIFICATION RETURN LOGIC (Verify karke wapas aane par)
     # -------------------------------------------------------------------------
     if len(message.command) > 1 and message.command[1].startswith("verify_"):
         try:
@@ -331,12 +319,12 @@ async def start_handler(client, message):
             if str(verify_userid) != str(message.from_user.id): 
                 return await message.reply("❌ **Invalid Link!** This link is not for you.")
             
-            # Update DB that this level is done
+            # Update DB
             await db.update_verify_status(message.from_user.id, verify_chatid, level)
             
             # Check if COMPLETE verification is done
             if await check_verification(client, message.from_user.id, verify_chatid, link_id, message):
-                # We send them back to the 'get' command to trigger the Slot 4 check
+                # Send user back to 'get' command to trigger Slot 4 check
                 btn = [[InlineKeyboardButton("📂 Get Your File Now", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{verify_chatid}")]]
                 await message.reply(f"✅ **Verification Verified!**\n\nAb niche button par click karke file lein.", reply_markup=InlineKeyboardMarkup(btn))
             return
@@ -352,17 +340,25 @@ async def start_handler(client, message):
             src_chat_id = data[2] if len(data) > 2 else str(message.chat.id)
             
             # ==================================================================
-            # 🛑 PHASE 1: SHORTENER VERIFICATION
+            # 🛑 STEP 1: NORMAL FSUB (SLOTS 1, 2, 3)
             # ==================================================================
-            if not await check_verification(client, message.from_user.id, src_chat_id, link_id, message): 
-                return # Shortener link sent, stopped here.
+            # Ye sabse pehle chalega. Agar user Slot 1-3 me nahi hai, to yahi ruk jayega.
+            if not await check_fsub(client, message.from_user.id, message):
+                return 
 
             # ==================================================================
-            # 🛑 PHASE 2: SLOT 4 (FINAL CHANNEL) CHECK
+            # 🛑 STEP 2: SHORTENER VERIFICATION
             # ==================================================================
+            # Agar Step 1 pass hai, tab verify check hoga.
+            if not await check_verification(client, message.from_user.id, src_chat_id, link_id, message): 
+                return 
+
+            # ==================================================================
+            # 🛑 STEP 3: SLOT 4 (FINAL CHANNEL) CHECK
+            # ==================================================================
+            # Agar Step 1 & 2 pass hain, tab Final Channel check hoga.
             fsub_4_status, id_4 = await check_fsub_4_status(client, message.from_user.id, src_chat_id)
             
-            # Logic: If Slot 4 set AND User Not Joined
             if id_4 and fsub_4_status == "NOT_JOINED":
                 try:
                     invite = await client.create_chat_invite_link(id_4, creates_join_request=True)
@@ -372,6 +368,7 @@ async def start_handler(client, message):
 
                 btn = [
                     [InlineKeyboardButton("📢 Join Final Channel", url=invite.invite_link)],
+                    # 'I Have Joined' dabane par wapas yahi loop chalega -> All steps check -> File
                     [InlineKeyboardButton("✅ I Have Joined - Get File", url=f"https://t.me/{temp.U_NAME}?start={message.command[1]}")]
                 ]
                 
@@ -383,10 +380,10 @@ async def start_handler(client, message):
                     ),
                     reply_markup=InlineKeyboardMarkup(btn)
                 )
-                return # ⛔ Stopped here.
+                return 
             
             # ==================================================================
-            # ✅ PHASE 3: SEND FILE
+            # ✅ STEP 4: SEND FILE (All Checks Passed)
             # ==================================================================
 
             file_data = await Media.get_file_details(link_id)
@@ -417,7 +414,6 @@ async def connect_handler(client, message):
         member = await client.get_chat_member(message.chat.id, user_id)
         if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]: return await message.reply("❌ **Admin Only.** You cannot use this.")
         
-        # ✅ Save Title Here Too (Fix for Restart Issue)
         await db.add_group(message.chat.id, message.chat.title)
         
         await message.reply_text(f"✅ **Successfully Connected!**\nGroup: `{message.chat.title}`\nID: `{message.chat.id}` saved.")

@@ -11,6 +11,7 @@ class UserChatDB:
         self.users = self.db.users
         self.groups = self.db.groups
         self.banned = self.db.banned 
+        # ✅ Yeh collection pending Join Requests store karega
         self.fsub_pending = self.db.fsub_pending 
 
     async def add_user(self, id):
@@ -185,25 +186,32 @@ class UserChatDB:
             upsert=True
         )
 
-    # --- 🔥 ADVANCED FSUB PENDING LOGIC 🔥 ---
+    # --- 🔥 ADVANCED FSUB PENDING LOGIC (Updated for Force Request) 🔥 ---
     
     async def add_pending_request(self, user_id, channel_id):
+        """Used when user clicks 'Request to Join'."""
         try:
             await self.fsub_pending.update_one(
                 {'_id': f"{user_id}_{channel_id}"},
-                {'$set': {'user_id': int(user_id), 'chat_id': int(channel_id)}},
+                {'$set': {
+                    'user_id': int(user_id), 
+                    'chat_id': int(channel_id),
+                    'date': time.time() # ✅ Added Timestamp
+                }},
                 upsert=True
             )
         except Exception as e:
             print(f"Error adding pending request: {e}")
 
     async def remove_pending_request(self, user_id, channel_id):
+        """Used when Admin Approves/Declines or User Leaves."""
         try:
             await self.fsub_pending.delete_one({'_id': f"{user_id}_{channel_id}"})
         except Exception as e:
             print(f"Error removing pending request: {e}")
 
     async def is_user_pending(self, user_id, channel_id):
+        """Checks if user has a pending join request."""
         try:
             found = await self.fsub_pending.find_one({'_id': f"{user_id}_{channel_id}"})
             return bool(found)

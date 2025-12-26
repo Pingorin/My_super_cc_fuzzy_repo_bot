@@ -2,6 +2,7 @@ import logging
 import time
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.errors import UserNotParticipant # Required for Advanced Fsub
 from database.users_chats_db import db
 from database.ia_filterdb import Media
 import info 
@@ -232,11 +233,11 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(f"⚠️ **Alert:** Shortener {site} is down. Skipping Level {level}... ⏩")
         return "SKIP"
 
-# --- 🚫 FSUB CHECK (FORCE REQUEST JOIN) ---
+# --- 🔥 ADVANCED FSUB CHECK (Component 3) ---
 
 async def check_fsub(client, user_id, message_obj):
     src_chat_id = None
-    # Parse source chat ID from start command
+    # Parse source chat ID
     if len(message_obj.command) > 1:
         try:
             parts = message_obj.command[1].split("_")
@@ -250,37 +251,49 @@ async def check_fsub(client, user_id, message_obj):
     if not group_settings: return True
     
     fsub_channels = group_settings.get('fsub_channels')
-    if not fsub_channels or not isinstance(fsub_channels, dict): 
-        return True 
+    if not isinstance(fsub_channels, dict): return True 
 
+    # Loop through configured slots
     for slot, channel_id in fsub_channels.items():
         if str(slot) == "4": continue # Slot 4 is checked AFTER verification
+        
         try:
             channel_id = int(channel_id)
+        except: continue
+
+        # 1️⃣ CASE 1: CHECK MEMBER (Direct API Check)
+        try:
             member = await client.get_chat_member(channel_id, user_id)
             if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
-                continue 
-        except: pass
+                continue # Access Granted, check next
+        except UserNotParticipant:
+            pass # Not a member, check pending
+        except Exception:
+            continue # Bot might not be admin or other error, skip to avoid blocking
 
-        if await db.is_user_pending(user_id, channel_id): continue 
+        # 2️⃣ CASE 2: CHECK PENDING (Database Check)
+        if await db.is_user_pending(user_id, channel_id):
+            continue # Pending request found, Access Granted
 
+        # 3️⃣ CASE 3: NEITHER MEMBER NOR PENDING -> BLOCK ACCESS
         try:
             try: await client.get_chat(channel_id)
             except: pass 
-
+            
+            # Create "Request to Join" Link
             link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=True)
             link = link_obj.invite_link
             
-            btn = [[InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=link)]]
-            original_param = message_obj.command[1] if len(message_obj.command) > 1 else "start"
-            btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")])
+            btn = [
+                [InlineKeyboardButton(f"📢 Request to Join Channel {slot}", url=link)],
+                [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={message_obj.command[1]}")]
+            ]
 
             await message_obj.reply_text(
                 f"⚠️ **Access Denied!**\n\n"
                 f"You must **Request to Join** our update channel (Slot {slot}) to access this file.\n\n"
                 f"1️⃣ Click **Request to Join**\n"
-                f"2️⃣ Wait for approval (or auto-approve)\n"
-                f"3️⃣ Click **Try Again**",
+                f"2️⃣ Click **Try Again** immediately (No need to wait for approval).",
                 reply_markup=InlineKeyboardMarkup(btn)
             )
             return False 
@@ -341,20 +354,15 @@ async def start_handler(client, message):
             # ==================================================================
             # 🛑 PHASE 1: SHORTENER VERIFICATION
             # ==================================================================
-            # Ye check karega: Dynamic (All links) ya Smart (Gap Active)
-            # Agar Gap active hai, to ye True return karega.
-            # Agar Verification pending hai, to ye Link bhejega aur False return karega.
             if not await check_verification(client, message.from_user.id, src_chat_id, link_id, message): 
-                return # User ko Shortener link mila hai, code yahan ruk gaya.
+                return # Shortener link sent, stopped here.
 
             # ==================================================================
             # 🛑 PHASE 2: SLOT 4 (FINAL CHANNEL) CHECK
             # ==================================================================
-            # Code yahan tabhi aayega jab Shortener (Phase 1) PASS ho chuka ho.
-            
             fsub_4_status, id_4 = await check_fsub_4_status(client, message.from_user.id, src_chat_id)
             
-            # Logic: Agar Slot 4 set hai AND User Join Nahi Hai
+            # Logic: If Slot 4 set AND User Not Joined
             if id_4 and fsub_4_status == "NOT_JOINED":
                 try:
                     invite = await client.create_chat_invite_link(id_4, creates_join_request=True)
@@ -364,8 +372,6 @@ async def start_handler(client, message):
 
                 btn = [
                     [InlineKeyboardButton("📢 Join Final Channel", url=invite.invite_link)],
-                    # 'I Joined' dabane par wapas yahi command chalegi
-                    # Phase 1 (Verify) Pass hoga -> Phase 2 (Slot 4) check hoga
                     [InlineKeyboardButton("✅ I Have Joined - Get File", url=f"https://t.me/{temp.U_NAME}?start={message.command[1]}")]
                 ]
                 
@@ -377,10 +383,10 @@ async def start_handler(client, message):
                     ),
                     reply_markup=InlineKeyboardMarkup(btn)
                 )
-                return # ⛔ FILE NAHI GAYI. Yahan ruk gaya.
+                return # ⛔ Stopped here.
             
             # ==================================================================
-            # ✅ PHASE 3: SEND FILE (Only if Phase 1 & 2 Passed)
+            # ✅ PHASE 3: SEND FILE
             # ==================================================================
 
             file_data = await Media.get_file_details(link_id)

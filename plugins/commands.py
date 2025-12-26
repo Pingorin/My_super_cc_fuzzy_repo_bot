@@ -71,12 +71,7 @@ async def get_active_shorteners(chat_id):
 # --- 🛠️ GROUP OBSERVER (AUTO SAVE TITLE) ---
 @Client.on_message(filters.group, group=-1)
 async def auto_save_group_handler(client, message):
-    """
-    Automatically saves group ID and TITLE to database on any message.
-    This ensures the bot remembers the Group Name after restart.
-    """
     try: 
-        # ✅ Save Title along with ID automatically
         if message.chat and message.chat.title:
             await db.add_group(message.chat.id, message.chat.title)
     except: 
@@ -254,35 +249,25 @@ async def check_fsub(client, user_id, message_obj):
     group_settings = await db.get_group_settings(src_chat_id)
     if not group_settings: return True
     
-    # 🛠️ FIX: PREVENT LIST ERROR (DB COMPATIBILITY)
     fsub_channels = group_settings.get('fsub_channels')
     if not fsub_channels or not isinstance(fsub_channels, dict): 
         return True 
 
     for slot, channel_id in fsub_channels.items():
+        if str(slot) == "4": continue # Slot 4 is checked AFTER verification
         try:
             channel_id = int(channel_id)
-        except: continue
-        
-        # 1. Check if user is already a member
-        try:
             member = await client.get_chat_member(channel_id, user_id)
             if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
                 continue 
-        except: pass 
+        except: pass
 
-        # 2. Check if user has already sent a Join Request (Pending)
-        if await db.is_user_pending(user_id, channel_id):
-            continue 
+        if await db.is_user_pending(user_id, channel_id): continue 
 
-        # 3. Create JOIN REQUEST Link and Block Access
         try:
-            # 🛠️ FIX: PRE-FETCH CHAT TO PREVENT 'PEER_ID_INVALID'
-            # Telegram API requires us to "know" the chat before creating a link
             try: await client.get_chat(channel_id)
             except: pass 
 
-            # creates_join_request=True forces the user to Request Join instead of instant join
             link_obj = await client.create_chat_invite_link(channel_id, creates_join_request=True)
             link = link_obj.invite_link
             
@@ -299,11 +284,7 @@ async def check_fsub(client, user_id, message_obj):
                 reply_markup=InlineKeyboardMarkup(btn)
             )
             return False 
-
-        except Exception as e:
-            # Avoid printing error to logs repeatedly to save space
-            pass
-            continue
+        except: continue
 
     return True
 
@@ -314,90 +295,97 @@ async def start_handler(client, message):
     # --- Private Chat Logic ---
     if message.chat.type == enums.ChatType.PRIVATE:
         await db.add_user(message.from_user.id)
-        
-        # 🛑 FSUB CHECK (First Priority - Normal Slots 1, 2, 3)
-        if len(message.command) > 1 and not message.command[1].startswith("verify_"):
-            is_allowed = await check_fsub(client, message.from_user.id, message)
-            if not is_allowed: return 
+        # Normal Slots (1, 2, 3) check - Agar command verify ya get nahi hai
+        if len(message.command) > 1 and not (message.command[1].startswith("verify_") or message.command[1].startswith("get_")):
+            if not await check_fsub(client, message.from_user.id, message): return 
 
-    # --- Group Chat Logic ---
     elif message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-        # ✅ Save Title here as well
         await db.add_group(message.chat.id, message.chat.title)
         if len(message.command) == 1:
             return await message.reply("✅ Bot is Alive & Settings Saved!")
 
-    # ✅ VERIFICATION RETURN LOGIC (verify_level_userid_chatid_linkid)
+    # -------------------------------------------------------------------------
+    # 2. VERIFICATION RETURN LOGIC (Jab user Shortener se wapas aata hai)
+    # -------------------------------------------------------------------------
     if len(message.command) > 1 and message.command[1].startswith("verify_"):
         try:
             data = message.command[1].split("_")
             level = int(data[1])
-            verify_id = data[2]
-            chat_id = data[3]
+            verify_userid = data[2]
+            verify_chatid = data[3]
             link_id = int(data[4]) if len(data) > 4 else 0
             
-            if str(verify_id) != str(message.from_user.id): 
+            if str(verify_userid) != str(message.from_user.id): 
                 return await message.reply("❌ **Invalid Link!** This link is not for you.")
             
             # Update DB that this level is done
-            await db.update_verify_status(message.from_user.id, chat_id, level)
+            await db.update_verify_status(message.from_user.id, verify_chatid, level)
             
-            # Check if more verification is needed
-            is_all_clear = await check_verification(client, message.from_user.id, chat_id, link_id, message)
-            
-            if is_all_clear:
-                await message.reply(f"✅ **Verification Complete!**\nAb File lene ke liye **Try Again** par click karein ya Link wapas open karein.")
+            # Check if COMPLETE verification is done
+            if await check_verification(client, message.from_user.id, verify_chatid, link_id, message):
+                # We send them back to the 'get' command to trigger the Slot 4 check
+                btn = [[InlineKeyboardButton("📂 Get Your File Now", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{verify_chatid}")]]
+                await message.reply(f"✅ **Verification Verified!**\n\nAb niche button par click karke file lein.", reply_markup=InlineKeyboardMarkup(btn))
             return
         except Exception as e: return await message.reply(f"❌ Error during verification: {e}")
 
-    # ✅ FILE RETRIEVAL LOGIC (get_linkid_chatid)
+    # -------------------------------------------------------------------------
+    # 3. 🔥 MAIN FILE RETRIEVAL LOGIC (get_linkid_chatid) 🔥
+    # -------------------------------------------------------------------------
     if len(message.command) > 1 and message.command[1].startswith("get_"):
         try:
             data = message.command[1].split("_")
             link_id = int(data[1])
             src_chat_id = data[2] if len(data) > 2 else str(message.chat.id)
             
-            # 1. Check Shortener Verification Status First
-            is_all_clear = await check_verification(client, message.from_user.id, src_chat_id, link_id, message)
-            if not is_all_clear: return 
+            # ==================================================================
+            # 🛑 PHASE 1: SHORTENER VERIFICATION
+            # ==================================================================
+            # Ye check karega: Dynamic (All links) ya Smart (Gap Active)
+            # Agar Gap active hai, to ye True return karega.
+            # Agar Verification pending hai, to ye Link bhejega aur False return karega.
+            if not await check_verification(client, message.from_user.id, src_chat_id, link_id, message): 
+                return # User ko Shortener link mila hai, code yahan ruk gaya.
 
-            # -----------------------------------------------------------
-            # 🔥 SLOT 4 (POST-VERIFY) CHECK START 🔥
-            # -----------------------------------------------------------
+            # ==================================================================
+            # 🛑 PHASE 2: SLOT 4 (FINAL CHANNEL) CHECK
+            # ==================================================================
+            # Code yahan tabhi aayega jab Shortener (Phase 1) PASS ho chuka ho.
+            
             fsub_4_status, id_4 = await check_fsub_4_status(client, message.from_user.id, src_chat_id)
             
-            # Agar Slot 4 set hai aur User Joined nahi hai
+            # Logic: Agar Slot 4 set hai AND User Join Nahi Hai
             if id_4 and fsub_4_status == "NOT_JOINED":
                 try:
                     invite = await client.create_chat_invite_link(id_4, creates_join_request=True)
-                except Exception as e:
-                    await message.reply(f"❌ **Config Error:** Bot cannot generate link for Slot 4 Channel.\n`{e}`")
+                except:
+                    await message.reply("❌ **Error:** Admin check Slot 4 permissions.")
                     return
 
-                # Buttons setup
                 btn = [
-                    [InlineKeyboardButton("📢 Join Final Channel (Last Step)", url=invite.invite_link)],
-                    # 'Try Again' wapas yahi loop chalayega. Verify pass hoga, bas Fsub check hoga.
+                    [InlineKeyboardButton("📢 Join Final Channel", url=invite.invite_link)],
+                    # 'I Joined' dabane par wapas yahi command chalegi
+                    # Phase 1 (Verify) Pass hoga -> Phase 2 (Slot 4) check hoga
                     [InlineKeyboardButton("✅ I Have Joined - Get File", url=f"https://t.me/{temp.U_NAME}?start={message.command[1]}")]
                 ]
                 
                 await message.reply_text(
                     text=(
-                        "🛑 **One Last Step!**\n\n"
-                        "Shortener Verification ✅ **Done!**\n"
-                        "File receive karne ke liye bas ye **Final Channel** join karein.\n\n"
-                        "👇 **Join karke niche button dabayein:**"
+                        "🎉 **Verification Passed!**\n\n"
+                        "🛑 **Last Step:** File bhejne se pehle, bas ye **Final Channel** join karein.\n"
+                        "Uske baad file turant mil jayegi."
                     ),
                     reply_markup=InlineKeyboardMarkup(btn)
                 )
-                return # ⛔ YAHAN RUK JAYEGA (File send nahi hogi)
-            # -----------------------------------------------------------
-            # 🔥 SLOT 4 CHECK END 🔥
-            # -----------------------------------------------------------
+                return # ⛔ FILE NAHI GAYI. Yahan ruk gaya.
+            
+            # ==================================================================
+            # ✅ PHASE 3: SEND FILE (Only if Phase 1 & 2 Passed)
+            # ==================================================================
 
-            # Send File
             file_data = await Media.get_file_details(link_id)
             search_data = await Media.search_col.find_one({'link_id': link_id})
+            
             if not file_data: return await message.reply("❌ **File Not Found.** It may have been deleted.")
             
             caption = search_data.get('caption', f"📂 <b>{search_data.get('file_name')}</b>")
@@ -406,9 +394,9 @@ async def start_handler(client, message):
         except Exception as e: await message.reply(f"❌ Error: {e}")
         return
 
-    # ✅ STANDARD START MESSAGE
+    # Standard Start
     if message.chat.type == enums.ChatType.PRIVATE:
-        text = f"Hello {message.from_user.mention} 👋,\nI am a Powerul Auto Filter Bot with Verification Support."
+        text = f"Hello {message.from_user.mention} 👋,\nI am a Powerul Auto Filter Bot."
         buttons = [
             [InlineKeyboardButton('⇆ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘs ⇆', url=f'http://t.me/{temp.U_NAME}?startgroup=start')],
             [InlineKeyboardButton('⚙ ꜰᴇᴀᴛᴜʀᴇs', callback_data='features'), InlineKeyboardButton('💸 ᴘʀᴇᴍɪᴜᴍ', callback_data='buy_premium')],

@@ -1,7 +1,7 @@
 import asyncio
 import aiohttp
 from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
 import info
 
@@ -41,8 +41,11 @@ async def settings_command(client, message):
                 member = await client.get_chat_member(chat_id, user_id)
             except: continue 
             if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-                chat_info = await client.get_chat(chat_id)
-                user_groups.append((chat_info.title, chat_id))
+                try: chat_info = await client.get_chat(chat_id)
+                except: chat_info = None
+                
+                title = chat_info.title if chat_info else f"Group {chat_id}"
+                user_groups.append((title, chat_id))
         except: continue 
 
     await msg.delete()
@@ -66,89 +69,159 @@ async def main_settings_menu(client, query):
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
     try: title = (await client.get_chat(chat_id)).title
-    except: title = "Unknown"
+    except: title = str(chat_id)
+    
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🔥 ADVANCED FSUB MENU (Repo 2 Style - Updated Layout)
+# 🔥 NEW FSUB SELECTION MENU (SPLIT REQUEST VS NORMAL)
 # ==============================================================================
+
 @Client.on_callback_query(filters.regex(r"^fsub_menu#"))
 async def fsub_configure_menu(client, query):
-    try:
-        chat_id = int(query.data.split("#")[1])
-        group_data = await db.get_group_settings(chat_id)
-        
-        if not group_data:
-            await db.add_group(chat_id)
-            group_data = await db.get_group_settings(chat_id)
-            
-        raw_fsub = group_data.get('fsub_channels', {})
-        if not isinstance(raw_fsub, dict): raw_fsub = {}
+    chat_id = int(query.data.split("#")[1])
+    
+    text = (
+        "📢 **Force Subscribe Settings**\n\n"
+        "Select which type of FSub you want to configure:"
+    )
+    
+    buttons = [
+        [InlineKeyboardButton("Request Fsub (Auth 1,2,4)", callback_data=f"fsub_req_menu#{chat_id}")],
+        [InlineKeyboardButton("Normal Fsub (Auth 3)", callback_data=f"fsub_norm_menu#{chat_id}")],
+        [InlineKeyboardButton("🔙 Back", callback_data=f"set_main#{chat_id}")]
+    ]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-        # Slots Read
-        s1 = raw_fsub.get('1')
-        s2 = raw_fsub.get('2')
-        s3 = raw_fsub.get('3')
-        s4 = raw_fsub.get('4')
+# ==============================================================================
+# 1️⃣ REQUEST FSUB MENU (Slots 1, 2, 4)
+# ==============================================================================
 
-        # Status Text
-        txt = f"⚙️ **Advanced Force Subscribe**\n\n"
-        txt += f"1️⃣ **Slot 1 (Req):** `{s1 if s1 else '❌ Not Set'}`\n"
-        txt += f"2️⃣ **Slot 2 (Req):** `{s2 if s2 else '❌ Not Set'}`\n"
-        txt += f"3️⃣ **Slot 3 (Normal):** `{s3 if s3 else '❌ Not Set'}`\n"
-        txt += f"➖➖➖➖➖➖➖➖➖➖\n"
-        txt += f"4️⃣ **Slot 4 (Post-Verify):** `{s4 if s4 else '❌ Not Set'}`\n\n"
-        txt += "👇 **Click below to change:**"
+@Client.on_callback_query(filters.regex(r"^fsub_req_menu#"))
+async def request_fsub_menu(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    fsub = group_data.get('fsub_channels', {}) if group_data else {}
+    if not isinstance(fsub, dict): fsub = {}
 
-        buttons = []
-        
-        # Row 1: Slot 1 & 2
-        btn1 = []
-        btn1.append(InlineKeyboardButton(f"{'✏️' if s1 else '➕'} Set 1", callback_data=f"set_fsub#{chat_id}#1"))
-        btn1.append(InlineKeyboardButton(f"{'✏️' if s2 else '➕'} Set 2", callback_data=f"set_fsub#{chat_id}#2"))
-        buttons.append(btn1)
+    # Helper to get name
+    async def get_name(id_val):
+        if not id_val: return "Not Set ❌"
+        try:
+            chat = await client.get_chat(id_val)
+            return f"{chat.title} ({id_val})"
+        except: return f"Unknown ({id_val})"
 
-        # Row 2: Slot 3 (Normal)
-        # User requested 1, 2, 3 show together logic, but distinct button for clarity
-        buttons.append([InlineKeyboardButton(f"{'✏️' if s3 else '➕'} Set Slot 3 (Normal)", callback_data=f"set_fsub#{chat_id}#3")])
+    s1 = fsub.get('1')
+    s2 = fsub.get('2')
+    s4 = fsub.get('4')
 
-        # Row 3: Slot 4 (Post Verification - Alag se)
-        buttons.append([InlineKeyboardButton(f"{'✏️' if s4 else '➕'} Set Post-Verify (Slot 4)", callback_data=f"set_fsub#{chat_id}#4")])
+    name1 = await get_name(s1)
+    name2 = await get_name(s2)
+    name4 = await get_name(s4)
 
-        # Clear Buttons
-        if s1 or s2 or s3 or s4:
-            buttons.append([InlineKeyboardButton("🗑️ Remove All Slots", callback_data=f"rem_fsub_all#{chat_id}")])
+    text = (
+        f"⚙️ **Configure Request F-Sub Channels for:** `{chat_id}`\n\n"
+        f"1️⃣ **Slot 1:** `{name1}`\n"
+        f"2️⃣ **Slot 2:** `{name2}`\n"
+        f"4️⃣ **Slot 4:** `{name4}`"
+    )
 
-        buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"set_main#{chat_id}")])
-        
-        await query.message.edit_text(txt, reply_markup=InlineKeyboardMarkup(buttons))
+    buttons = []
 
-    except Exception as e:
-        await query.answer(f"Error: {e}", show_alert=True)
+    # Slot 1 Controls
+    if s1:
+        buttons.append([InlineKeyboardButton("✏️ Edit Slot 1", callback_data=f"set_fsub#{chat_id}#1"),
+                        InlineKeyboardButton("🗑️ Clear Slot 1", callback_data=f"clr_fsub#{chat_id}#1")])
+    else:
+        buttons.append([InlineKeyboardButton("➕ Set Slot 1", callback_data=f"set_fsub#{chat_id}#1")])
 
-# 2. SET SLOT INPUT (Interactive Listen Enabled)
+    # Slot 2 Controls
+    if s2:
+        buttons.append([InlineKeyboardButton("✏️ Edit Slot 2", callback_data=f"set_fsub#{chat_id}#2"),
+                        InlineKeyboardButton("🗑️ Clear Slot 2", callback_data=f"clr_fsub#{chat_id}#2")])
+    else:
+        buttons.append([InlineKeyboardButton("➕ Set Slot 2", callback_data=f"set_fsub#{chat_id}#2")])
+
+    # Slot 4 Controls
+    label4 = "Slot 4 (Post-Verify)"
+    if s4:
+        buttons.append([InlineKeyboardButton(f"✏️ Edit {label4}", callback_data=f"set_fsub#{chat_id}#4"),
+                        InlineKeyboardButton("🗑️ Clear Slot 4", callback_data=f"clr_fsub#{chat_id}#4")])
+    else:
+        buttons.append([InlineKeyboardButton(f"➕ Set {label4}", callback_data=f"set_fsub#{chat_id}#4")])
+
+    # Footer
+    if s1 or s2 or s4:
+        buttons.append([InlineKeyboardButton("⛔ Remove All Request Fsub", callback_data=f"rem_req_all#{chat_id}")])
+    
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"fsub_menu#{chat_id}")])
+
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+# ==============================================================================
+# 2️⃣ NORMAL FSUB MENU (Slot 3)
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^fsub_norm_menu#"))
+async def normal_fsub_menu(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    fsub = group_data.get('fsub_channels', {}) if group_data else {}
+    if not isinstance(fsub, dict): fsub = {}
+
+    s3 = fsub.get('3')
+    
+    name3 = "Not Set ❌"
+    if s3:
+        try: name3 = (await client.get_chat(s3)).title
+        except: name3 = f"Unknown ({s3})"
+
+    text = (
+        f"⚙️ **Configure Normal F-Sub (Auth 3) for:** `{chat_id}`\n\n"
+        f"3️⃣ **Slot 3:** `{name3}`"
+    )
+
+    buttons = []
+    
+    # Slot 3 Controls
+    if s3:
+        buttons.append([InlineKeyboardButton("✏️ Edit Slot 3", callback_data=f"set_fsub#{chat_id}#3"),
+                        InlineKeyboardButton("🗑️ Clear Slot 3", callback_data=f"clr_fsub#{chat_id}#3")])
+        buttons.append([InlineKeyboardButton("⛔ Remove All Normal Fsub", callback_data=f"rem_norm_all#{chat_id}")])
+    else:
+        buttons.append([InlineKeyboardButton("➕ Set Slot 3", callback_data=f"set_fsub#{chat_id}#3")])
+
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"fsub_menu#{chat_id}")])
+
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+# ==============================================================================
+# ✍️ SET FSUB HANDLER (INPUT LISTENER)
+# ==============================================================================
+
 @Client.on_callback_query(filters.regex(r"^set_fsub#"))
 async def set_fsub_input(client, query):
     _, chat_id, slot = query.data.split("#")
     chat_id = int(chat_id)
     user_id = query.from_user.id
     
-    slot_name = "Normal" if slot == "3" else "Post-Verify" if slot == "4" else "Request"
+    # Determine Back Button destination
+    back_cb = f"fsub_req_menu#{chat_id}" if slot in ['1', '2', '4'] else f"fsub_norm_menu#{chat_id}"
     
     await query.message.edit_text(
-        f"🆔 **Set Slot {slot} ({slot_name})**\n\n"
-        "**Target Channel se koi bhi message Forward karein**\n"
-        "YA Channel ID/Username bhejein.\n\n"
-        "⚠️ **Dhyan dein:** Bot wahan Admin hona chahiye!",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data=f"fsub_menu#{chat_id}")]])
+        f"🆔 **Set Slot {slot}**\n\n"
+        "1. **Add me as Admin** in your Target Channel.\n"
+        "2. **Forward any message** from that Channel to here.\n"
+        "   OR Send Channel ID / Username.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data=back_cb)]])
     )
     
     try:
-        # Listening for input
         msg = await client.listen(user_id, timeout=60)
     except asyncio.TimeoutError:
-        await query.message.edit_text("❌ **Timeout!** Too slow.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"fsub_menu#{chat_id}")]]))
-        return
+        return await query.message.edit_text("❌ Timeout.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=back_cb)]]))
 
     if msg.text or msg.forward_from_chat:
         try:
@@ -157,39 +230,84 @@ async def set_fsub_input(client, query):
             else:
                 target_chat = await client.get_chat(msg.text)
             
-            # Save to Database
-            group_data = await db.get_group_settings(chat_id)
-            fsub_channels = group_data.get('fsub_channels', {})
-            if not isinstance(fsub_channels, dict): fsub_channels = {}
-            
-            fsub_channels[str(slot)] = int(target_chat.id)
-            await db.update_group_settings(chat_id, {'fsub_channels': fsub_channels})
-            
+            # Check Admin
+            try:
+                me = await client.get_chat_member(target_chat.id, "me")
+                if me.status != enums.ChatMemberStatus.ADMINISTRATOR:
+                    await msg.reply("❌ **Error:** I am not Admin in that channel!")
+                    # Go back to menu
+                    if slot in ['1', '2', '4']: return await request_fsub_menu(client, query)
+                    else: return await normal_fsub_menu(client, query)
+            except:
+                pass # Continue even if check fails (sometimes caches issues)
+
+            await db.update_fsub_channel(chat_id, slot, target_chat.id)
             await msg.reply(f"✅ **Saved!**\nSlot {slot}: {target_chat.title}")
             
-            # Wapas Menu par le jao
-            await fsub_configure_menu(client, query) 
+            # Redirect to correct menu
+            if slot in ['1', '2', '4']:
+                await request_fsub_menu(client, query)
+            else:
+                await normal_fsub_menu(client, query)
 
         except Exception as e:
-            await msg.reply(f"❌ **Error:** Invalid Channel.\nMake sure bot is admin there.\n`{e}`")
-            # Return to menu on error
-            try: await fsub_configure_menu(client, query)
-            except: pass
+            await msg.reply(f"❌ **Error:** Invalid Channel or I am not Admin.\n`{e}`")
+            if slot in ['1', '2', '4']: await request_fsub_menu(client, query)
+            else: await normal_fsub_menu(client, query)
     else:
         await msg.reply("❌ Invalid input.")
-        try: await fsub_configure_menu(client, query)
-        except: pass
-
-# 3. REMOVE ALL SLOTS
-@Client.on_callback_query(filters.regex(r"^rem_fsub_all#"))
-async def remove_fsub_all(client, query):
-    chat_id = int(query.data.split("#")[1])
-    await db.update_group_settings(chat_id, {'fsub_channels': {}})
-    await query.answer("All Fsub Channels Removed!", show_alert=True)
-    await fsub_configure_menu(client, query)
+        if slot in ['1', '2', '4']: await request_fsub_menu(client, query)
+        else: await normal_fsub_menu(client, query)
 
 # ==============================================================================
-# 💰 EARNING & SHORTENER SETTINGS (Unchanged)
+# 🗑️ CLEAR & REMOVE HANDLERS
+# ==============================================================================
+
+# Clear Single Slot
+@Client.on_callback_query(filters.regex(r"^clr_fsub#"))
+async def clear_single_fsub(client, query):
+    _, chat_id, slot = query.data.split("#")
+    chat_id = int(chat_id)
+    
+    await db.remove_fsub_channel(chat_id, slot)
+    
+    # Reload correct menu
+    if slot in ['1', '2', '4']:
+        await request_fsub_menu(client, query)
+    else:
+        await normal_fsub_menu(client, query)
+
+# Remove All Request Fsub (1, 2, 4)
+@Client.on_callback_query(filters.regex(r"^rem_req_all#"))
+async def remove_req_all(client, query):
+    chat_id = int(query.data.split("#")[1])
+    
+    await db.remove_fsub_channel(chat_id, '1')
+    await db.remove_fsub_channel(chat_id, '2')
+    await db.remove_fsub_channel(chat_id, '4')
+    
+    await query.answer("All Request Fsub Channels Removed!", show_alert=True)
+    await request_fsub_menu(client, query)
+
+# Remove All Normal Fsub (3)
+@Client.on_callback_query(filters.regex(r"^rem_norm_all#"))
+async def remove_norm_all(client, query):
+    chat_id = int(query.data.split("#")[1])
+    
+    await db.remove_fsub_channel(chat_id, '3')
+    
+    await query.answer("Normal Fsub Channel Removed!", show_alert=True)
+    await normal_fsub_menu(client, query)
+
+# ==============================================================================
+# 🔙 BACK HANDLERS
+# ==============================================================================
+@Client.on_callback_query(filters.regex(r"^set_back_home"))
+async def back_home(client, query):
+    await settings_command(client, query.message)
+
+# ==============================================================================
+# 💰 EARNING & SHORTENER SETTINGS
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^set_earn#"))
@@ -413,3 +531,17 @@ async def toggle_act(client, query):
 @Client.on_callback_query(filters.regex(r"^set_back_home"))
 async def back_home(client, query):
     await settings_command(client, query.message)
+
+# ==============================================================================
+# 🌐 WEB SERVER
+# ==============================================================================
+# (Required to keep bot running on some platforms)
+from aiohttp import web
+
+async def handle(request):
+    return web.Response(text="Bot is Running!")
+
+async def web_server():
+    web_app = web.Application(client_max_size=30000000)
+    web_app.add_routes([web.get('/', handle)])
+    return web_app

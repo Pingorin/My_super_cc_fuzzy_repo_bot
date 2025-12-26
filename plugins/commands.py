@@ -223,13 +223,12 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(f"⚠️ **Alert:** Shortener {site} is down. Skipping Level {level}... ⏩")
         return "SKIP"
 
-# --- 🔥 ADVANCED FSUB CHECK (Component 3 - BATCH LOGIC) ---
+# --- 🔥 ADVANCED FSUB CHECK WITH LAYOUT ---
 
 async def check_fsub(client, user_id, message_obj):
     """
     Checks Slots 1, 2, and 3.
-    Returns True if user is allowed.
-    Returns False and sends buttons if user needs to join/request.
+    Layout: Row 1 (Slot 1, 2), Row 2 (Slot 3), Row 3 (Try Again).
     """
     src_chat_id = None
     if len(message_obj.command) > 1:
@@ -247,68 +246,72 @@ async def check_fsub(client, user_id, message_obj):
     fsub_channels = group_settings.get('fsub_channels')
     if not isinstance(fsub_channels, dict): return True 
 
-    # ✅ Collect Buttons Logic
-    buttons_to_show = []
+    # ✅ BUTTON ROWS SETUP
+    btn_row_1 = [] # For Slot 1 & Slot 2
+    btn_row_2 = [] # For Slot 3
 
-    # Check Slots 1, 2, 3 (Order defined here)
+    # Check Slots 1, 2, 3
     for slot in ['1', '2', '3']:
         channel_id = fsub_channels.get(slot)
         if not channel_id: continue 
         
-        try:
-            channel_id = int(channel_id)
+        try: channel_id = int(channel_id)
         except: continue
 
-        # 1. Check Membership (Common for all slots)
+        # 1️⃣ Check Membership
         is_member = False
         try:
             member = await client.get_chat_member(channel_id, user_id)
             if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
                 is_member = True
-        except UserNotParticipant:
-            pass 
-        except Exception:
-            continue # Skip if bot issue
+        except UserNotParticipant: pass 
+        except: continue 
 
-        if is_member: continue # User is joined, check next slot
+        if is_member: continue # If joined, skip adding button
 
-        # 2. Logic for Unjoined Users
+        # 2️⃣ Generate Button if not joined
         
-        # --- SLOT 3: NORMAL JOIN (No Pending Check) ---
+        # --- SLOT 3 (Normal) ---
         if slot == '3':
             try:
-                # Normal Link
                 invite = await client.create_chat_invite_link(channel_id)
-                buttons_to_show.append([InlineKeyboardButton(f"📢 Join Channel {slot}", url=invite.invite_link)])
+                btn_row_2.append(InlineKeyboardButton(f"📢 Join Channel {slot}", url=invite.invite_link))
             except: pass
 
-        # --- SLOT 1 & 2: FORCE REQUEST (Check Pending) ---
+        # --- SLOT 1 & 2 (Request) ---
         else:
-            # Check Pending List First
-            if await db.is_user_pending(user_id, channel_id):
-                continue # User has requested, consider as joined
+            if await db.is_user_pending(user_id, channel_id): continue 
             
             try:
-                # Request Link
                 invite = await client.create_chat_invite_link(channel_id, creates_join_request=True)
-                buttons_to_show.append([InlineKeyboardButton(f"📢 Request Join Channel {slot}", url=invite.invite_link)])
+                btn_row_1.append(InlineKeyboardButton(f"📢 Request {slot}", url=invite.invite_link))
             except: pass
 
-    # ✅ FINAL DECISION
-    if buttons_to_show:
-        # Append Try Again Button
+    # ✅ CONSTRUCT FINAL LAYOUT
+    final_markup = []
+    
+    # Row 1 (Slot 1 & 2 side by side)
+    if btn_row_1:
+        final_markup.append(btn_row_1)
+    
+    # Row 2 (Slot 3 full width)
+    if btn_row_2:
+        final_markup.append(btn_row_2)
+
+    # If any buttons exist, add "Try Again" at the bottom and stop access
+    if final_markup:
         original_param = message_obj.command[1] if len(message_obj.command) > 1 else "start"
-        buttons_to_show.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")])
+        final_markup.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")])
         
         await message_obj.reply_text(
             f"⚠️ **Access Denied!**\n\n"
-            f"File paane ke liye niche diye gaye **Sabhi Channels** join karein.\n"
-            f"Join karne ke baad **Try Again** dabayein.",
-            reply_markup=InlineKeyboardMarkup(buttons_to_show)
+            f"Please complete the steps below to get the file.\n"
+            f"Join/Request the channels and click **Try Again**.",
+            reply_markup=InlineKeyboardMarkup(final_markup)
         )
-        return False # Block access
+        return False 
 
-    return True # Allow access
+    return True
 
 # --- 🎮 COMMAND HANDLERS ---
 
@@ -362,7 +365,7 @@ async def start_handler(client, message):
             src_chat_id = data[2] if len(data) > 2 else str(message.chat.id)
             
             # ==================================================================
-            # 🛑 STEP 1: FSUB 1, 2, 3 (Batch Check)
+            # 🛑 STEP 1: FSUB 1, 2, 3 (Batched with Layout)
             # ==================================================================
             if not await check_fsub(client, message.from_user.id, message):
                 return # Buttons sent, code stopped

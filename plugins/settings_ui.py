@@ -1,7 +1,7 @@
 import asyncio
 import aiohttp
 from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from database.users_chats_db import db
 import info
 
@@ -35,18 +35,19 @@ async def settings_command(client, message):
     
     user_groups = []
     async for group in db.groups.find({}):
-        chat_id = group['id']
-        saved_title = group.get('title', f"Group {chat_id}") 
         try:
-            member = await client.get_chat_member(chat_id, user_id)
+            chat_id = group['id']
+            try:
+                member = await client.get_chat_member(chat_id, user_id)
+            except: continue 
             if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-                user_groups.append((saved_title, chat_id))
-        except:
-            user_groups.append((f"{saved_title} (Cached)", chat_id))
+                chat_info = await client.get_chat(chat_id)
+                user_groups.append((chat_info.title, chat_id))
+        except: continue 
 
     await msg.delete()
     if not user_groups:
-        return await message.reply_text("❌ **No Connected Groups Found!**")
+        return await message.reply_text("❌ **No Groups Found!**\nMake sure I am added to your group and you are an Admin there.")
 
     buttons = []
     for title, chat_id in user_groups:
@@ -54,26 +55,22 @@ async def settings_command(client, message):
     
     await message.reply_text("⚙️ **Select a Group:**", reply_markup=InlineKeyboardMarkup(buttons))
 
-# --- MAIN MENU ---
+# --- MAIN MENUS ---
 @Client.on_callback_query(filters.regex(r"^set_main#"))
 async def main_settings_menu(client, query):
     chat_id = int(query.data.split("#")[1])
-    try: 
-        chat = await client.get_chat(chat_id)
-        title = chat.title
-    except: 
-        group_data = await db.get_group_settings(chat_id)
-        title = group_data.get('title', "Unknown Group")
-
+    
     buttons = [
         [InlineKeyboardButton("💰 Earning Method", callback_data=f"set_earn#{chat_id}"),
          InlineKeyboardButton("🔒 Force Subscribe", callback_data=f"fsub_menu#{chat_id}")],
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
+    try: title = (await client.get_chat(chat_id)).title
+    except: title = "Unknown"
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🔥 ADVANCED FSUB MENU (Repo 2 Style Layout)
+# 🔥 ADVANCED FSUB MENU (Repo 2 Style - Updated Layout)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^fsub_menu#"))
 async def fsub_configure_menu(client, query):
@@ -82,24 +79,22 @@ async def fsub_configure_menu(client, query):
         group_data = await db.get_group_settings(chat_id)
         
         if not group_data:
-            await db.add_group(chat_id, "Unknown")
+            await db.add_group(chat_id)
             group_data = await db.get_group_settings(chat_id)
             
-        raw_fsub = group_data.get('fsub_channels')
-        if isinstance(raw_fsub, list): fsub_channels = {} 
-        elif isinstance(raw_fsub, dict): fsub_channels = raw_fsub
-        else: fsub_channels = {}
+        raw_fsub = group_data.get('fsub_channels', {})
+        if not isinstance(raw_fsub, dict): raw_fsub = {}
 
         # Slots Read
-        s1 = fsub_channels.get('1')
-        s2 = fsub_channels.get('2')
-        s3 = fsub_channels.get('3')
-        s4 = fsub_channels.get('4')
+        s1 = raw_fsub.get('1')
+        s2 = raw_fsub.get('2')
+        s3 = raw_fsub.get('3')
+        s4 = raw_fsub.get('4')
 
-        # Status Text (Sajawat Repo 2 Jaisi)
+        # Status Text
         txt = f"⚙️ **Advanced Force Subscribe**\n\n"
-        txt += f"1️⃣ **Slot 1 (Request):** `{s1 if s1 else '❌ Not Set'}`\n"
-        txt += f"2️⃣ **Slot 2 (Request):** `{s2 if s2 else '❌ Not Set'}`\n"
+        txt += f"1️⃣ **Slot 1 (Req):** `{s1 if s1 else '❌ Not Set'}`\n"
+        txt += f"2️⃣ **Slot 2 (Req):** `{s2 if s2 else '❌ Not Set'}`\n"
         txt += f"3️⃣ **Slot 3 (Normal):** `{s3 if s3 else '❌ Not Set'}`\n"
         txt += f"➖➖➖➖➖➖➖➖➖➖\n"
         txt += f"4️⃣ **Slot 4 (Post-Verify):** `{s4 if s4 else '❌ Not Set'}`\n\n"
@@ -107,19 +102,20 @@ async def fsub_configure_menu(client, query):
 
         buttons = []
         
-        # Row 1: Slot 1 & 2 (Ek Saath)
+        # Row 1: Slot 1 & 2
         btn1 = []
         btn1.append(InlineKeyboardButton(f"{'✏️' if s1 else '➕'} Set 1", callback_data=f"set_fsub#{chat_id}#1"))
         btn1.append(InlineKeyboardButton(f"{'✏️' if s2 else '➕'} Set 2", callback_data=f"set_fsub#{chat_id}#2"))
         buttons.append(btn1)
 
-        # Row 2: Slot 3 (Normal) - Iske saath hi
+        # Row 2: Slot 3 (Normal)
+        # User requested 1, 2, 3 show together logic, but distinct button for clarity
         buttons.append([InlineKeyboardButton(f"{'✏️' if s3 else '➕'} Set Slot 3 (Normal)", callback_data=f"set_fsub#{chat_id}#3")])
 
-        # Row 3: Slot 4 (Post Verification - Alag se highlighted)
+        # Row 3: Slot 4 (Post Verification - Alag se)
         buttons.append([InlineKeyboardButton(f"{'✏️' if s4 else '➕'} Set Post-Verify (Slot 4)", callback_data=f"set_fsub#{chat_id}#4")])
 
-        # Clear Buttons (Agar koi set hai to hi dikhega)
+        # Clear Buttons
         if s1 or s2 or s3 or s4:
             buttons.append([InlineKeyboardButton("🗑️ Remove All Slots", callback_data=f"rem_fsub_all#{chat_id}")])
 
@@ -148,7 +144,7 @@ async def set_fsub_input(client, query):
     )
     
     try:
-        # Listening for input (Repo 2 Style)
+        # Listening for input
         msg = await client.listen(user_id, timeout=60)
     except asyncio.TimeoutError:
         await query.message.edit_text("❌ **Timeout!** Too slow.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"fsub_menu#{chat_id}")]]))
@@ -176,10 +172,13 @@ async def set_fsub_input(client, query):
 
         except Exception as e:
             await msg.reply(f"❌ **Error:** Invalid Channel.\nMake sure bot is admin there.\n`{e}`")
-            await fsub_configure_menu(client, query) 
+            # Return to menu on error
+            try: await fsub_configure_menu(client, query)
+            except: pass
     else:
         await msg.reply("❌ Invalid input.")
-        await fsub_configure_menu(client, query) 
+        try: await fsub_configure_menu(client, query)
+        except: pass
 
 # 3. REMOVE ALL SLOTS
 @Client.on_callback_query(filters.regex(r"^rem_fsub_all#"))
@@ -190,7 +189,7 @@ async def remove_fsub_all(client, query):
     await fsub_configure_menu(client, query)
 
 # ==============================================================================
-# 💰 EARNING & SHORTENER SETTINGS
+# 💰 EARNING & SHORTENER SETTINGS (Unchanged)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^set_earn#"))
@@ -198,7 +197,7 @@ async def earning_settings(client, query):
     chat_id = int(query.data.split("#")[1])
     group_data = await db.get_group_settings(chat_id)
     if not group_data: 
-        await db.add_group(chat_id, "Unknown Group")
+        await db.add_group(chat_id)
         group_data = await db.get_group_settings(chat_id)
     
     active_mode = "SHORTLINK" if group_data.get('is_shortlink_active', True) else "FSUB (Disable Shortlink)"
@@ -262,14 +261,34 @@ async def set_mode_handler(client, query):
 @Client.on_callback_query(filters.regex(r"^time_ui#"))
 async def time_picker_ui(client, query):
     _, chat_id, key = query.data.split("#")
-    names = {'time_dynamic': "Dynamic Full Access", 'time_gap1': "Smart Gap 1", 'time_gap2': "Smart Gap 2", 'time_smart': "Smart Full Access", 'time_together': "Together Base Access", 'time_together_3': "Together 3-Link"}
+    
+    names = {
+        'time_dynamic': "Dynamic Full Access",
+        'time_gap1': "Smart Gap 1",
+        'time_gap2': "Smart Gap 2",
+        'time_smart': "Smart Full Access",
+        'time_together': "Together Base Access (1/2 Links)",
+        'time_together_3': "Together 3-Link Final Access"
+    }
     name = names.get(key, "Time")
-    text = f"⏱ **Set Time for {name}**\n\nChoose duration:"
+
+    text = f"⏱ **Set Time for {name}**\n\nChoose a duration:"
     
     if "gap" in key:
-        buttons = [[InlineKeyboardButton("5 Mins", callback_data=f"save_time#{chat_id}#{key}#{300}"), InlineKeyboardButton("15 Mins", callback_data=f"save_time#{chat_id}#{key}#{900}")], [InlineKeyboardButton("1 Hour", callback_data=f"save_time#{chat_id}#{key}#{3600}")]]
+        buttons = [
+            [InlineKeyboardButton("5 Mins", callback_data=f"save_time#{chat_id}#{key}#{5*60}"),
+             InlineKeyboardButton("15 Mins", callback_data=f"save_time#{chat_id}#{key}#{15*60}")],
+            [InlineKeyboardButton("1 Hour", callback_data=f"save_time#{chat_id}#{key}#{3600}"),
+             InlineKeyboardButton("3 Hours", callback_data=f"save_time#{chat_id}#{key}#{3*3600}")]
+        ]
     else:
-        buttons = [[InlineKeyboardButton("12 Hours", callback_data=f"save_time#{chat_id}#{key}#{43200}"), InlineKeyboardButton("24 Hours", callback_data=f"save_time#{chat_id}#{key}#{86400}")], [InlineKeyboardButton("3 Days", callback_data=f"save_time#{chat_id}#{key}#{259200}"), InlineKeyboardButton("7 Days", callback_data=f"save_time#{chat_id}#{key}#{604800}")]]
+        buttons = [
+            [InlineKeyboardButton("12 Hours", callback_data=f"save_time#{chat_id}#{key}#{12*3600}"),
+             InlineKeyboardButton("24 Hours", callback_data=f"save_time#{chat_id}#{key}#{86400}")],
+            [InlineKeyboardButton("3 Days", callback_data=f"save_time#{chat_id}#{key}#{3*86400}"),
+             InlineKeyboardButton("7 Days", callback_data=f"save_time#{chat_id}#{key}#{7*86400}")],
+            [InlineKeyboardButton("1 Month", callback_data=f"save_time#{chat_id}#{key}#{30*86400}")]
+        ]
     
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"set_smode#{chat_id}")])
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -285,30 +304,64 @@ async def save_time_handler(client, query):
 async def configure_slots(client, query):
     chat_id = int(query.data.split("#")[1])
     group_data = await db.get_group_settings(chat_id)
+    if not group_data: group_data = {}
     shorteners = group_data.get('shorteners', {})
     
+    current_mode = group_data.get('shortener_mode', 'dynamic').capitalize()
+    interval = group_data.get('time_dynamic', 86400) if current_mode == 'Dynamic' else group_data.get('time_smart', 86400)
+    interval_hours = int(interval / 3600)
+
     status_text = ""
     for i in range(1, 4):
-        s = shorteners.get(str(i))
-        status_text += f"✅ Shortener {i}: {s['site']}\n" if s else f"❌ Shortener {i}: Not Set\n"
+        s_data = shorteners.get(str(i))
+        if s_data: status_text += f"✅ Shortener {i}: {s_data['site']}\n"
+        else: status_text += f"❌ Shortener {i}: Not Set\n"
 
-    text = f"🛠️ **Shortener Setup for:** `{chat_id}`\n\n{status_text}"
+    text = (
+        f"🛠️ **Configuring {current_mode} Type for:** `{chat_id}`\n\n"
+        f"**Verification Interval:** {interval_hours} hours\n\n"
+        f"**Your Setup:**\n{status_text}"
+    )
+
     buttons = []
     for i in range(1, 4):
-        s = shorteners.get(str(i))
-        if s: buttons.append([InlineKeyboardButton(f"✏️ Edit Slot {i}", callback_data=f"edit_slot#{chat_id}#{i}"), InlineKeyboardButton(f"🗑️ Reset", callback_data=f"del_slot#{chat_id}#{i}")])
-        else: buttons.append([InlineKeyboardButton(f"➕ Set Slot {i}", callback_data=f"add_slot#{chat_id}#{i}")])
+        s_data = shorteners.get(str(i))
+        if s_data: buttons.append([InlineKeyboardButton(f"✏️ Edit Slot {i}", callback_data=f"edit_slot#{chat_id}#{i}"), InlineKeyboardButton(f"🗑️ Reset {i}", callback_data=f"del_slot#{chat_id}#{i}")])
+        else: buttons.append([InlineKeyboardButton(f"➕ Set Shortener {i}", callback_data=f"add_slot#{chat_id}#{i}")])
 
-    buttons.append([InlineKeyboardButton("🧪 Test Connections", callback_data=f"test_sl#{chat_id}")])
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"set_smode#{chat_id}")])
-    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    help_text_btn = f"How {current_mode} mode works"
+    footer_btns = [
+        [InlineKeyboardButton("🧪 Test Connections", callback_data=f"test_sl#{chat_id}")],
+        [InlineKeyboardButton(f"ℹ️ {help_text_btn}", url="https://t.me/YourChannel")],
+        [InlineKeyboardButton("🔙 Back", callback_data=f"set_smode#{chat_id}")]
+    ]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons + footer_btns))
 
 @Client.on_callback_query(filters.regex(r"^add_slot#") | filters.regex(r"^edit_slot#"))
 async def input_slot_req(client, query):
     _, chat_id, slot = query.data.split("#")
-    # Redirect to interactive input
-    await set_fsub_input(client, query)
-    return
+    chat_id = int(chat_id)
+    cancel_btn = [[InlineKeyboardButton("❌ Cancel", callback_data=f"set_slots#{chat_id}")]]
+    
+    await query.message.edit_text(f"Please send **Domain** for Slot {slot}.\n(e.g. shareus.in)", reply_markup=InlineKeyboardMarkup(cancel_btn))
+    try:
+        domain_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if not domain_msg.text: return await query.message.edit_text("❌ Input must be text.", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        domain = domain_msg.text.strip()
+        await domain_msg.delete()
+        
+        await query.message.edit_text(f"✅ Domain set.\nNow send **API Key** for Slot {slot}.", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        api_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if not api_msg.text: return await query.message.edit_text("❌ Text only!", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        api = api_msg.text.strip()
+        await api_msg.delete()
+        
+        await db.add_shortener(chat_id, slot, domain, api)
+        await query.message.edit_text("✅ Saved!")
+        await asyncio.sleep(1)
+        query.data = f"set_slots#{chat_id}"
+        await configure_slots(client, query)
+    except: return
 
 @Client.on_callback_query(filters.regex(r"^del_slot#"))
 async def delete_slot(client, query):
@@ -322,17 +375,24 @@ async def test_shorteners(client, query):
     chat_id = int(query.data.split("#")[1])
     group_data = await db.get_group_settings(chat_id)
     shorteners = group_data.get('shorteners', {})
+    if not shorteners: return await query.answer("⚠️ No shorteners set!", show_alert=True)
     
     await query.message.edit_text("🧪 **Testing connections...**")
     results = []
-    for i in range(1, 4):
-        s = shorteners.get(str(i))
-        if s:
-            if await check_shortener_link(s['site'], s['api']): results.append(f"Slot {i}: ✅ Success")
-            else: results.append(f"Slot {i}: ❌ Failed")
+    all_success = True
     
-    text = "\n".join(results) if results else "No shorteners set."
-    await query.message.edit_text(f"📊 **Results:**\n{text}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"set_slots#{chat_id}")]]))
+    for i in range(1, 4):
+        s_data = shorteners.get(str(i))
+        if s_data:
+            is_working = await check_shortener_link(s_data['site'], s_data['api'])
+            if is_working: results.append(f" - {s_data['site']}: ✅ Success")
+            else: 
+                results.append(f" - {s_data['site']}: ❌ Failed")
+                all_success = False
+
+    back_btn = [[InlineKeyboardButton("🔙 Back", callback_data=f"set_slots#{chat_id}")]]
+    text = "🎉 **All Working!**" if all_success else "📊 **Results:**\n" + "\n".join(results)
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(back_btn))
 
 @Client.on_callback_query(filters.regex(r"^set_disable#"))
 async def disable_menu(client, query):

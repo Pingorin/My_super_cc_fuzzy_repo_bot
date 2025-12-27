@@ -24,7 +24,7 @@ class temp(object):
     B_LINK = None
     ME = None
 
-# ✅ 1. TEXT FORMATTERS (Added Helpers for Result Modes)
+# ✅ 1. TEXT FORMATTERS (Fixed to accept chat_id)
 def get_size(size):
     if not size: return "0 B"
     power = 2**10
@@ -35,31 +35,36 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-def format_text_results(files, query):
+def format_text_results(files, query, chat_id):
     text = f"👻 **Results for:** `{query}`\n\n"
     for i, file in enumerate(files, 1):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
-        chat_id = file.get('chat_id')
-        cmd_link = f"/get_{link_id}" 
-        text += f"{i}. 📂 [{f_name}](https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}) [{f_size}]\n\n"
+        
+        # ✅ FIX: Using passed chat_id to generate valid deep link
+        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
+        
+        # Using HTML anchor tag for clean look
+        text += f"{i}. 📂 <a href='{link}'>{f_name}</a> [{f_size}]\n\n"
     return text
 
-def format_detailed_results(files, query):
+def format_detailed_results(files, query, chat_id):
     text = f"👻 **Detailed Results for:** `{query}`\n\n"
     for file in files:
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
-        chat_id = file.get('chat_id')
         caption = file.get('caption', 'N/A')
-        if len(caption) > 50: caption = caption[:50] + "..."
+        if caption and len(caption) > 50: caption = caption[:50] + "..."
+        
+        # ✅ FIX: Using passed chat_id
+        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
         
         text += f"🎬 **Title:** `{f_name}`\n"
         text += f"💾 **Size:** `{f_size}`\n"
         text += f"📝 **Info:** {caption}\n"
-        text += f"🔗 **Link:** [Get File](https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id})\n"
+        text += f"🔗 **Link:** <a href='{link}'>Get File</a>\n"
         text += f"━━━━━━━━━━━━━━━━━━━━\n\n"
     return text
 
@@ -75,13 +80,12 @@ def format_card_result(file, current_index, total_count):
     text = f"🎬 **{f_name}**\n\n"
     text += f"🗂️ **Type:** {f_type}\n"
     text += f"💾 **Size:** {f_size}\n"
-    if len(caption) > 100: text += f"📝 **Info:** {caption[:100]}...\n"
+    if caption and len(caption) > 100: text += f"📝 **Info:** {caption[:100]}...\n"
     
     text += f"\n**File {current_index + 1} of {total_count}**"
     return text
 
 # ✅ 2. TELEGRAPH POSTER (Site Mode Helper)
-# Note: You might need to install 'telegraph' library or remove this if not using it
 try:
     from telegraph import Telegraph
     telegraph_client = Telegraph()
@@ -89,15 +93,17 @@ try:
 except:
     telegraph_client = None
 
-async def post_to_telegraph(files, query):
+async def post_to_telegraph(files, query, chat_id):
     if not telegraph_client: return None
     html_content = f"<h3>Search Results for: {query}</h3><br>"
     for file in files:
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
-        chat_id = file.get('chat_id')
+        
+        # ✅ FIX: Using passed chat_id
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
+        
         html_content += f"<p>📂 <a href='{link}'>{f_name}</a> [{f_size}]</p><hr>"
     
     try:

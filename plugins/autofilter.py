@@ -5,8 +5,8 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-# ✅ Import new helpers from utils
-from utils import btn_parser, format_text_results, format_detailed_results, post_to_telegraph, format_card_result, get_size
+# ✅ Import helpers from utils
+from utils import btn_parser, format_text_results, format_detailed_results, post_to_telegraph, format_card_result
 
 logger = logging.getLogger(__name__)
 
@@ -68,22 +68,25 @@ async def auto_filter(client, message):
 
         # --- MODE B: TEXT LIST ---
         elif mode == 'text':
-            # Slice for max 20 results to avoid message length limits
+            # Slice for max 20 results
             display_files = files[:20]
-            text = format_text_results(display_files, query)
+            # ✅ Passed message.chat.id for link generation
+            text = format_text_results(display_files, query, message.chat.id)
             await message.reply_text(text, disable_web_page_preview=True)
 
         # --- MODE C: DETAILED LIST ---
         elif mode == 'detailed':
-            # Slice for max 10 results (Detailed takes more space)
+            # Slice for max 10 results
             display_files = files[:10]
-            text = format_detailed_results(display_files, query)
+            # ✅ Passed message.chat.id
+            text = format_detailed_results(display_files, query, message.chat.id)
             await message.reply_text(text, disable_web_page_preview=True)
 
         # --- MODE D: SITE (TELEGRAPH) ---
         elif mode == 'site':
             if len(files) > 20:
-                url = await post_to_telegraph(files, query)
+                # ✅ Passed message.chat.id
+                url = await post_to_telegraph(files, query, message.chat.id)
                 if url:
                     btn = [[InlineKeyboardButton(f"🔎 View All {len(files)} Results", url=url)]]
                     await message.reply_text(
@@ -93,12 +96,12 @@ async def auto_filter(client, message):
                         reply_markup=InlineKeyboardMarkup(btn)
                     )
                 else:
-                    # Fallback if telegraph fails
+                    # Fallback to buttons if telegraph fails
                     buttons = btn_parser(files, message.chat.id, query)
                     await message.reply_text(f"👻 Results: `{query}`", reply_markup=InlineKeyboardMarkup(buttons))
             else:
                 # If few results, revert to standard text mode
-                text = format_text_results(files, query)
+                text = format_text_results(files, query, message.chat.id)
                 await message.reply_text(text, disable_web_page_preview=True)
 
         # --- MODE E: CARD (Single Result View with Navigation) ---
@@ -111,7 +114,7 @@ async def auto_filter(client, message):
             # Navigation Buttons
             btn = []
             if total > 1:
-                # Truncate query to avoid callback data limit
+                # Truncate query to avoid callback data limit (64 bytes)
                 short_q = query[:20] 
                 btn.append([
                     InlineKeyboardButton("Next ➡️", callback_data=f"card_next_0_{short_q}")
@@ -126,7 +129,6 @@ async def auto_filter(client, message):
 
     except Exception as e:
         logger.error(f"Search Error: {e}")
-        # await message.reply_text(f"❌ Error: {e}")
 
 # ==============================================================================
 # ⏭️ CARD NAVIGATION HANDLERS (Next/Prev Logic)
@@ -135,10 +137,11 @@ async def auto_filter(client, message):
 @Client.on_callback_query(filters.regex(r"^card_next_"))
 async def card_next_nav(client, query):
     try:
-        _, index, q_text = query.data.split("_", 3) # Split max 3 times to preserve query
+        # Split max 3 times: card, next, index, query_string
+        _, index, q_text = query.data.split("_", 2) # Adjusted split for safety
         current_index = int(index)
         
-        # Re-fetch files (Stateless pagination for simplicity)
+        # Re-fetch files (Stateless pagination)
         files = await Media.get_search_results(q_text)
         if not files: return await query.answer("Results expired or not found.", show_alert=True)
         
@@ -151,6 +154,9 @@ async def card_next_nav(client, query):
         text = format_card_result(file, next_index, total)
         
         btn = []
+        # Calculate Previous Index
+        prev_index = next_index - 1 if next_index > 0 else total - 1
+
         btn.append([
             InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{next_index}_{q_text}"),
             InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{next_index}_{q_text}")
@@ -167,7 +173,7 @@ async def card_next_nav(client, query):
 @Client.on_callback_query(filters.regex(r"^card_prev_"))
 async def card_prev_nav(client, query):
     try:
-        _, index, q_text = query.data.split("_", 3)
+        _, index, q_text = query.data.split("_", 2)
         current_index = int(index)
         
         files = await Media.get_search_results(q_text)
@@ -181,6 +187,9 @@ async def card_prev_nav(client, query):
         file = files[prev_index]
         text = format_card_result(file, prev_index, total)
         
+        # Calculate Next Index for the Next Button
+        next_index = prev_index + 1 if prev_index < total - 1 else 0
+
         btn = [[
             InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{prev_index}_{q_text}"),
             InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{prev_index}_{q_text}")

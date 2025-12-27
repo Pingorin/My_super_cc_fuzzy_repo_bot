@@ -1,5 +1,6 @@
 import logging
 import time
+import re
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import UserNotParticipant
@@ -223,6 +224,7 @@ async def check_fsub(client, user_id, message_obj):
         except: continue
         
         # 🛠️ RESTART FIX: Force Refresh
+        # This prevents "Invalid ID" error after bot restarts
         try:
             chat_obj = await client.get_chat(channel_id)
             channel_id = chat_obj.id
@@ -238,13 +240,13 @@ async def check_fsub(client, user_id, message_obj):
 
         if is_member: continue
 
-        # Slot 3 (Normal)
+        # Slot 3 (Normal Join)
         if slot == '3':
             try:
                 invite = await client.create_chat_invite_link(channel_id)
                 btn_row_2.append(InlineKeyboardButton(f"📢 Join Channel {slot}", url=invite.invite_link))
             except: pass
-        # Slot 1 & 2 (Request)
+        # Slot 1 & 2 (Force Request)
         else:
             if await db.is_user_pending(user_id, channel_id): continue 
             try:
@@ -281,7 +283,7 @@ async def start_handler(client, message):
 
     if message.chat.type == enums.ChatType.PRIVATE:
         await db.add_user(message.from_user.id)
-        # Normal FSub Check
+        # Normal FSub Check (if not verification/get flow)
         if len(message.command) > 1 and not (message.command[1].startswith("verify_") or message.command[1].startswith("get_")):
              if not await check_fsub(client, message.from_user.id, message): return
 
@@ -399,7 +401,7 @@ async def start_handler(client, message):
                 return # ⛔ STOP
 
             # ==================================================================
-            # ✅ STEP 4: SEND FILE
+            # ✅ STEP 4: SEND FILE + CLEAN CAPTION
             # ==================================================================
 
             file_data = await Media.get_file_details(link_id)
@@ -407,8 +409,38 @@ async def start_handler(client, message):
             
             if not file_data: return await message.reply("❌ **File Not Found.**")
             
+            # Original Caption
             caption = search_data.get('caption', f"📂 <b>{search_data.get('file_name')}</b>")
-            try: await client.send_cached_media(chat_id=message.from_user.id, file_id=file_data.get('file_id'), caption=f"{caption}\n{script.CUSTOM_FOOTER}", parse_mode=enums.ParseMode.HTML)
+            
+            # 🧹🧹 CAPTION CLEANING LOGIC 🧹🧹
+            
+            # 1. Remove "https://t.me/..." or "https://t me/..."
+            caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", "", caption, flags=re.IGNORECASE)
+            
+            # 2. Remove other HTTP links
+            caption = re.sub(r"https?://[^\s]+", "", caption, flags=re.IGNORECASE)
+            
+            # 3. Remove Spam Text (Join Now, Aa Jao, Arrows, Emojis)
+            remove_patterns = [
+                r"Join\s?(Now|Channel|Us|Here)", 
+                r"Aa\s?Jao", 
+                r"🤞", r"➜", r"\)⁠➜", r"👉", 
+                r"\[@\w+\]", r"@\w+"
+            ]
+            
+            for pattern in remove_patterns:
+                caption = re.sub(pattern, "", caption, flags=re.IGNORECASE)
+
+            # 4. Final Trim
+            caption = re.sub(r"\s+", " ", caption).strip()
+
+            try: 
+                await client.send_cached_media(
+                    chat_id=message.from_user.id, 
+                    file_id=file_data.get('file_id'), 
+                    caption=f"{caption}\n\n{script.CUSTOM_FOOTER}", 
+                    parse_mode=enums.ParseMode.HTML
+                )
             except Exception as e: await message.reply(f"❌ Error sending file: `{e}`")
                 
         except Exception as e: await message.reply(f"❌ Error: {e}")

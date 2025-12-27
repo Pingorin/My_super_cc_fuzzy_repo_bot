@@ -10,16 +10,12 @@ from info import ADMINS, IS_VERIFY
 from utils import temp, get_shortlink, check_fsub_4_status
 from Script import script 
 
-# Configure Logging
 logger = logging.getLogger(__name__)
-
-# Constants
 START_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg"
 
-# --- 🛠️ HELPER FUNCTIONS (Shorteners) ---
+# --- 🛠️ HELPER FUNCTIONS ---
 
 async def send_shortener_alert(client, chat_id, site_domain):
-    """Sends an alert to admins if a shortener fails."""
     try:
         try:
             chat_id_int = int(str(chat_id))
@@ -42,7 +38,6 @@ async def send_shortener_alert(client, chat_id, site_domain):
     except: pass
 
 async def get_active_shorteners(chat_id):
-    """Fetches active shorteners for the group or defaults."""
     group_settings = await db.get_group_settings(chat_id)
     if group_settings:
         group_shorteners = group_settings.get('shorteners', {})
@@ -58,7 +53,6 @@ async def get_active_shorteners(chat_id):
     if info.SHORTLINK_URL_3 and info.SHORTLINK_API_3: default_shorteners['3'] = {'site': info.SHORTLINK_URL_3, 'api': info.SHORTLINK_API_3}
     return default_shorteners
 
-# --- 🛠️ GROUP OBSERVER ---
 @Client.on_message(filters.group, group=-1)
 async def auto_save_group_handler(client, message):
     try: 
@@ -201,7 +195,6 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         return "SKIP"
 
 # --- 🔥 PRE-VERIFY FSUB CHECK (Slots 1, 2, 3) ---
-# [attachment_0](attachment)
 
 async def check_fsub(client, user_id, message_obj):
     src_chat_id = None
@@ -228,6 +221,12 @@ async def check_fsub(client, user_id, message_obj):
         if not channel_id: continue 
         try: channel_id = int(channel_id)
         except: continue
+        
+        # 🛠️ RESTART FIX: Force Refresh
+        try:
+            chat_obj = await client.get_chat(channel_id)
+            channel_id = chat_obj.id
+        except: pass
 
         is_member = False
         try:
@@ -335,6 +334,10 @@ async def start_handler(client, message):
             if id_4:
                 try:
                     id_4 = int(id_4)
+                    # 🛠️ RESTART FIX: Force Refresh
+                    try: await client.get_chat(id_4)
+                    except: pass
+                    
                     try:
                         m4 = await client.get_chat_member(id_4, message.from_user.id)
                         is_joined_4 = m4.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
@@ -357,11 +360,15 @@ async def start_handler(client, message):
                     # CASE A: Real ID (Verification Active)
                     try:
                         cid5 = int(id_5)
+                        # 🛠️ RESTART FIX: Force Refresh
+                        try: await client.get_chat(cid5)
+                        except: pass
+                        
                         try:
                             m5 = await client.get_chat_member(cid5, message.from_user.id)
                             is_joined_5 = m5.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
                         except UserNotParticipant: is_joined_5 = False
-                        except: is_joined_5 = True # Assume true on error to avoid blocks
+                        except: is_joined_5 = True 
                         
                         if not is_joined_5:
                             invite5 = await client.create_chat_invite_link(cid5)
@@ -369,11 +376,6 @@ async def start_handler(client, message):
                     except: pass
                 else:
                     # CASE B: Custom Link (Verification OFF - Show Button Only)
-                    # Note: We cannot verify membership for links, so we don't block.
-                    # But if we don't block, the user sees no button.
-                    # To show button, we must treat it as "Not Joined".
-                    # WARNING: This effectively forces the user to see the button every time.
-                    # Users usually ignore this after joining once.
                     is_joined_5 = False 
                     slot5_btn_url = str_id_5
 

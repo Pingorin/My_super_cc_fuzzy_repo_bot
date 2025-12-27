@@ -201,12 +201,9 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         return "SKIP"
 
 # --- 🔥 PRE-VERIFY FSUB CHECK (Slots 1, 2, 3) ---
+# [attachment_0](attachment)
 
 async def check_fsub(client, user_id, message_obj):
-    """
-    Checks Slots 1, 2, 3 before verification.
-    Layout: [1][2], [3], [Try Again]
-    """
     src_chat_id = None
     if len(message_obj.command) > 1:
         try:
@@ -223,8 +220,8 @@ async def check_fsub(client, user_id, message_obj):
     fsub_channels = group_settings.get('fsub_channels')
     if not isinstance(fsub_channels, dict): return True 
 
-    btn_row_1 = [] # Slot 1, 2
-    btn_row_2 = [] # Slot 3
+    btn_row_1 = [] # For Slot 1 & Slot 2
+    btn_row_2 = [] # For Slot 3
 
     for slot in ['1', '2', '3']:
         channel_id = fsub_channels.get(slot)
@@ -232,7 +229,6 @@ async def check_fsub(client, user_id, message_obj):
         try: channel_id = int(channel_id)
         except: continue
 
-        # Check Membership
         is_member = False
         try:
             member = await client.get_chat_member(channel_id, user_id)
@@ -240,15 +236,17 @@ async def check_fsub(client, user_id, message_obj):
                 is_member = True
         except UserNotParticipant: pass 
         except: continue 
-        if is_member: continue 
 
-        # Generate Button
-        if slot == '3': # Normal Join
+        if is_member: continue
+
+        # Slot 3 (Normal)
+        if slot == '3':
             try:
                 invite = await client.create_chat_invite_link(channel_id)
                 btn_row_2.append(InlineKeyboardButton(f"📢 Join Channel {slot}", url=invite.invite_link))
             except: pass
-        else: # Request Join (1 & 2)
+        # Slot 1 & 2 (Request)
+        else:
             if await db.is_user_pending(user_id, channel_id): continue 
             try:
                 invite = await client.create_chat_invite_link(channel_id, creates_join_request=True)
@@ -284,7 +282,7 @@ async def start_handler(client, message):
 
     if message.chat.type == enums.ChatType.PRIVATE:
         await db.add_user(message.from_user.id)
-        # Check Fsub on pure /start
+        # Normal FSub Check
         if len(message.command) > 1 and not (message.command[1].startswith("verify_") or message.command[1].startswith("get_")):
              if not await check_fsub(client, message.from_user.id, message): return
 
@@ -315,14 +313,14 @@ async def start_handler(client, message):
             link_id = int(data[1])
             src_chat_id = data[2] if len(data) > 2 else str(message.chat.id)
             
-            # 1. Normal Slots 1,2,3 (Pre-Verify)
+            # 1. Pre-Verify Slots (1,2,3)
             if not await check_fsub(client, message.from_user.id, message): return 
 
             # 2. Shortener Verification
             if not await check_verification(client, message.from_user.id, src_chat_id, link_id, message): return 
 
             # ==================================================================
-            # 🛑 STEP 3: SLOT 4 (Request) & SLOT 5 (Normal) - POST VERIFY
+            # 🛑 STEP 3: SLOT 4 (Request) & SLOT 5 (Normal/Link) - POST VERIFY
             # ==================================================================
             
             group_settings = await db.get_group_settings(src_chat_id)
@@ -341,43 +339,62 @@ async def start_handler(client, message):
                         m4 = await client.get_chat_member(id_4, message.from_user.id)
                         is_joined_4 = m4.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
                     except UserNotParticipant: is_joined_4 = False
-                    except: is_joined_4 = True # Ignore errors
+                    except: is_joined_4 = True 
                     
                     if not is_joined_4 and not await db.is_user_pending(message.from_user.id, id_4):
                          invite4 = await client.create_chat_invite_link(id_4, creates_join_request=True)
                          post_verify_buttons.append(InlineKeyboardButton("📢 Request Final (Slot 4)", url=invite4.invite_link))
                 except: pass
 
-            # --- CHECK SLOT 5 (Normal Mode) ---
+            # --- CHECK SLOT 5 (Hybrid: ID or Link) ---
             if id_5:
-                try:
-                    id_5 = int(id_5)
+                is_joined_5 = False
+                slot5_btn_url = None
+                
+                # Check: Is it ID (digits) or Link (string)?
+                str_id_5 = str(id_5)
+                if isinstance(id_5, int) or str_id_5.lstrip('-').isdigit():
+                    # CASE A: Real ID (Verification Active)
                     try:
-                        m5 = await client.get_chat_member(id_5, message.from_user.id)
-                        is_joined_5 = m5.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
-                    except UserNotParticipant: is_joined_5 = False
-                    except: is_joined_5 = True
-                    
-                    if not is_joined_5:
-                        invite5 = await client.create_chat_invite_link(id_5)
-                        post_verify_buttons.append(InlineKeyboardButton("📢 Join Final (Slot 5)", url=invite5.invite_link))
-                except: pass
+                        cid5 = int(id_5)
+                        try:
+                            m5 = await client.get_chat_member(cid5, message.from_user.id)
+                            is_joined_5 = m5.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
+                        except UserNotParticipant: is_joined_5 = False
+                        except: is_joined_5 = True # Assume true on error to avoid blocks
+                        
+                        if not is_joined_5:
+                            invite5 = await client.create_chat_invite_link(cid5)
+                            slot5_btn_url = invite5.invite_link
+                    except: pass
+                else:
+                    # CASE B: Custom Link (Verification OFF - Show Button Only)
+                    # Note: We cannot verify membership for links, so we don't block.
+                    # But if we don't block, the user sees no button.
+                    # To show button, we must treat it as "Not Joined".
+                    # WARNING: This effectively forces the user to see the button every time.
+                    # Users usually ignore this after joining once.
+                    is_joined_5 = False 
+                    slot5_btn_url = str_id_5
 
-            # --- DISPLAY & BLOCK IF ANY BUTTONS EXIST ---
+                if not is_joined_5 and slot5_btn_url:
+                    post_verify_buttons.append(InlineKeyboardButton("📢 Join Final (Slot 5)", url=slot5_btn_url))
+
+            # --- DISPLAY & BLOCK IF BUTTONS EXIST ---
             if post_verify_buttons:
-                # Layout Logic: Side by Side if 2, else Stacked
                 wrapper = []
+                # Side-by-side if 2 exist, else Stacked
                 if len(post_verify_buttons) == 2: wrapper.append(post_verify_buttons)
                 else: wrapper.append([post_verify_buttons[0]])
                 
-                # Footer Button
+                # Footer
                 wrapper.append([InlineKeyboardButton("✅ I Have Joined - Get File", url=f"https://t.me/{temp.U_NAME}?start={message.command[1]}")])
                 
                 await message.reply_text(
                     text="🛑 **Almost There!**\n\nPlease join the Final Channels below to get your file.",
                     reply_markup=InlineKeyboardMarkup(wrapper)
                 )
-                return # ⛔ STOP HERE
+                return # ⛔ STOP
 
             # ==================================================================
             # ✅ STEP 4: SEND FILE

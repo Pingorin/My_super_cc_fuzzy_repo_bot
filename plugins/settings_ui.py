@@ -62,19 +62,98 @@ async def settings_command(client, message):
 @Client.on_callback_query(filters.regex(r"^set_main#"))
 async def main_settings_menu(client, query):
     chat_id = int(query.data.split("#")[1])
-    
-    buttons = [
-        [InlineKeyboardButton("💰 Earning / Shorteners", callback_data=f"set_earn#{chat_id}")],
-        [InlineKeyboardButton("📢 Force Subscribe", callback_data=f"fsub_menu#{chat_id}")],
-        [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
-    ]
     try: title = (await client.get_chat(chat_id)).title
     except: title = str(chat_id)
+
+    # ✅ UPDATED LAYOUT: 2x2 GRID + Back
+    buttons = [
+        # Row 1
+        [InlineKeyboardButton("💰 Earning method", callback_data=f"set_earn#{chat_id}"),
+         InlineKeyboardButton("📢 Force Subscribe", callback_data=f"fsub_menu#{chat_id}")],
+        
+        # Row 2 (Result Mode & Per Page)
+        [InlineKeyboardButton("📜 Result mode", callback_data=f"set_res_mode#{chat_id}"),
+         InlineKeyboardButton("📄 Result per page", callback_data=f"set_per_page#{chat_id}")],
+        
+        # Row 3
+        [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
+    ]
     
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🔥 FSUB SELECTION MENU (SPLIT REQUEST VS NORMAL)
+# 📜 RESULT MODE SETTINGS (NEW)
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^set_res_mode#"))
+async def result_mode_settings(client, query):
+    chat_id = int(query.data.split("#")[1])
+    
+    # Ensure group exists in DB
+    group_data = await db.get_group_settings(chat_id)
+    if not group_data: 
+        await db.add_group(chat_id, "Unknown Group")
+        group_data = await db.get_group_settings(chat_id)
+
+    # Default to 'button' mode if not set
+    current = group_data.get('result_mode', 'button')
+
+    # Helper function to add checkmark
+    def txt(mode_key, label):
+        return f"✅ {label}" if current == mode_key else label
+
+    text = (
+        f"📜 **Result Mode for Chat ID:** `{chat_id}`\n\n"
+        "Choose the display mode for search results.\n\n"
+        "**Button Mode Demo**\n"
+        "**Text Mode Demo**\n"
+        "**Detailed Text Mode Demo**\n"
+        "**Site Mode Demo**\n"
+        "**Card Mode Demo**"
+    )
+
+    buttons = [
+        # Row 1
+        [InlineKeyboardButton(txt('button', "Button Mode"), callback_data=f"set_rmode#{chat_id}#button"),
+         InlineKeyboardButton(txt('hybrid', "Hybrid Mode"), callback_data=f"set_rmode#{chat_id}#hybrid")],
+        
+        # Row 2
+        [InlineKeyboardButton(txt('text', "Text Mode"), callback_data=f"set_rmode#{chat_id}#text"),
+         InlineKeyboardButton(txt('detailed', "Detailed Text Mode"), callback_data=f"set_rmode#{chat_id}#detailed")],
+        
+        # Row 3
+        [InlineKeyboardButton(txt('card', "Card Mode"), callback_data=f"set_rmode#{chat_id}#card"),
+         InlineKeyboardButton(txt('site', "Site Mode"), callback_data=f"set_rmode#{chat_id}#site")],
+        
+        # Back
+        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
+    ]
+
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^set_rmode#"))
+async def set_result_mode_handler(client, query):
+    _, chat_id, mode = query.data.split("#")
+    chat_id = int(chat_id)
+    
+    # Save to Database
+    await db.update_group_settings(chat_id, {'result_mode': mode})
+    
+    await query.answer(f"Updated to {mode.capitalize()} Mode!")
+    
+    # Refresh the Menu to show the new tick
+    await result_mode_settings(client, query)
+
+# ==============================================================================
+# 📄 RESULT PER PAGE (Placeholder)
+# ==============================================================================
+@Client.on_callback_query(filters.regex(r"^set_per_page#"))
+async def result_per_page_placeholder(client, query):
+    await query.answer("Coming Soon! This feature is under development.", show_alert=True)
+
+
+# ==============================================================================
+# 🔥 FSUB SELECTION MENU
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^fsub_menu#"))
@@ -108,7 +187,6 @@ async def request_fsub_menu(client, query):
     async def get_name(id_val):
         if not id_val: return "Not Set ❌"
         try:
-            # Try to get from cache first to save API calls in menu
             chat = await client.get_chat(id_val)
             return f"{chat.title} ({id_val})"
         except: return f"Unknown ({id_val})"
@@ -160,7 +238,6 @@ async def normal_fsub_menu(client, query):
 
     async def get_name(id_val):
         if not id_val: return "Not Set ❌"
-        # Check if it looks like a Link (Slot 5 feature)
         if isinstance(id_val, str) and ("t.me" in id_val or "http" in id_val):
             return f"Link Set ({id_val})"
         try:
@@ -255,7 +332,6 @@ async def set_fsub_input(client, query):
             
             else:
                 # ✅ STEP 1: FORCE REFRESH (Fixes PeerIdInvalid on Restart)
-                # This fetches the chat from API and caches it in session
                 real_chat = await client.get_chat(input_identifier)
                 
                 # ✅ STEP 2: ADMIN CHECK

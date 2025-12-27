@@ -5,14 +5,6 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
 import info
 
-# --- HELPER: Time Convertor ---
-def seconds_to_str(seconds):
-    if seconds == 0: return "0s"
-    if seconds < 60: return f"{seconds}s"
-    if seconds < 3600: return f"{int(seconds/60)}min"
-    if seconds < 86400: return f"{int(seconds/3600)}hr"
-    return f"{int(seconds/86400)}days"
-
 # --- HELPER: CHECK SHORTENER ---
 async def check_shortener_link(domain, api):
     test_url = "https://google.com"
@@ -26,6 +18,14 @@ async def check_shortener_link(domain, api):
                         return True
     except: pass
     return False
+
+# --- HELPER: TIME FORMATTER ---
+def seconds_to_str(seconds):
+    if seconds == 0: return "0s"
+    if seconds < 60: return f"{seconds}s"
+    if seconds < 3600: return f"{int(seconds/60)}min"
+    if seconds < 86400: return f"{int(seconds/3600)}hr"
+    return f"{int(seconds/86400)}days"
 
 # --- /settings COMMAND ---
 @Client.on_message(filters.command("settings") & filters.private)
@@ -58,14 +58,16 @@ async def settings_command(client, message):
     
     await message.reply_text("⚙️ **Select a Group:**", reply_markup=InlineKeyboardMarkup(buttons))
 
-# --- MAIN MENUS ---
+# ==============================================================================
+# ⚙️ MAIN SETTINGS MENU (UPDATED LAYOUT)
+# ==============================================================================
 @Client.on_callback_query(filters.regex(r"^set_main#"))
 async def main_settings_menu(client, query):
     chat_id = int(query.data.split("#")[1])
     try: title = (await client.get_chat(chat_id)).title
     except: title = str(chat_id)
 
-    # ✅ UPDATED LAYOUT: 2x2 GRID + Back
+    # ✅ UPDATED 2x2 GRID LAYOUT
     buttons = [
         # Row 1
         [InlineKeyboardButton("💰 Earning method", callback_data=f"set_earn#{chat_id}"),
@@ -82,7 +84,7 @@ async def main_settings_menu(client, query):
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 📜 RESULT MODE SETTINGS (NEW)
+# 📜 RESULT MODE SETTINGS (NEW FEATURE)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^set_res_mode#"))
@@ -153,7 +155,7 @@ async def result_per_page_placeholder(client, query):
 
 
 # ==============================================================================
-# 🔥 FSUB SELECTION MENU
+# 🔥 FSUB SELECTION MENU (PRESERVED)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^fsub_menu#"))

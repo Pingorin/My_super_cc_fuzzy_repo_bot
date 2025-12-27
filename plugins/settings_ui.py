@@ -74,7 +74,7 @@ async def main_settings_menu(client, query):
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🔥 FSUB SELECTION MENU
+# 🔥 FSUB SELECTION MENU (SPLIT REQUEST VS NORMAL)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^fsub_menu#"))
@@ -88,7 +88,6 @@ async def fsub_configure_menu(client, query):
     
     buttons = [
         [InlineKeyboardButton("Request Fsub (Auth 1,2,4)", callback_data=f"fsub_req_menu#{chat_id}")],
-        # Updated Text to include Slot 5
         [InlineKeyboardButton("Normal Fsub (Auth 3, 5)", callback_data=f"fsub_norm_menu#{chat_id}")],
         [InlineKeyboardButton("🔙 Back", callback_data=f"set_main#{chat_id}")]
     ]
@@ -109,6 +108,7 @@ async def request_fsub_menu(client, query):
     async def get_name(id_val):
         if not id_val: return "Not Set ❌"
         try:
+            # Try to get from cache first to save API calls in menu
             chat = await client.get_chat(id_val)
             return f"{chat.title} ({id_val})"
         except: return f"Unknown ({id_val})"
@@ -160,7 +160,7 @@ async def normal_fsub_menu(client, query):
 
     async def get_name(id_val):
         if not id_val: return "Not Set ❌"
-        # Check if it looks like a Link
+        # Check if it looks like a Link (Slot 5 feature)
         if isinstance(id_val, str) and ("t.me" in id_val or "http" in id_val):
             return f"Link Set ({id_val})"
         try:
@@ -169,7 +169,7 @@ async def normal_fsub_menu(client, query):
         except: return f"Unknown ({id_val})"
 
     s3 = fsub.get('3')
-    s5 = fsub.get('5') # ✅ Added Slot 5
+    s5 = fsub.get('5') 
     
     name3 = await get_name(s3)
     name5 = await get_name(s5)
@@ -186,7 +186,7 @@ async def normal_fsub_menu(client, query):
     if s3: buttons.append([InlineKeyboardButton("✏️ Edit Slot 3", callback_data=f"set_fsub#{chat_id}#3"), InlineKeyboardButton("🗑️ Clear Slot 3", callback_data=f"clr_fsub#{chat_id}#3")])
     else: buttons.append([InlineKeyboardButton("➕ Set Slot 3", callback_data=f"set_fsub#{chat_id}#3")])
 
-    # ✅ Slot 5 Controls (Added)
+    # Slot 5 Controls
     if s5: buttons.append([InlineKeyboardButton("✏️ Edit Slot 5", callback_data=f"set_fsub#{chat_id}#5"), InlineKeyboardButton("🗑️ Clear Slot 5", callback_data=f"clr_fsub#{chat_id}#5")])
     else: buttons.append([InlineKeyboardButton("➕ Set Slot 5", callback_data=f"set_fsub#{chat_id}#5")])
 
@@ -198,7 +198,7 @@ async def normal_fsub_menu(client, query):
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# ✍️ SET FSUB HANDLER (INPUT LISTENER)
+# ✍️ SET FSUB HANDLER (ROBUST: REFRESH + ADMIN CHECK)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^set_fsub#"))
@@ -207,15 +207,17 @@ async def set_fsub_input(client, query):
     chat_id = int(chat_id)
     user_id = query.from_user.id
     
+    # Determine Back Button logic
     back_cb = f"fsub_req_menu#{chat_id}" if slot in ['1', '2', '4'] else f"fsub_norm_menu#{chat_id}"
     
     # Prompt Text
     txt = f"🆔 **Set Slot {slot}**\n\n"
-    txt += "1. **Option A:** Add bot as Admin in Channel & Forward Message (Auto-Verify).\n"
+    txt += "1. **Option A (Recommended):** Add bot as Admin in Channel & Forward Message.\n"
     if slot == '5':
-        txt += "2. **Option B (Link Only):** Send any Channel/Group Link."
+        txt += "2. **Option B (Link Only):** Send Group Link (Button Only, No Verify).\n"
     else:
-        txt += "2. **Option B:** Send Channel ID."
+        txt += "2. **Option B:** Send Channel ID.\n"
+    txt += "\n⚠️ **Note:** Bot MUST be Admin in target channel!"
 
     await query.message.edit_text(
         txt,
@@ -223,58 +225,66 @@ async def set_fsub_input(client, query):
     )
     
     try:
+        # Listen for User Input
         msg = await client.listen(user_id, timeout=60)
     except asyncio.TimeoutError:
         return await query.message.edit_text("❌ Timeout.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=back_cb)]]))
 
     if msg.text or msg.forward_from_chat:
-        target_chat = None
-        custom_link = None
-        
-        # 1. Try Resolving as Chat ID/Object
         try:
-            if msg.forward_from_chat: 
-                target_chat = msg.forward_from_chat
-            else: 
-                # Try getting chat object from text (ID or Username)
-                target_chat = await client.get_chat(msg.text)
-        except:
-            # 2. Link Fallback for Slot 5
-            if slot == '5' and msg.text and ("t.me/" in msg.text or "http" in msg.text):
-                custom_link = msg.text.strip()
+            input_identifier = None
+            is_link_mode = False
 
-        # --- SAVE LOGIC ---
-        try:
-            if target_chat:
-                # Check Admin
-                try:
-                    me = await client.get_chat_member(target_chat.id, "me")
-                except: pass 
-                
-                await db.update_fsub_channel(chat_id, slot, target_chat.id)
-                await msg.reply(f"✅ **Saved ID!**\nSlot {slot}: {target_chat.title}")
-                
-            elif custom_link:
-                # Save Link String
-                await db.update_fsub_channel(chat_id, slot, custom_link)
-                await msg.reply(f"✅ **Saved Link!**\nSlot {slot}: `{custom_link}`")
+            # 1. Extract Input (ID or Link)
+            if msg.forward_from_chat:
+                input_identifier = msg.forward_from_chat.id
+            elif msg.text:
+                text = msg.text.strip()
+                # Check for Slot 5 Link Mode
+                if slot == '5' and ("t.me/" in text or "http" in text):
+                    is_link_mode = True
+                    input_identifier = text
+                else:
+                    input_identifier = text
+
+            # 2. Process Input
+            if is_link_mode:
+                # Direct Save for Links (Verification Impossible)
+                await db.update_fsub_channel(chat_id, slot, input_identifier)
+                await msg.reply(f"✅ **Saved Link!**\nSlot {slot}: `{input_identifier}`\n(Verification: OFF - Button Only)")
             
             else:
-                await msg.reply(f"❌ **Error:** Invalid ID/Link or Bot is not Admin.")
-                # Return
-                if slot in ['1', '2', '4']: return await request_fsub_menu(client, query)
-                else: return await normal_fsub_menu(client, query)
+                # ✅ STEP 1: FORCE REFRESH (Fixes PeerIdInvalid on Restart)
+                # This fetches the chat from API and caches it in session
+                real_chat = await client.get_chat(input_identifier)
+                
+                # ✅ STEP 2: ADMIN CHECK
+                try:
+                    me = await client.get_chat_member(real_chat.id, "me")
+                    if me.status != enums.ChatMemberStatus.ADMINISTRATOR:
+                        await msg.reply(f"❌ **Error:** I am not an Admin in **{real_chat.title}**!\nPlease promote me and try again.")
+                        # Return to menu
+                        if slot in ['1', '2', '4']: return await request_fsub_menu(client, query)
+                        else: return await normal_fsub_menu(client, query)
+                except Exception as e:
+                    await msg.reply(f"❌ **Error:** Could not check Admin status.\nMake sure I am added to the channel.\n`{e}`")
+                    if slot in ['1', '2', '4']: return await request_fsub_menu(client, query)
+                    else: return await normal_fsub_menu(client, query)
 
-            # Redirect
+                # ✅ STEP 3: SAVE TO DATABASE
+                await db.update_fsub_channel(chat_id, slot, real_chat.id)
+                await msg.reply(f"✅ **Saved!**\nSlot {slot}: {real_chat.title}\nID: `{real_chat.id}`")
+
+            # Redirect to correct menu
             if slot in ['1', '2', '4']: await request_fsub_menu(client, query)
             else: await normal_fsub_menu(client, query)
 
         except Exception as e:
-            await msg.reply(f"❌ **Error:** `{e}`")
+            await msg.reply(f"❌ **Error:** Invalid ID or Channel not found.\n`{e}`")
             if slot in ['1', '2', '4']: await request_fsub_menu(client, query)
             else: await normal_fsub_menu(client, query)
     else:
-        await msg.reply("❌ Invalid input.")
+        await msg.reply("❌ Invalid input (Text or Forward only).")
         if slot in ['1', '2', '4']: await request_fsub_menu(client, query)
         else: await normal_fsub_menu(client, query)
 
@@ -307,7 +317,7 @@ async def remove_req_all(client, query):
 async def remove_norm_all(client, query):
     chat_id = int(query.data.split("#")[1])
     await db.remove_fsub_channel(chat_id, '3')
-    await db.remove_fsub_channel(chat_id, '5') # ✅ Clear Slot 5
+    await db.remove_fsub_channel(chat_id, '5')
     await query.answer("All Normal Fsub Channels Removed!", show_alert=True)
     await normal_fsub_menu(client, query)
 
@@ -329,7 +339,8 @@ async def earning_settings(client, query):
     
     active_mode = "SHORTLINK" if group_data.get('is_shortlink_active', True) else "FSUB (Disable Shortlink)"
     buttons = [
-        [InlineKeyboardButton("🔗 Shortlink Mode", callback_data=f"set_smode#{chat_id}")],
+        [InlineKeyboardButton("🔗 Configure Mode", callback_data=f"set_smode#{chat_id}")],
+        [InlineKeyboardButton("⚙️ Set URLs/APIs", callback_data=f"set_slots#{chat_id}")],
         [InlineKeyboardButton("🚫 Disable Shortlink", callback_data=f"set_disable#{chat_id}")],
         [InlineKeyboardButton("🔙 Back", callback_data=f"set_main#{chat_id}")]
     ]

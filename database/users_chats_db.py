@@ -1,6 +1,5 @@
 import motor.motor_asyncio
 import time
-# ✅ CHANGED: Imported USER_DB_URI for separate User/Group Database
 from info import USER_DB_URI, DATABASE_NAME
 
 class UserChatDB:
@@ -33,6 +32,9 @@ class UserChatDB:
                 'shorteners': {},              
                 'fsub_channels': {},           
                 'is_shortlink_active': True,
+                # New Result Mode Setting
+                'result_mode': 'button', # Default: button, hybrid, text, detailed, card, site
+                'result_per_page': 10,   # Placeholder for future logic
                 # Time Defaults
                 'time_dynamic': 86400,
                 'time_smart': 86400,
@@ -86,10 +88,19 @@ class UserChatDB:
         except Exception as e:
             print(f"Auto-Fix Error: {e}")
 
+        # Slot 5 special handling (can be link or ID)
+        val_to_save = channel_id
+        if slot == '5':
+            # Ensure it's stored as string/int appropriately if handled upstream
+            pass
+        else:
+            try: val_to_save = int(channel_id)
+            except: pass
+
         key = f"fsub_channels.{slot}"
         await self.groups.update_one(
             {'id': int(chat_id)},
-            {'$set': {key: int(channel_id)}},
+            {'$set': {key: val_to_save}},
             upsert=True
         )
 

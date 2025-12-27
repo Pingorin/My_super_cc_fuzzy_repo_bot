@@ -1,27 +1,34 @@
 import logging
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums
 from database.ia_filterdb import Media
-from info import CHANNELS
 
 # Logger setup
 logger = logging.getLogger(__name__)
 
-# ✅ CHANGE: 'filters.audio' hata diya gaya hai.
-# Ab sirf Document aur Video hi automatic save honge.
-@Client.on_message(filters.chat(CHANNELS) & (filters.document | filters.video)) 
+# ✅ LOGIC CHANGE: 
+# Removed 'filters.chat(CHANNELS)'
+# Added 'filters.channel' to listen to ALL channels
+# Added 'filters.audio' as requested
+
+@Client.on_message(filters.channel & (filters.document | filters.video | filters.audio)) 
 async def live_indexing(bot, message):
-    # ✅ CHANGE: Yahan bhi audio hata diya
-    media = message.document or message.video 
+    
+    # Determine which media type is present
+    media = message.document or message.video or message.audio
+    
+    # Safety check
     if not media:
         return
 
     try:
+        # Save to Database
+        # We wrap it in a list [(media, message)] because save_batch expects a list
         saved, dups = await Media.save_batch([(media, message)])
         
+        # Optional: Log successful saves
         if saved:
-            print(f"✅ Auto-Indexed: {message.id} | {message.chat.title}")
-        elif dups:
-            print(f"♻️ Duplicate Skipped: {message.id}")
+            logger.info(f"✅ Auto-Indexed: {message.chat.title} [{message.chat.id}] - Msg ID: {message.id}")
             
     except Exception as e:
-        print(f"❌ Auto-Index Error: {e}")
+        logger.error(f"❌ Auto-Index Error in {message.chat.title}: {e}")
+

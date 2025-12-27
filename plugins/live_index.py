@@ -1,34 +1,28 @@
 import logging
-from pyrogram import Client, filters, enums
+from pyrogram import Client, filters
 from database.ia_filterdb import Media
 
 # Logger setup
 logger = logging.getLogger(__name__)
 
-# ✅ UPDATED: Removed specific 'CHANNELS' filter.
-# Now using 'filters.channel' to listen to ALL channels the bot is in.
+# ✅ UPDATE: Removed 'CHANNELS' filter. 
+# Now listens to ANY Channel where bot is Admin.
 @Client.on_message(filters.channel & (filters.document | filters.video)) 
 async def live_indexing(bot, message):
-    
-    # Check for media availability
+    """
+    Automatically saves files from ANY channel where the bot is added.
+    """
     media = message.document or message.video 
     if not media:
         return
 
-    # Optional: Ignore protected content (files that can't be forwarded/saved)
-    if message.protected:
-        return
-
     try:
-        # Save Batch expects a list of tuples: [(media, message)]
+        # We use save_batch with a single item list to reuse existing logic
         saved, dups = await Media.save_batch([(media, message)])
         
         if saved:
-            logger.info(f"✅ Auto-Indexed: {message.id} | {message.chat.title}")
-        elif dups:
-            # Uncomment below line if you want to see duplicate logs
-            logger.info(f"♻️ Duplicate Skipped: {message.id} | {message.chat.title}")
-            pass
+            chat_title = message.chat.title if message.chat else "Unknown Chat"
+            logger.info(f"✅ Auto-Indexed: {message.id} | {chat_title}")
             
     except Exception as e:
-        logger.error(f"❌ Auto-Index Error in {message.chat.title}: {e}")
+        logger.error(f"❌ Auto-Index Error: {e}")

@@ -111,22 +111,20 @@ async def auto_filter(client, message):
             total = len(files)
             text = format_card_result(file, 0, total)
             
-            # Button Layout
+            # Navigation Buttons
             btn = []
+            if total > 1:
+                # Truncate query to avoid callback data limit (64 bytes)
+                short_q = query[:20] 
+                # Handler expects: card_next_CURRENTINDEX_QUERY
+                btn.append([
+                    InlineKeyboardButton("Next ➡️", callback_data=f"card_next_0_{short_q}")
+                ])
             
-            # Row 1: Get File
+            # Add Get Button
             link_id = file['link_id']
             chat_id = message.chat.id
             btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{client.username}?start=get_{link_id}_{chat_id}")])
-
-            # Row 2: Navigation (Only if more than 1 result)
-            if total > 1:
-                short_q = query[:20] # Truncate query to avoid callback limits
-                # First Page: Only "1/N" and "Next"
-                btn.append([
-                    InlineKeyboardButton(f"1/{total}", callback_data="pages"),
-                    InlineKeyboardButton("Next ➡️", callback_data=f"card_next_0_{short_q}")
-                ])
 
             await message.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
 
@@ -156,20 +154,15 @@ async def card_next_nav(client, query):
         file = files[next_index]
         text = format_card_result(file, next_index, total)
         
-        # Button Logic
         btn = []
+        btn.append([
+            InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{next_index}_{q_text}"),
+            InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{next_index}_{q_text}")
+        ])
         
-        # Row 1: Get File
         link_id = file['link_id']
         chat_id = query.message.chat.id
         btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{client.username}?start=get_{link_id}_{chat_id}")])
-        
-        # Row 2: Navigation
-        btn.append([
-            InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{next_index}_{q_text}"),
-            InlineKeyboardButton(f"{next_index + 1}/{total}", callback_data="pages"),
-            InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{next_index}_{q_text}")
-        ])
         
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
     except Exception as e:
@@ -192,25 +185,14 @@ async def card_prev_nav(client, query):
         file = files[prev_index]
         text = format_card_result(file, prev_index, total)
         
-        # Button Logic
-        btn = []
-        
-        # Row 1: Get File
+        btn = [[
+            InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{prev_index}_{q_text}"),
+            InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{prev_index}_{q_text}")
+        ]]
         link_id = file['link_id']
         chat_id = query.message.chat.id
         btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{client.username}?start=get_{link_id}_{chat_id}")])
         
-        # Row 2: Navigation
-        btn.append([
-            InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{prev_index}_{q_text}"),
-            InlineKeyboardButton(f"{prev_index + 1}/{total}", callback_data="pages"),
-            InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{prev_index}_{q_text}")
-        ])
-        
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
     except Exception as e:
         await query.answer(f"Error: {e}", show_alert=True)
-
-@Client.on_callback_query(filters.regex(r"^pages$"))
-async def page_counter_callback(client, query):
-    await query.answer(f"You are viewing this page.", show_alert=True)

@@ -2,24 +2,29 @@ from aiohttp import web
 import logging
 import math
 from requests import get
-from utils import temp  # ✅ Import temp to access the dynamic Bot Username
+from utils import temp 
 
 logger = logging.getLogger(__name__)
 
 # ✅ In-Memory Cache to store search results
-# This is imported by autofilter.py to save results before sending the link
 RESULTS_CACHE = {}
 
-# ✅ Helper to get Public IP
-def get_public_ip():
+# ✅ Helper to get Public IP or Domain
+def get_site_url():
+    try:
+        # Agar aapne config me URL set kiya hai to wo use karein
+        from info import URL 
+        if URL: return URL.rstrip("/")
+    except: pass
+    
     try:
         ip = get('https://api.ipify.org').text
-        return ip
+        return f"http://{ip}"
     except:
-        return "127.0.0.1"
+        return "http://127.0.0.1"
 
-# Cache IP on startup
-PUBLIC_IP = get_public_ip()
+# Cache URL on startup
+SITE_URL = get_site_url()
 
 async def handle_home(request):
     return web.Response(text="Bot is Running!")
@@ -28,9 +33,8 @@ async def handle_search_results(request):
     try:
         search_id = request.match_info['key']
         
-        # Check if ID exists in cache
         if search_id not in RESULTS_CACHE:
-            return web.Response(text="❌ Link Expired or Invalid. Please search again.", status=404)
+            return web.Response(text="❌ Link Expired or Invalid.", status=404)
         
         data = RESULTS_CACHE[search_id]
         all_files = data['files']
@@ -38,200 +42,167 @@ async def handle_search_results(request):
         chat_id = data['chat_id']
         
         # --- 🔢 PAGINATION LOGIC ---
-        try:
-            page = int(request.query.get('page', 1))
-        except ValueError:
-            page = 1
+        try: page = int(request.query.get('page', 1))
+        except: page = 1
             
         per_page = 10
         total_results = len(all_files)
         total_pages = math.ceil(total_results / per_page)
         
-        # Adjust page bounds
         if page < 1: page = 1
         if page > total_pages: page = total_pages
         
         start_index = (page - 1) * per_page
         end_index = start_index + per_page
-        
         current_files = all_files[start_index:end_index]
         
-        # Helpers for UI Display
         start_count = start_index + 1
         end_count = min(end_index, total_results)
         
-        # --- 📝 GENERATE LIST HTML ---
+        # --- 📝 GENERATE HTML LIST ---
         list_items = ""
         for file in current_files:
             f_name = file['file_name']
             f_size = str(file.get('file_size', 0))
             
-            # Size formatting
+            # Size Formatting
             try:
                 raw_size = float(f_size)
                 if raw_size < 1024: size_str = f"{raw_size:.0f} B"
                 elif raw_size < 1024**2: size_str = f"{raw_size/1024:.2f} KB"
                 elif raw_size < 1024**3: size_str = f"{raw_size/1024**2:.2f} MB"
                 else: size_str = f"{raw_size/1024**3:.2f} GB"
-            except:
-                size_str = str(f_size)
+            except: size_str = str(f_size)
 
             link_id = file['link_id']
             
-            # ✅ FIX: Use temp.U_NAME to ensure the link works dynamically
+            # Bot Username fetch karna (Live)
             bot_username = temp.U_NAME if temp.U_NAME else "Telegram"
             link = f"https://t.me/{bot_username}?start=get_{link_id}_{chat_id}"
             
             list_items += f"""
-            <a href="{link}" class="card-link" target="_blank">
-                <div class="card">
-                    <div class="card-border"></div>
-                    <div class="card-content">
-                        <div class="file-badges">
-                            <span class="badge size-badge">[{size_str}]</span>
-                        </div>
-                        <h3 class="file-name">{f_name}</h3>
-                        <p class="file-type">Document/Video</p>
+            <div class="card" onclick="window.open('{link}', '_blank')">
+                <div class="card-left-border"></div>
+                <div class="card-body">
+                    <div class="badges">
+                        <span class="badge size-badge">{size_str}</span>
+                        <span class="badge type-badge">Video</span>
                     </div>
+                    <h3 class="filename">{f_name}</h3>
+                    <a href="{link}" class="get-btn">📂 Get File</a>
                 </div>
-            </a>
+            </div>
             """
 
         # --- ⏭️ PAGINATION BUTTONS ---
-        # Previous Button
-        if page > 1:
-            prev_link = f"?page={page-1}"
-            prev_class = "nav-btn"
-        else:
-            prev_link = "#"
-            prev_class = "nav-btn disabled"
+        prev_style = "disabled" if page <= 1 else ""
+        next_style = "disabled" if page >= total_pages else ""
+        prev_link = f"?page={page-1}" if page > 1 else "#"
+        next_link = f"?page={page+1}" if page < total_pages else "#"
 
-        # Next Button
-        if page < total_pages:
-            next_link = f"?page={page+1}"
-            next_class = "nav-btn next"
-        else:
-            next_link = "#"
-            next_class = "nav-btn disabled"
-
-        prev_html = f'<a href="{prev_link}" class="{prev_class}">◀ Prev</a>'
-        next_html = f'<a href="{next_link}" class="{next_class}">Next ▶</a>'
-
-        # --- 🖥️ FULL PAGE HTML (Dark Theme) ---
+        # --- 🖥️ DARK APP UI HTML ---
         html_content = f"""
         <!DOCTYPE html>
         <html lang="en">
         <head>
             <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Results for "{query}"</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <title>Results for {query}</title>
             <style>
                 :root {{
-                    --bg-color: #121212;
-                    --card-bg: #1e1e1e;
-                    --text-primary: #ffffff;
-                    --text-secondary: #aaaaaa;
-                    --accent-blue: #2196f3;
-                    --badge-bg: #2c3e50;
-                    --badge-text: #81d4fa;
+                    --bg-color: #0f0f0f;
+                    --card-bg: #1c1c1e;
+                    --primary: #2979ff;
+                    --text-main: #ffffff;
+                    --text-muted: #9e9e9e;
+                    --badge-bg: #263238;
+                    --badge-text: #80d8ff;
                 }}
                 
-                * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }}
-                body {{ background-color: var(--bg-color); color: var(--text-primary); padding: 20px; max-width: 800px; margin: 0 auto; }}
+                * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-tap-highlight-color: transparent; }}
+                body {{ background-color: var(--bg-color); color: var(--text-main); padding: 15px; max-width: 600px; margin: 0 auto; padding-bottom: 40px; }}
                 
-                /* Search Header */
-                .search-container {{ margin-bottom: 30px; }}
+                /* Search Bar Area */
+                .search-area {{ position: sticky; top: 0; background: var(--bg-color); padding: 10px 0; z-index: 100; }}
                 .search-box {{ 
-                    width: 100%; padding: 15px; background: #000; border: 2px solid #333; 
-                    border-radius: 10px; color: white; font-size: 16px; outline: none;
+                    width: 100%; background: #000; border: 1px solid #333; padding: 12px 15px; 
+                    border-radius: 12px; color: #fff; font-size: 16px; outline: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
                 }}
-                .search-box:focus {{ border-color: var(--accent-blue); box-shadow: 0 0 10px rgba(33, 150, 243, 0.3); }}
-                
-                .search-btn {{
-                    width: 100%; margin-top: 10px; padding: 12px; background: #0066ff;
-                    color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;
-                }}
+                .search-box:focus {{ border-color: var(--primary); }}
                 
                 /* Results Info */
-                .results-header {{ text-align: center; margin-bottom: 20px; }}
-                .results-title {{ font-size: 24px; margin-bottom: 5px; }}
-                .highlight {{ color: #00aaff; }}
-                .results-count {{ color: var(--text-secondary); font-size: 14px; }}
-                
-                /* File Cards */
-                .card-link {{ text-decoration: none; color: inherit; display: block; margin-bottom: 15px; }}
+                .header-info {{ margin: 20px 0 15px 0; display: flex; justify-content: space-between; align-items: center; }}
+                .query-text {{ font-size: 18px; font-weight: bold; }}
+                .query-highlight {{ color: var(--primary); }}
+                .count-text {{ font-size: 12px; color: var(--text-muted); }}
+
+                /* Cards */
                 .card {{ 
-                    background-color: var(--card-bg); border-radius: 8px; overflow: hidden; 
-                    position: relative; display: flex; transition: transform 0.2s;
+                    background: var(--card-bg); border-radius: 12px; margin-bottom: 12px; 
+                    position: relative; overflow: hidden; display: flex; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                    cursor: pointer; transition: transform 0.1s;
                 }}
-                .card:active {{ transform: scale(0.98); }}
-                .card-border {{ width: 6px; background-color: var(--accent-blue); }}
-                .card-content {{ padding: 15px; width: 100%; }}
+                .card:active {{ transform: scale(0.98); background: #2c2c2e; }}
                 
-                .file-badges {{ margin-bottom: 8px; }}
-                .badge {{ 
-                    background-color: var(--badge-bg); color: var(--badge-text); 
-                    padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold;
+                .card-left-border {{ width: 5px; background: var(--primary); }}
+                .card-body {{ padding: 15px; width: 100%; }}
+                
+                .badges {{ display: flex; gap: 8px; margin-bottom: 8px; }}
+                .badge {{ background: var(--badge-bg); color: var(--badge-text); font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }}
+                
+                .filename {{ font-size: 15px; line-height: 1.4; font-weight: 500; margin-bottom: 12px; word-break: break-word; }}
+                
+                .get-btn {{ 
+                    display: inline-block; background: rgba(41, 121, 255, 0.15); color: var(--primary); 
+                    text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; 
                 }}
-                
-                .file-name {{ font-size: 16px; line-height: 1.4; margin-bottom: 5px; color: #fff; }}
-                .file-type {{ color: #666; font-size: 13px; font-weight: 500; }}
-                
+
                 /* Pagination */
-                .pagination {{ 
-                    display: flex; justify-content: space-between; align-items: center; 
-                    margin-top: 30px; background: #1a1a1a; padding: 10px; border-radius: 10px;
+                .pagination {{ display: flex; justify-content: space-between; align-items: center; margin-top: 25px; background: var(--card-bg); padding: 10px; border-radius: 12px; }}
+                .page-btn {{ 
+                    padding: 10px 18px; background: var(--primary); color: white; border-radius: 8px; 
+                    text-decoration: none; font-weight: bold; font-size: 14px; 
                 }}
-                
-                .nav-btn {{
-                    padding: 10px 20px; background-color: #333; color: white; text-decoration: none;
-                    border-radius: 6px; font-weight: bold; display: flex; align-items: center;
-                }}
-                .nav-btn:hover:not(.disabled) {{ background-color: #444; }}
-                .nav-btn.disabled {{ opacity: 0.5; cursor: default; pointer-events: none; }}
-                .page-info {{ color: #888; font-size: 14px; }}
-                
+                .page-btn.disabled {{ background: #333; color: #666; pointer-events: none; }}
+                .page-info {{ font-size: 13px; color: var(--text-muted); }}
+
             </style>
         </head>
         <body>
-        
-            <div class="search-container">
+            
+            <div class="search-area">
                 <input type="text" class="search-box" value="{query}" readonly>
-                <button class="search-btn">Search</button>
             </div>
 
-            <div class="results-header">
-                <h1 class="results-title">Results for: <span class="highlight">"{query}"</span></h1>
-                <p class="results-count">Showing {start_count}-{end_count} of {total_results} results</p>
+            <div class="header-info">
+                <div class="query-text">Results for <span class="query-highlight">"{query}"</span></div>
+                <div class="count-text">{start_count}-{end_count} of {total_results}</div>
             </div>
 
-            <div class="file-list">
+            <div class="results-list">
                 {list_items}
             </div>
 
             <div class="pagination">
-                {prev_html}
+                <a href="{prev_link}" class="page-btn {prev_style}">Prev</a>
                 <span class="page-info">Page {page} of {total_pages}</span>
-                {next_html}
+                <a href="{next_link}" class="page-btn {next_style}">Next</a>
             </div>
 
         </body>
         </html>
         """
-        
         return web.Response(text=html_content, content_type='text/html')
 
     except Exception as e:
-        logger.error(f"Web Page Error: {e}")
-        return web.Response(text="Internal Server Error", status=500)
+        logger.error(f"Web Error: {e}")
+        return web.Response(text="Server Error", status=500)
 
 async def web_server():
     web_app = web.Application(client_max_size=30000000)
-    
-    # Routes
     web_app.add_routes([
         web.get('/', handle_home),
-        web.get('/results/{key}', handle_search_results)
+        web.get('/results/{key}', handle_search_results),
+        web.get('/favicon.ico', handle_home) # Error preventer
     ])
-    
     return web_app

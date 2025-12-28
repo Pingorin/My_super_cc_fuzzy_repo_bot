@@ -2,6 +2,7 @@ import logging
 import math
 import aiohttp
 import os
+import re
 from pyrogram.types import InlineKeyboardButton
 from pyrogram import enums
 from pyrogram.errors import UserNotParticipant
@@ -24,7 +25,7 @@ class temp(object):
     B_LINK = None
     ME = None
 
-# ✅ 1. TEXT FORMATTERS (Added Helpers for Result Modes)
+# ✅ 1. GENERAL HELPERS
 def get_size(size):
     if not size: return "0 B"
     power = 2**10
@@ -35,96 +36,111 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-def format_text_results(files, query):
+# ✅ 2. TELEGRAPH SETUP (For Site Mode)
+try:
+    from telegraph import Telegraph
+    telegraph_client = Telegraph()
+    telegraph_client.create_account(short_name='AutoFilter')
+except Exception as e:
+    logger.warning(f"Telegraph library not found or error: {e}")
+    telegraph_client = None
+
+# ✅ 3. RESULT MODE FORMATTERS
+
+def format_text_results(files, query, chat_id):
+    """Generates the List layout for Text Mode."""
     text = f"👻 **Results for:** `{query}`\n\n"
     for i, file in enumerate(files, 1):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
-        chat_id = file.get('chat_id')
-        cmd_link = f"/get_{link_id}" 
-        text += f"{i}. 📂 [{f_name}](https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}) [{f_size}]\n\n"
+        
+        # Link directs to the bot with the specific Group ID
+        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
+        
+        # HTML Link formatting for cleaner look
+        text += f"{i}. 📂 <a href='{link}'>{f_name}</a> [{f_size}]\n\n"
+        
     return text
 
-def format_detailed_results(files, query):
-    text = f"👻 **Detailed Results for:** `{query}`\n\n"
+def format_detailed_results(files, query, chat_id, time_taken=0):
+    """Generates the detailed layout with Metadata."""
+    text = (
+        f"⚡ **Hey {query} lovers!**\n"
+        f"👻 **Here are your results....**\n"
+        f"⌛ **Time taken:** {time_taken} seconds\n"
+        f"code: {len(files)}\n\n"
+    )
+    
     for file in files:
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
-        chat_id = file.get('chat_id')
-        caption = file.get('caption', 'N/A')
-        if len(caption) > 50: caption = caption[:50] + "..."
         
-        text += f"🎬 **Title:** `{f_name}`\n"
-        text += f"💾 **Size:** `{f_size}`\n"
-        text += f"📝 **Info:** {caption}\n"
-        text += f"🔗 **Link:** [Get File](https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id})\n"
-        text += f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
+        
+        # Auto-Detect Quality
+        q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
+        quality = q_match.group(0) if q_match else "N/A"
+        
+        # Auto-Detect Language
+        l_matches = re.findall(r"\b(Hindi|Eng|English|Tam|Tamil|Tel|Telugu|Mal|Malayalam|Kan|Kannada|Ben|Bengali|Pun|Punjabi|Mar|Marathi)\b", f_name, re.IGNORECASE)
+        if l_matches:
+            lang = ", ".join(sorted(set([l.capitalize() for l in l_matches])))
+        else:
+            lang = "N/A"
+
+        text += f"📂 <a href='{link}'>𝘾𝙡𝙞𝙘𝙠 𝙩𝙤 𝙜𝙖𝙩 𝙩𝙝𝙞𝙨 𝙛𝙞𝙡𝙚 📥</a>\n"
+        text += f"🖥 𝙉𝙖𝙢𝙚: {f_name}\n"
+        text += f"📀 𝙦𝙪𝙖𝙡𝙞𝙩𝙮: {quality}\n"
+        text += f"🌍 𝙡𝙖𝙣𝙜𝙪𝙖𝙜𝙚: {lang}\n"
+        text += f"📦 [{f_size}]\n\n"
+        
     return text
 
 def format_card_result(file, current_index, total_count):
+    """Generates the Single Card layout."""
     f_name = file['file_name']
     f_size = get_size(file['file_size'])
     caption = file.get('caption', '')
     
     f_type = "Document"
-    if f_name.endswith(('.mkv', '.mp4', '.avi')): f_type = "Video"
-    elif f_name.endswith(('.mp3', '.flac')): f_type = "Audio"
+    if f_name.endswith(('.mkv', '.mp4', '.avi', '.webm')): f_type = "Video"
+    elif f_name.endswith(('.mp3', '.flac', '.wav')): f_type = "Audio"
 
     text = f"🎬 **{f_name}**\n\n"
     text += f"🗂️ **Type:** {f_type}\n"
     text += f"💾 **Size:** {f_size}\n"
-    if len(caption) > 100: text += f"📝 **Info:** {caption[:100]}...\n"
+    if caption and len(caption) > 100: 
+        text += f"📝 **Info:** {caption[:100]}...\n"
     
     text += f"\n**File {current_index + 1} of {total_count}**"
     return text
 
-# ✅ 2. TELEGRAPH POSTER (Site Mode Helper)
-try:
-    from telegraph import Telegraph
-    telegraph_client = Telegraph()
-    telegraph_client.create_account(short_name='AutoFilter')
-except:
-    telegraph_client = None
-
-async def post_to_telegraph(files, query):
+async def post_to_telegraph(files, query, chat_id):
+    """Generates a Telegraph page for Site Mode."""
     if not telegraph_client: return None
+    
     html_content = f"<h3>Search Results for: {query}</h3><br>"
     for file in files:
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
-        chat_id = file.get('chat_id')
+        
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
         html_content += f"<p>📂 <a href='{link}'>{f_name}</a> [{f_size}]</p><hr>"
     
     try:
-        response = telegraph_client.create_page(title=f"Results: {query}", html_content=html_content)
+        response = telegraph_client.create_page(
+            title=f"Results: {query}", 
+            html_content=html_content
+        )
         return response['url']
     except Exception as e:
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 3. SHORTLINK GENERATOR
-async def get_shortlink(site, api, link):
-    url = f'https://{site}/api'
-    params = {'api': api, 'url': link}
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, timeout=20) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if "shortenedUrl" in data: return data["shortenedUrl"]
-                    elif "status" in data and data["status"] == "success" and "shortenedUrl" in data: return data["shortenedUrl"]
-                logger.error(f"Shortener Failed ({site}): Status {response.status}")
-                return None 
-    except Exception as e:
-        logger.error(f"Shortlink Exception ({site}): {e}")
-        return None 
-
-# ✅ 4. BUTTON PARSER
+# ✅ 4. BUTTON PARSER (Button Mode)
 def btn_parser(files, chat_id, query=None):
     buttons = []
     for file in files:
@@ -146,12 +162,31 @@ def btn_parser(files, chat_id, query=None):
         btn_text = f"📂 {display_name} [{f_size}]"
         
         if link_id is not None:
+            # We pass chat_id in the Deep Link to enforce Group Settings (Fsub/Shortener)
             url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     return buttons
 
-# ✅ 5. FSUB STATUS LOGIC
+# ✅ 5. SHORTLINK GENERATOR
+async def get_shortlink(site, api, link):
+    url = f'https://{site}/api'
+    params = {'api': api, 'url': link}
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=20) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if "shortenedUrl" in data: return data["shortenedUrl"]
+                    elif "status" in data and data["status"] == "success" and "shortenedUrl" in data: return data["shortenedUrl"]
+                logger.error(f"Shortener Failed ({site}): Status {response.status}")
+                return None 
+    except Exception as e:
+        logger.error(f"Shortlink Exception ({site}): {e}")
+        return None 
+
+# ✅ 6. FSUB STATUS HELPERS
 async def _get_fsub_status(bot, user_id, channel_id):
     try:
         member = await bot.get_chat_member(channel_id, user_id)

@@ -1,50 +1,50 @@
 import os
 import re
 
-# Helper for ID parsing (IDs check karne ke liye)
+# Helper for ID parsing
 id_pattern = re.compile(r'^-?\d+$')
 
-# Mandatory Variables
+# --- MANDATORY VARIABLES ---
 API_ID = int(os.environ.get("API_ID", "12345")) 
-API_HASH = os.environ.get("API_HASH", "apna_hash_yahan")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "apna_bot_token")
-DATABASE_URI = os.environ.get("DATABASE_URI", "apna_mongodb_url")
+API_HASH = os.environ.get("API_HASH", "your_api_hash")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "your_bot_token")
+DATABASE_URI = os.environ.get("DATABASE_URI", "your_mongo_uri")
 
-# Database Names
+# --- DATABASE SETTINGS ---
 DATABASE_NAME = os.environ.get("DATABASE_NAME", "MyBotDB")
+COLLECTION_NAME = os.environ.get('COLLECTION_NAME', 'Telegram_files')
 USER_DB_URI = os.environ.get("USER_DB_URI", "")
 if not USER_DB_URI:
     USER_DB_URI = DATABASE_URI
   
-# Optional
+# --- GENERAL SETTINGS ---
 ADMINS = [int(i) for i in os.environ.get("ADMINS", "").split(" ")] if os.environ.get("ADMINS") else []
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0")) 
 PORT = int(os.environ.get("PORT", "8080"))
-CHANNELS = [-1003342421845] 
+CHANNELS = [int(ch) for ch in os.environ.get("CHANNELS", "0").split()] if os.environ.get("CHANNELS") else []
+
+# ✅ SITE URL (REQUIRED FOR SITE MODE)
+# Render/Heroku users must set this in Environment Variables (e.g., https://my-app.onrender.com)
+# Do not add a trailing slash (/) at the end.
+SITE_URL = os.environ.get("SITE_URL", "http://localhost:8080")
 
 # --- VERIFICATION SETTINGS ---
-# Environment variable se control karne ke liye update kiya gaya hai
 IS_VERIFY = os.environ.get("IS_VERIFY", "True").lower() in ["true", "yes", "1"]
-
-# Verification Time & Gaps
 VERIFY_TIME = int(os.environ.get("VERIFY_TIME", 1200)) # 20 Min
 VERIFY_GAP1 = int(os.environ.get("VERIFY_GAP1", 300))  # 5 Min
 VERIFY_GAP2 = int(os.environ.get("VERIFY_GAP2", 300))  # 5 Min
 
-# Shortener Info
+# --- SHORTENER SETTINGS ---
 SHORTLINK_URL_1 = os.environ.get("SHORTLINK_URL_1", "shortxlinks.com")
-SHORTLINK_API_1 = os.environ.get("SHORTLINK_API_1", "7c480930494be0edb7e546125c35d79840d5146b")
+SHORTLINK_API_1 = os.environ.get("SHORTLINK_API_1", "your_api_key")
 
 SHORTLINK_URL_2 = os.environ.get("SHORTLINK_URL_2", "softurl.in")
-SHORTLINK_API_2 = os.environ.get("SHORTLINK_API_2", "613ce973446725bfe2bf909b320c7a1e84c4bdc8")
+SHORTLINK_API_2 = os.environ.get("SHORTLINK_API_2", "your_api_key")
 
 SHORTLINK_URL_3 = os.environ.get("SHORTLINK_URL_3", "softurl.in")
-SHORTLINK_API_3 = os.environ.get("SHORTLINK_API_3", "613ce973446725bfe2bf909b320c7a1e84c4bdc8")
+SHORTLINK_API_3 = os.environ.get("SHORTLINK_API_3", "your_api_key")
 
-# =========================================================
-# 🔥 FSUB CHANNELS (Error Fix & New Feature)
-# =========================================================
-
+# --- FSUB CHANNELS ---
 # Slot 1 (Request FSub)
 auth_channel = os.environ.get('AUTH_CHANNEL', '') 
 AUTH_CHANNEL = int(auth_channel) if auth_channel and id_pattern.search(auth_channel) else None
@@ -61,3 +61,7 @@ AUTH_CHANNEL_3 = int(auth_channel_3) if auth_channel_3 and id_pattern.search(aut
 auth_channel_4 = os.environ.get('AUTH_CHANNEL_4', '')
 AUTH_CHANNEL_4 = int(auth_channel_4) if auth_channel_4 and id_pattern.search(auth_channel_4) else None
 AUTH_CHANNEL_4_TEXT = os.environ.get('AUTH_CHANNEL_4_TEXT', '✅ Join Final Channel')
+
+# --- OTHER SETTINGS ---
+USE_CAPTION_FILTER = os.environ.get("USE_CAPTION_FILTER", "True").lower() in ["true", "yes", "1"]
+MONGODB_TIMEOUT = 300 # 5 Minutes

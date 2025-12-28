@@ -1,16 +1,15 @@
 import logging
 import time
 import re
-import uuid # ✅ Added for Site Mode ID generation
+import uuid 
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import PORT
-# ✅ Import Web Server Cache & IP for Site Mode
-from plugins.web_server import RESULTS_CACHE, PUBLIC_IP 
-# ✅ Import helpers (Added temp for username)
-from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result
+# ✅ FIX: Import SITE_URL instead of PUBLIC_IP (Matches web_server.py update)
+from plugins.web_server import RESULTS_CACHE, SITE_URL
+from utils import temp, btn_parser, format_text_results, format_detailed_results, post_to_telegraph, format_card_result
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,10 @@ async def auto_filter(client, message):
     
     query = re.sub(clean_regex, "", raw_query, flags=re.IGNORECASE)
     query = re.sub(r"\s+", " ", query).strip()
-    if len(query) < 2: query = raw_query
+    
+    if len(query) < 2:
+        query = raw_query
+    # -------------------------
 
     start_time = time.time()
 
@@ -86,7 +88,13 @@ async def auto_filter(client, message):
             }
             
             # 3. Construct Local URL
-            site_url = f"http://{PUBLIC_IP}:{PORT}/results/{search_id}"
+            # Smart logic: Check if SITE_URL already has a port or is a domain
+            if "127.0.0.1" in SITE_URL or (SITE_URL.count(":") < 2):
+                # If it's a raw IP (http://1.2.3.4), append the port
+                final_site_url = f"{SITE_URL}:{PORT}/results/{search_id}"
+            else:
+                # If it's a domain (https://bot.com) or has port, leave it
+                final_site_url = f"{SITE_URL}/results/{search_id}"
             
             # 4. Custom Message Format
             text = (
@@ -95,10 +103,10 @@ async def auto_filter(client, message):
                 f"⌛ Time taken: {time_taken} seconds\n"
                 f"code: {len(files)}\n\n"
                 f"🚀 Your results are ready\n"
-                f"🚀 <a href='{site_url}'>Click here to see your results..</a>"
+                f"🚀 <a href='{final_site_url}'>Click here to see your results..</a>"
             )
             
-            btn = [[InlineKeyboardButton("🔎 Open Results Page", url=site_url)]]
+            btn = [[InlineKeyboardButton("🔎 Open Results Page", url=final_site_url)]]
             await message.reply_text(text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn))
 
         # --- MODE E: CARD (Single Result View with Navigation) ---

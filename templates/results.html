@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Results for {{ query }}</title>
+    <style>
+        :root {
+            --bg-color: #0f0f0f;
+            --card-bg: #1e1e1e;
+            --accent: #0088cc;
+            --text-main: #ffffff;
+            --text-sec: #aaaaaa;
+        }
+        body { background-color: var(--bg-color); color: var(--text-main); font-family: sans-serif; padding: 20px; margin: 0; }
+        .container { max-width: 800px; margin: 0 auto; }
+        
+        h2 { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }
+        .query { color: var(--accent); }
+        
+        .file-card {
+            background: var(--card-bg);
+            margin-bottom: 15px;
+            padding: 15px;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            border-left: 5px solid var(--accent);
+        }
+        
+        .file-info { flex-grow: 1; padding-right: 15px; }
+        .filename { font-size: 16px; font-weight: bold; margin-bottom: 5px; display: block; }
+        .filesize { font-size: 12px; background: #333; padding: 2px 8px; border-radius: 4px; color: #00e676; }
+        
+        .get-btn {
+            background: var(--accent);
+            color: white;
+            text-decoration: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .get-btn:hover { opacity: 0.8; }
+        
+        @media (max-width: 600px) {
+            .file-card { flex-direction: column; align-items: flex-start; }
+            .get-btn { width: 100%; text-align: center; margin-top: 10px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Results for: <span class="query">"{{ query }}"</span></h2>
+        <p style="text-align:center; color: #777;">Found {{ total }} files</p>
+
+        {% for file in files %}
+        <div class="file-card">
+            <div class="file-info">
+                <span class="filename">{{ file.file_name }}</span>
+                <span class="filesize">Size: {{ file.file_size }}</span>
+            </div>
+            <a href="tg://resolve?domain={{ bot_username }}&start=get_{{ file.link_id }}_{{ file.chat_id }}" class="get-btn">
+                📂 Get File
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+</body>
+</html>

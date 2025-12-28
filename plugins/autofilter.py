@@ -1,12 +1,16 @@
 import logging
 import time
 import re
+import uuid # ✅ Added for Site Mode ID generation
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-# ✅ Import helpers from utils (Added temp for username)
-from utils import temp, btn_parser, format_text_results, format_detailed_results, post_to_telegraph, format_card_result
+from info import PORT
+# ✅ Import Web Server Cache & IP for Site Mode
+from plugins.web_server import RESULTS_CACHE, PUBLIC_IP 
+# ✅ Import helpers (Added temp for username)
+from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +25,7 @@ async def auto_filter(client, message):
     
     query = re.sub(clean_regex, "", raw_query, flags=re.IGNORECASE)
     query = re.sub(r"\s+", " ", query).strip()
-    
-    if len(query) < 2:
-        query = raw_query
-    # -------------------------
+    if len(query) < 2: query = raw_query
 
     start_time = time.time()
 
@@ -39,8 +40,7 @@ async def auto_filter(client, message):
         end_time = time.time()
         time_taken = round(end_time - start_time, 2)
 
-        if not files:
-            return
+        if not files: return
 
         # ==================================================================
         # 🔀 MODE DISPATCHER (Dynamic Display Logic)
@@ -59,44 +59,47 @@ async def auto_filter(client, message):
                 f"👻 **Here are your results for:** `{query}`\n"
                 f"⏳ **Time Taken:** {time_taken} seconds"
             )
-            await message.reply_text(
-                text=msg_text,
-                reply_markup=InlineKeyboardMarkup(buttons)
-            )
+            await message.reply_text(text=msg_text, reply_markup=InlineKeyboardMarkup(buttons))
 
         # --- MODE B: TEXT LIST ---
         elif mode == 'text':
             display_files = files[:20]
-            # ✅ Passed message.chat.id for link generation
             text = format_text_results(display_files, query, message.chat.id)
             await message.reply_text(text, disable_web_page_preview=True)
 
         # --- MODE C: DETAILED LIST ---
         elif mode == 'detailed':
             display_files = files[:10]
-            # ✅ Passed message.chat.id AND time_taken
             text = format_detailed_results(display_files, query, message.chat.id, time_taken)
             await message.reply_text(text, disable_web_page_preview=True)
 
-        # --- MODE D: SITE (TELEGRAPH) ---
+        # --- MODE D: SITE (SELF-HOSTED) ---
         elif mode == 'site':
-            if len(files) > 20:
-                # ✅ Passed message.chat.id
-                url = await post_to_telegraph(files, query, message.chat.id)
-                if url:
-                    btn = [[InlineKeyboardButton(f"🔎 View All {len(files)} Results", url=url)]]
-                    await message.reply_text(
-                        f"👻 **Found {len(files)} results for:** `{query}`\n"
-                        f"⏳ **Time Taken:** {time_taken} seconds\n\n"
-                        "Results are too long, view them on the site page.",
-                        reply_markup=InlineKeyboardMarkup(btn)
-                    )
-                else:
-                    buttons = btn_parser(files, message.chat.id, query)
-                    await message.reply_text(f"👻 Results: `{query}`", reply_markup=InlineKeyboardMarkup(buttons))
-            else:
-                text = format_text_results(files, query, message.chat.id)
-                await message.reply_text(text, disable_web_page_preview=True)
+            # 1. Generate Unique ID
+            search_id = str(uuid.uuid4())
+            
+            # 2. Store Data in Web Server Cache
+            RESULTS_CACHE[search_id] = {
+                "files": files,
+                "query": query,
+                "chat_id": message.chat.id
+            }
+            
+            # 3. Construct Local URL
+            site_url = f"http://{PUBLIC_IP}:{PORT}/results/{search_id}"
+            
+            # 4. Custom Message Format
+            text = (
+                f"⚡ Hey {query} lovers!\n"
+                f"👻 here are your results....\n"
+                f"⌛ Time taken: {time_taken} seconds\n"
+                f"code: {len(files)}\n\n"
+                f"🚀 Your results are ready\n"
+                f"🚀 <a href='{site_url}'>Click here to see your results..</a>"
+            )
+            
+            btn = [[InlineKeyboardButton("🔎 Open Results Page", url=site_url)]]
+            await message.reply_text(text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn))
 
         # --- MODE E: CARD (Single Result View with Navigation) ---
         elif mode == 'card':
@@ -114,7 +117,6 @@ async def auto_filter(client, message):
             # Row 2: Navigation (Only if > 1 result)
             if total > 1:
                 short_q = query[:20] 
-                
                 # Logic: Page 1 shows "1/N" and "Next" (No Prev)
                 btn.append([
                     InlineKeyboardButton(f"1/{total}", callback_data="pages"),

@@ -2,12 +2,12 @@ from aiohttp import web
 import logging
 import math
 from requests import get
-# ✅ Fix: Import temp instead of static U_NAME
-from utils import temp
+from utils import temp  # ✅ Import temp to access the dynamic Bot Username
 
 logger = logging.getLogger(__name__)
 
 # ✅ In-Memory Cache to store search results
+# This is imported by autofilter.py to save results before sending the link
 RESULTS_CACHE = {}
 
 # ✅ Helper to get Public IP
@@ -30,7 +30,7 @@ async def handle_search_results(request):
         
         # Check if ID exists in cache
         if search_id not in RESULTS_CACHE:
-            return web.Response(text="❌ Link Expired or Invalid.", status=404)
+            return web.Response(text="❌ Link Expired or Invalid. Please search again.", status=404)
         
         data = RESULTS_CACHE[search_id]
         all_files = data['files']
@@ -56,7 +56,7 @@ async def handle_search_results(request):
         
         current_files = all_files[start_index:end_index]
         
-        # UI Helpers
+        # Helpers for UI Display
         start_count = start_index + 1
         end_count = min(end_index, total_results)
         
@@ -66,6 +66,7 @@ async def handle_search_results(request):
             f_name = file['file_name']
             f_size = str(file.get('file_size', 0))
             
+            # Size formatting
             try:
                 raw_size = float(f_size)
                 if raw_size < 1024: size_str = f"{raw_size:.0f} B"
@@ -77,9 +78,8 @@ async def handle_search_results(request):
 
             link_id = file['link_id']
             
-            # ✅ FIX: Use temp.U_NAME (Live Username)
-            # Agar temp.U_NAME available nahi hai to fallback handle karein
-            bot_username = temp.U_NAME if temp.U_NAME else "YourBotName"
+            # ✅ FIX: Use temp.U_NAME to ensure the link works dynamically
+            bot_username = temp.U_NAME if temp.U_NAME else "Telegram"
             link = f"https://t.me/{bot_username}?start=get_{link_id}_{chat_id}"
             
             list_items += f"""
@@ -91,23 +91,33 @@ async def handle_search_results(request):
                             <span class="badge size-badge">[{size_str}]</span>
                         </div>
                         <h3 class="file-name">{f_name}</h3>
-                        <p class="file-type">Video</p>
+                        <p class="file-type">Document/Video</p>
                     </div>
                 </div>
             </a>
             """
 
         # --- ⏭️ PAGINATION BUTTONS ---
-        prev_btn_class = "nav-btn" if page > 1 else "nav-btn disabled"
-        prev_link = f"?page={page-1}" if page > 1 else "#"
-        
-        next_btn_class = "nav-btn next" if page < total_pages else "nav-btn disabled"
-        next_link = f"?page={page+1}" if page < total_pages else "#"
+        # Previous Button
+        if page > 1:
+            prev_link = f"?page={page-1}"
+            prev_class = "nav-btn"
+        else:
+            prev_link = "#"
+            prev_class = "nav-btn disabled"
 
-        prev_html = f'<a href="{prev_link}" class="{prev_btn_class}">◀ Prev</a>'
-        next_html = f'<a href="{next_link}" class="{next_btn_class}">Next ▶</a>'
+        # Next Button
+        if page < total_pages:
+            next_link = f"?page={page+1}"
+            next_class = "nav-btn next"
+        else:
+            next_link = "#"
+            next_class = "nav-btn disabled"
 
-        # --- 🖥️ HTML UI (Dark Theme) ---
+        prev_html = f'<a href="{prev_link}" class="{prev_class}">◀ Prev</a>'
+        next_html = f'<a href="{next_link}" class="{next_class}">Next ▶</a>'
+
+        # --- 🖥️ FULL PAGE HTML (Dark Theme) ---
         html_content = f"""
         <!DOCTYPE html>
         <html lang="en">
@@ -129,6 +139,7 @@ async def handle_search_results(request):
                 * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }}
                 body {{ background-color: var(--bg-color); color: var(--text-primary); padding: 20px; max-width: 800px; margin: 0 auto; }}
                 
+                /* Search Header */
                 .search-container {{ margin-bottom: 30px; }}
                 .search-box {{ 
                     width: 100%; padding: 15px; background: #000; border: 2px solid #333; 
@@ -141,11 +152,13 @@ async def handle_search_results(request):
                     color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;
                 }}
                 
+                /* Results Info */
                 .results-header {{ text-align: center; margin-bottom: 20px; }}
                 .results-title {{ font-size: 24px; margin-bottom: 5px; }}
                 .highlight {{ color: #00aaff; }}
                 .results-count {{ color: var(--text-secondary); font-size: 14px; }}
                 
+                /* File Cards */
                 .card-link {{ text-decoration: none; color: inherit; display: block; margin-bottom: 15px; }}
                 .card {{ 
                     background-color: var(--card-bg); border-radius: 8px; overflow: hidden; 
@@ -164,6 +177,7 @@ async def handle_search_results(request):
                 .file-name {{ font-size: 16px; line-height: 1.4; margin-bottom: 5px; color: #fff; }}
                 .file-type {{ color: #666; font-size: 13px; font-weight: 500; }}
                 
+                /* Pagination */
                 .pagination {{ 
                     display: flex; justify-content: space-between; align-items: center; 
                     margin-top: 30px; background: #1a1a1a; padding: 10px; border-radius: 10px;
@@ -213,8 +227,11 @@ async def handle_search_results(request):
 
 async def web_server():
     web_app = web.Application(client_max_size=30000000)
+    
+    # Routes
     web_app.add_routes([
         web.get('/', handle_home),
         web.get('/results/{key}', handle_search_results)
     ])
+    
     return web_app

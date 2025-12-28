@@ -14,6 +14,9 @@ from aiohttp import web
 from plugins.web_server import web_server
 import asyncio
 import time
+# ✅ New Imports for Site Mode
+import aiohttp_jinja2
+import jinja2
 
 # Logging Setup
 logging.config.fileConfig('logging.conf')
@@ -23,7 +26,7 @@ logging.getLogger("pyrogram").setLevel(logging.ERROR)
 class Bot(Client):
     def __init__(self):
         super().__init__(
-            name='aks',  # Updated name to match typical setups
+            name='aks', 
             api_id=API_ID,
             api_hash=API_HASH,
             bot_token=BOT_TOKEN,
@@ -34,7 +37,7 @@ class Bot(Client):
 
     async def start(self):
         st = time.time()
-        temp.START_TIME = st  # Aaj_elsa_bot_s style startup time
+        temp.START_TIME = st 
         
         # Database Connect & Banned Data Load
         b_users, b_chats = await db.get_banned()
@@ -43,7 +46,7 @@ class Bot(Client):
         
         await super().start()
         
-        # Indexes Ensure Karna (Zaroori for search)
+        # Indexes Ensure Karna 
         await Media.ensure_indexes()
         
         me = await self.get_me()
@@ -54,12 +57,29 @@ class Bot(Client):
         
         print(f"{me.first_name} is started now ❤️")
         
-        # Web Server Start
-        app = web.AppRunner(await web_server())
-        await app.setup()
-        bind_address = "0.0.0.0"
-        await web.TCPSite(app, bind_address, PORT).start()
+        # ==================================================================
+        # 🌐 WEB SERVER & JINJA2 SETUP (For Site Mode)
+        # ==================================================================
         
+        # 1. Get the Web App instance
+        curr_web_app = await web_server()
+        
+        # 2. Configure Jinja2 Template Loader (Looks in 'templates' folder)
+        aiohttp_jinja2.setup(curr_web_app, loader=jinja2.FileSystemLoader('templates'))
+        
+        # 3. Inject Bot Username into Web App Context (For HTML Deep Links)
+        curr_web_app['bot_username'] = me.username
+        
+        # 4. Run the App Runner
+        runner = web.AppRunner(curr_web_app)
+        await runner.setup()
+        bind_address = "0.0.0.0"
+        await web.TCPSite(runner, bind_address, PORT).start()
+        
+        print(f"Web Server Running on Port {PORT} with Jinja2 Templates")
+        
+        # ==================================================================
+
         # Restart Log
         if LOG_CHANNEL:
             try:
@@ -75,7 +95,6 @@ class Bot(Client):
         await super().stop()
         print("Bot stopped.")
 
-    # Iter messages helper (Aaj_elsa_bot_s style)
     async def iter_messages(
         self,
         chat_id: Union[int, str],

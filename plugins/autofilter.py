@@ -1,14 +1,12 @@
 import logging
 import time
 import re
-import uuid 
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-from info import PORT
-# ✅ FIX: Import SITE_URL instead of PUBLIC_IP (Matches web_server.py update)
-from plugins.web_server import RESULTS_CACHE, SITE_URL
+from info import PORT, SITE_URL # ✅ Import SITE_URL from config
+# ✅ Removed RESULTS_CACHE import as we now use MongoDB
 from utils import temp, btn_parser, format_text_results, format_detailed_results, post_to_telegraph, format_card_result
 
 logger = logging.getLogger(__name__)
@@ -42,7 +40,8 @@ async def auto_filter(client, message):
         end_time = time.time()
         time_taken = round(end_time - start_time, 2)
 
-        if not files: return
+        if not files:
+            return
 
         # ==================================================================
         # 🔀 MODE DISPATCHER (Dynamic Display Logic)
@@ -61,53 +60,54 @@ async def auto_filter(client, message):
                 f"👻 **Here are your results for:** `{query}`\n"
                 f"⏳ **Time Taken:** {time_taken} seconds"
             )
-            await message.reply_text(text=msg_text, reply_markup=InlineKeyboardMarkup(buttons))
+            await message.reply_text(
+                text=msg_text,
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
 
         # --- MODE B: TEXT LIST ---
         elif mode == 'text':
             display_files = files[:20]
+            # ✅ Passed message.chat.id for link generation
             text = format_text_results(display_files, query, message.chat.id)
             await message.reply_text(text, disable_web_page_preview=True)
 
         # --- MODE C: DETAILED LIST ---
         elif mode == 'detailed':
             display_files = files[:10]
+            # ✅ Passed message.chat.id AND time_taken
             text = format_detailed_results(display_files, query, message.chat.id, time_taken)
             await message.reply_text(text, disable_web_page_preview=True)
 
-        # --- MODE D: SITE (SELF-HOSTED) ---
+        # --- MODE D: SITE (WEB VIEW - MONGODB PERSISTENCE) ---
         elif mode == 'site':
-            # 1. Generate Unique ID
-            search_id = str(uuid.uuid4())
+            # 1. Save to MongoDB & Get Unique ID
+            # (Requires 'save_search_results' method in ia_filterdb.py)
+            search_id = await Media.save_search_results(query, files)
             
-            # 2. Store Data in Web Server Cache
-            RESULTS_CACHE[search_id] = {
-                "files": files,
-                "query": query,
-                "chat_id": message.chat.id
-            }
-            
-            # 3. Construct Local URL
-            # Smart logic: Check if SITE_URL already has a port or is a domain
-            if "127.0.0.1" in SITE_URL or (SITE_URL.count(":") < 2):
-                # If it's a raw IP (http://1.2.3.4), append the port
-                final_site_url = f"{SITE_URL}:{PORT}/results/{search_id}"
+            # 2. Construct Link
+            if not SITE_URL or not SITE_URL.startswith("http"):
+                # Fallback URL if config is missing
+                base_url = "http://127.0.0.1:8080"
             else:
-                # If it's a domain (https://bot.com) or has port, leave it
-                final_site_url = f"{SITE_URL}/results/{search_id}"
+                base_url = SITE_URL.rstrip('/')
             
-            # 4. Custom Message Format
+            final_site_url = f"{base_url}/results/{search_id}"
+            
+            # 3. Reply with Button
             text = (
-                f"⚡ Hey {query} lovers!\n"
-                f"👻 here are your results....\n"
-                f"⌛ Time taken: {time_taken} seconds\n"
-                f"code: {len(files)}\n\n"
-                f"🚀 Your results are ready\n"
-                f"🚀 <a href='{final_site_url}'>Click here to see your results..</a>"
+                f"⚡ **Results for:** `{query}`\n"
+                f"📂 **Found:** {len(files)} files\n"
+                f"⏳ **Time:** {time_taken}s\n\n"
+                f"👇 **Click the button below to view results online**"
             )
             
-            btn = [[InlineKeyboardButton("🔎 Open Results Page", url=final_site_url)]]
-            await message.reply_text(text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn))
+            btn = [[InlineKeyboardButton("🔎 View Results Online", url=final_site_url)]]
+            
+            await message.reply_text(
+                text, 
+                reply_markup=InlineKeyboardMarkup(btn)
+            )
 
         # --- MODE E: CARD (Single Result View with Navigation) ---
         elif mode == 'card':
@@ -117,7 +117,7 @@ async def auto_filter(client, message):
             
             btn = []
             
-            # Row 1: Get File (Using temp.U_NAME for reliability)
+            # Row 1: Get File
             link_id = file['link_id']
             chat_id = message.chat.id
             btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
@@ -125,7 +125,7 @@ async def auto_filter(client, message):
             # Row 2: Navigation (Only if > 1 result)
             if total > 1:
                 short_q = query[:20] 
-                # Logic: Page 1 shows "1/N" and "Next" (No Prev)
+                # Logic: Page 1 shows "1/N" and "Next"
                 btn.append([
                     InlineKeyboardButton(f"1/{total}", callback_data="pages"),
                     InlineKeyboardButton("Next ➡️", callback_data=f"card_next_0_{short_q}")
@@ -143,9 +143,11 @@ async def auto_filter(client, message):
 @Client.on_callback_query(filters.regex(r"^card_next_"))
 async def card_next_nav(client, query):
     try:
+        # Split max 3 times: card, next, index, query_string
         _, _, index, q_text = query.data.split("_", 3) 
         current_index = int(index)
         
+        # Re-fetch files (Stateless pagination)
         files = await Media.get_search_results(q_text)
         if not files: return await query.answer("Results expired or not found.", show_alert=True)
         
@@ -209,14 +211,14 @@ async def card_prev_nav(client, query):
         # Row 2: Navigation
         nav_row = []
         
-        # Prev Button (Show if not first page)
+        # Prev Button
         if prev_index > 0:
             nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{prev_index}_{q_text}"))
             
         # Page Counter
         nav_row.append(InlineKeyboardButton(f"{prev_index + 1}/{total}", callback_data="pages"))
         
-        # Next Button (Show if not last page)
+        # Next Button
         if prev_index < total - 1:
             nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{prev_index}_{q_text}"))
             

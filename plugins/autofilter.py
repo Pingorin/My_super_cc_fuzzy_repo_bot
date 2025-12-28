@@ -5,8 +5,8 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-# ✅ Import helpers from utils
-from utils import btn_parser, format_text_results, format_detailed_results, post_to_telegraph, format_card_result
+# ✅ Import helpers from utils (Added temp for username)
+from utils import temp, btn_parser, format_text_results, format_detailed_results, post_to_telegraph, format_card_result
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +40,6 @@ async def auto_filter(client, message):
         time_taken = round(end_time - start_time, 2)
 
         if not files:
-            # Optional: Uncomment to send "No Results" message
-            # await message.reply_text(f"❌ **No results found for:** `{query}`")
             return
 
         # ==================================================================
@@ -68,7 +66,6 @@ async def auto_filter(client, message):
 
         # --- MODE B: TEXT LIST ---
         elif mode == 'text':
-            # Slice for max 20 results
             display_files = files[:20]
             # ✅ Passed message.chat.id for link generation
             text = format_text_results(display_files, query, message.chat.id)
@@ -76,7 +73,6 @@ async def auto_filter(client, message):
 
         # --- MODE C: DETAILED LIST ---
         elif mode == 'detailed':
-            # Slice for max 10 results
             display_files = files[:10]
             # ✅ Passed message.chat.id AND time_taken
             text = format_detailed_results(display_files, query, message.chat.id, time_taken)
@@ -96,35 +92,30 @@ async def auto_filter(client, message):
                         reply_markup=InlineKeyboardMarkup(btn)
                     )
                 else:
-                    # Fallback to buttons if telegraph fails
                     buttons = btn_parser(files, message.chat.id, query)
                     await message.reply_text(f"👻 Results: `{query}`", reply_markup=InlineKeyboardMarkup(buttons))
             else:
-                # If few results, revert to standard text mode
                 text = format_text_results(files, query, message.chat.id)
                 await message.reply_text(text, disable_web_page_preview=True)
 
         # --- MODE E: CARD (Single Result View with Navigation) ---
         elif mode == 'card':
-            # Show 1st result initially
             file = files[0]
             total = len(files)
             text = format_card_result(file, 0, total)
             
-            # Navigation Buttons
             btn = []
             
-            # Row 1: Get File
+            # Row 1: Get File (Using temp.U_NAME for reliability)
             link_id = file['link_id']
             chat_id = message.chat.id
-            btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{client.username}?start=get_{link_id}_{chat_id}")])
+            btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
 
             # Row 2: Navigation (Only if > 1 result)
             if total > 1:
-                # Truncate query to avoid callback data limit (64 bytes)
                 short_q = query[:20] 
                 
-                # Logic: Page 1 shows "1/N" and "Next"
+                # Logic: Page 1 shows "1/N" and "Next" (No Prev)
                 btn.append([
                     InlineKeyboardButton(f"1/{total}", callback_data="pages"),
                     InlineKeyboardButton("Next ➡️", callback_data=f"card_next_0_{short_q}")
@@ -142,11 +133,9 @@ async def auto_filter(client, message):
 @Client.on_callback_query(filters.regex(r"^card_next_"))
 async def card_next_nav(client, query):
     try:
-        # Split max 3 times: card, next, index, query_string
         _, _, index, q_text = query.data.split("_", 3) 
         current_index = int(index)
         
-        # Re-fetch files (Stateless pagination)
         files = await Media.get_search_results(q_text)
         if not files: return await query.answer("Results expired or not found.", show_alert=True)
         
@@ -162,7 +151,7 @@ async def card_next_nav(client, query):
         # Row 1: Get File
         link_id = file['link_id']
         chat_id = query.message.chat.id
-        btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{client.username}?start=get_{link_id}_{chat_id}")])
+        btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
 
         # Row 2: Navigation
         nav_row = []
@@ -205,19 +194,19 @@ async def card_prev_nav(client, query):
         # Row 1: Get File
         link_id = file['link_id']
         chat_id = query.message.chat.id
-        btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{client.username}?start=get_{link_id}_{chat_id}")])
+        btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
 
         # Row 2: Navigation
         nav_row = []
         
-        # Prev Button
+        # Prev Button (Show if not first page)
         if prev_index > 0:
             nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{prev_index}_{q_text}"))
             
         # Page Counter
         nav_row.append(InlineKeyboardButton(f"{prev_index + 1}/{total}", callback_data="pages"))
         
-        # Next Button
+        # Next Button (Show if not last page)
         if prev_index < total - 1:
             nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{prev_index}_{q_text}"))
             
@@ -226,3 +215,7 @@ async def card_prev_nav(client, query):
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
     except Exception as e:
         await query.answer(f"Error: {e}", show_alert=True)
+
+@Client.on_callback_query(filters.regex(r"^pages$"))
+async def page_counter_callback(client, query):
+    await query.answer(f"Current Page Indicator", show_alert=False)

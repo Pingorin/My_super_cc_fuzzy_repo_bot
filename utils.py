@@ -102,19 +102,18 @@ def format_card_result(file, current_index, total_count):
     """Generates the Single Card layout."""
     f_name = file['file_name']
     f_size = get_size(file['file_size'])
-    caption = file.get('caption', '')
+    # Caption line removed as per request
     
     f_type = "Document"
-    if f_name.endswith(('.mkv', '.mp4', '.avi', '.webm')): f_type = "Video"
-    elif f_name.endswith(('.mp3', '.flac', '.wav')): f_type = "Audio"
+    if f_name.endswith(('.mkv', '.mp4', '.avi', '.webm', '.mov')): f_type = "Video"
+    elif f_name.endswith(('.mp3', '.flac', '.wav', '.m4a')): f_type = "Audio"
+    elif f_name.endswith(('.jpg', '.jpeg', '.png', '.webp')): f_type = "Photo"
 
     text = f"🎬 **{f_name}**\n\n"
     text += f"🗂️ **Type:** {f_type}\n"
-    text += f"💾 **Size:** {f_size}\n"
-    if caption and len(caption) > 100: 
-        text += f"📝 **Info:** {caption[:100]}...\n"
+    text += f"💾 **Size:** {f_size}\n\n"
     
-    text += f"\n**File {current_index + 1} of {total_count}**"
+    text += f"File {current_index + 1} of {total_count}"
     return text
 
 async def post_to_telegraph(files, query, chat_id):

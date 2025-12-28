@@ -78,8 +78,8 @@ async def auto_filter(client, message):
         elif mode == 'detailed':
             # Slice for max 10 results
             display_files = files[:10]
-            # ✅ Passed message.chat.id
-            text = format_detailed_results(display_files, query, message.chat.id)
+            # ✅ Passed message.chat.id AND time_taken
+            text = format_detailed_results(display_files, query, message.chat.id, time_taken)
             await message.reply_text(text, disable_web_page_preview=True)
 
         # --- MODE D: SITE (TELEGRAPH) ---
@@ -116,6 +116,7 @@ async def auto_filter(client, message):
             if total > 1:
                 # Truncate query to avoid callback data limit (64 bytes)
                 short_q = query[:20] 
+                # Handler expects: card_next_CURRENTINDEX_QUERY
                 btn.append([
                     InlineKeyboardButton("Next ➡️", callback_data=f"card_next_0_{short_q}")
                 ])
@@ -138,7 +139,7 @@ async def auto_filter(client, message):
 async def card_next_nav(client, query):
     try:
         # Split max 3 times: card, next, index, query_string
-        _, index, q_text = query.data.split("_", 2) # Adjusted split for safety
+        _, _, index, q_text = query.data.split("_", 3) 
         current_index = int(index)
         
         # Re-fetch files (Stateless pagination)
@@ -146,17 +147,14 @@ async def card_next_nav(client, query):
         if not files: return await query.answer("Results expired or not found.", show_alert=True)
         
         total = len(files)
+        # Calculate Next Index
         next_index = current_index + 1
-        
         if next_index >= total: next_index = 0 # Loop back to start
         
         file = files[next_index]
         text = format_card_result(file, next_index, total)
         
         btn = []
-        # Calculate Previous Index
-        prev_index = next_index - 1 if next_index > 0 else total - 1
-
         btn.append([
             InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{next_index}_{q_text}"),
             InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{next_index}_{q_text}")
@@ -173,23 +171,20 @@ async def card_next_nav(client, query):
 @Client.on_callback_query(filters.regex(r"^card_prev_"))
 async def card_prev_nav(client, query):
     try:
-        _, index, q_text = query.data.split("_", 2)
+        _, _, index, q_text = query.data.split("_", 3)
         current_index = int(index)
         
         files = await Media.get_search_results(q_text)
         if not files: return await query.answer("Results expired.", show_alert=True)
         
         total = len(files)
+        # Calculate Previous Index
         prev_index = current_index - 1
-        
         if prev_index < 0: prev_index = total - 1 # Loop to end
         
         file = files[prev_index]
         text = format_card_result(file, prev_index, total)
         
-        # Calculate Next Index for the Next Button
-        next_index = prev_index + 1 if prev_index < total - 1 else 0
-
         btn = [[
             InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{prev_index}_{q_text}"),
             InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{prev_index}_{q_text}")

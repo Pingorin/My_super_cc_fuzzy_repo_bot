@@ -1,4 +1,4 @@
-pyrofork
+Pyrofork
 tgcrypto
 pymongo[srv]==3.12.3
 motor==2.5.1
@@ -16,11 +16,12 @@ aiohttp==3.8.5
 telegraph
 ujson
 pyshorteners
-datetime
 pytz
 dnspython==2.3.0
-python-math
 Pillow
 speedtest-cli
 psutil
 shortzy
+# ✅ Added for Web View (Site Mode)
+aiohttp_jinja2
+jinja2

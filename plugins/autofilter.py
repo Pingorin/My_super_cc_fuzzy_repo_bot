@@ -1,8 +1,8 @@
 import logging
 import time
 import re
-import random # ✅ Needed for Random Emoji
-import asyncio # ✅ Needed for Auto-Delete Timer
+import random 
+import asyncio 
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
@@ -12,30 +12,42 @@ from utils import temp, btn_parser, format_text_results, format_detailed_results
 
 logger = logging.getLogger(__name__)
 
-# ✅ Random Positive Emojis
+# ✅ CONSTANTS
 REACTIONS = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🎉", "🤩"]
+DELETE_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg" # You can change this link
 
-# ✅ Helper for Auto-Delete Logic
-async def auto_delete_task(bot_message, user_message, delay, show_thanks):
-    if delay <= 0: return # Feature Disabled
+# ✅ HELPER: Auto-Delete Logic with Thanks Message
+async def auto_delete_task(bot_message, user_message, delay, show_thanks, query="files"):
+    if delay <= 0: return 
     
     await asyncio.sleep(delay)
     
     try:
-        # Delete Bot Message
+        # 1. Delete the Search Results (Bot Message)
         await bot_message.delete()
         
-        # Optional: Show "Thanks" or "Deleted" Toast
+        # 2. Show "Thanks" Message if enabled
         if show_thanks:
-            notification = await user_message.reply_text(
-                f"🗑️ Search results for `{user_message.text[:20]}...` deleted automatically to keep group clean.",
+            caption = (
+                f"👋 Hᴇʏ fasion lovers, Yᴏᴜʀ Fɪʟᴛᴇʀ Fᴏʀ '{query}' Is Cʟᴏsᴇᴅ 📪\n\n"
+                f"Tʜᴀɴᴋ Yᴏᴜ Fᴏʀ Usɪɴɢ! 🌟\n"
+                f"Cᴏᴍᴇ Aɢᴀɪɴ! 😊👍"
+            )
+            
+            # Send Photo with Caption
+            temp_msg = await user_message.reply_photo(
+                photo=DELETE_IMG,
+                caption=caption,
                 quote=False
             )
-            await asyncio.sleep(5) # Show for 5 seconds
-            await notification.delete()
+            
+            # Wait 1 Minute (60 seconds) then delete the thanks message
+            await asyncio.sleep(60)
+            await temp_msg.delete()
             
     except Exception as e:
-        logger.error(f"Auto-Delete Error: {e}")
+        # Pass if message is already deleted or permission error
+        pass
 
 @Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index", "set_shortner", "settings", "connect", "delreq"]))
 async def auto_filter(client, message):
@@ -83,7 +95,7 @@ async def auto_filter(client, message):
             try:
                 emoji = random.choice(REACTIONS)
                 await message.react(emoji)
-            except: pass # Fails if bot isn't admin or reactions disabled
+            except: pass 
 
         # ==================================================================
         # 🔀 MODE DISPATCHER
@@ -98,7 +110,7 @@ async def auto_filter(client, message):
         offset = 0 
         total_results = len(files)
         
-        # Placeholder for the message sent by bot (for auto-delete)
+        # Capture the message sent by bot
         sent_msg = None 
 
         # --- MODE A: BUTTON ---
@@ -109,7 +121,6 @@ async def auto_filter(client, message):
                 f"👻 **Here are your results for:** `{query}`\n"
                 f"⏳ **Time Taken:** {time_taken} seconds"
             )
-            # ✅ Capture sent message
             sent_msg = await message.reply_text(
                 text=msg_text,
                 reply_markup=InlineKeyboardMarkup(buttons)
@@ -124,7 +135,6 @@ async def auto_filter(client, message):
             pagination = get_pagination_row(offset, limit, total_results, query)
             if pagination: btn.append(pagination)
             
-            # ✅ Capture sent message
             sent_msg = await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
 
         # --- MODE C: DETAILED LIST ---
@@ -136,15 +146,12 @@ async def auto_filter(client, message):
             pagination = get_pagination_row(offset, limit, total_results, query)
             if pagination: btn.append(pagination)
             
-            # ✅ Capture sent message
             sent_msg = await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
 
         # --- MODE D: SITE (WEB VIEW) ---
         elif mode == 'site':
-            # Save to MongoDB
             search_id = await Media.save_search_results(query, files, message.chat.id)
             
-            # Construct Link
             base_url = SITE_URL.rstrip('/') if (SITE_URL and SITE_URL.startswith("http")) else "http://127.0.0.1:8080"
             final_site_url = f"{base_url}/results/{search_id}"
             
@@ -159,7 +166,6 @@ async def auto_filter(client, message):
             pagination = get_pagination_row(offset, limit, total_results, query)
             if pagination: btn.append(pagination)
             
-            # ✅ Capture sent message
             sent_msg = await message.reply_text(
                 text, 
                 reply_markup=InlineKeyboardMarkup(btn)
@@ -182,7 +188,6 @@ async def auto_filter(client, message):
                     InlineKeyboardButton("Next ➡️", callback_data=f"card_next_0_{short_q}")
                 ])
 
-            # ✅ Capture sent message
             sent_msg = await message.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
             
         # ==================================================================
@@ -190,14 +195,22 @@ async def auto_filter(client, message):
         # ==================================================================
         
         if sent_msg:
-            # 1. Delete User Message (Instant)
+            # 1. Delete User Message (Instant) if enabled
             if user_del:
                 try: await message.delete()
                 except: pass
             
             # 2. Schedule Bot Message Deletion
             if auto_del_time > 0:
-                asyncio.create_task(auto_delete_task(sent_msg, message, auto_del_time, del_thanks))
+                asyncio.create_task(
+                    auto_delete_task(
+                        sent_msg,   # The message bot sent
+                        message,    # The user's message (for replying)
+                        auto_del_time, 
+                        del_thanks,
+                        query       # Pass query for the thanks caption
+                    )
+                )
 
     except Exception as e:
         logger.error(f"Search Error: {e}")
@@ -269,7 +282,6 @@ async def handle_next_back(client, query):
 
         # --- SITE MODE ---
         elif mode == 'site':
-            # For site mode pagination, we generate a new ID and link
             search_id = await Media.save_search_results(req, files, query.message.chat.id)
             
             page_no = int(offset / limit) + 1

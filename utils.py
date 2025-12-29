@@ -54,9 +54,10 @@ def format_text_results(files, query, chat_id):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
+        f_chat_id = file.get('file_chat_id') or file.get('chat_id') or chat_id
         
         # Link directs to the bot with the specific Group ID
-        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
+        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         
         # HTML Link formatting for cleaner look
         text += f"{i}. 📂 <a href='{link}'>{f_name}</a> [{f_size}]\n\n"
@@ -76,8 +77,9 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
+        f_chat_id = file.get('file_chat_id') or file.get('chat_id') or chat_id
         
-        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
+        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         
         # Auto-Detect Quality
         q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
@@ -124,8 +126,9 @@ async def post_to_telegraph(files, query, chat_id):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
+        f_chat_id = file.get('file_chat_id') or file.get('chat_id') or chat_id
         
-        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
+        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         html_content += f"<p>📂 <a href='{link}'>{f_name}</a> [{f_size}]</p><hr>"
     
     try:
@@ -138,11 +141,37 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. BUTTON PARSER (Button Mode with Pagination Limit)
-def btn_parser(files, chat_id, query=None, offset=0, limit=10):
+# ✅ 4. PAGINATION HELPER (NEW)
+def get_pagination_row(current_offset, limit, total_count, query):
+    """
+    Generates the navigation row: [ ⬅️ Back ] [ 1/5 ] [ Next ➡️ ]
+    """
+    buttons = []
+    
+    # Calculate Page Numbers
+    current_page = int(current_offset / limit) + 1
+    total_pages = math.ceil(total_count / limit)
+
+    if total_pages == 1:
+        return []
+
+    # 1. Back Button
+    if current_offset >= limit:
+        buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"next_{current_offset - limit}_{query}"))
+
+    # 2. Page Counter (Static)
+    buttons.append(InlineKeyboardButton(f"📑 {current_page}/{total_pages}", callback_data="pages"))
+
+    # 3. Next Button
+    if current_offset + limit < total_count:
+        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"next_{current_offset + limit}_{query}"))
+
+    return buttons
+
+# ✅ 5. BUTTON PARSER (Updated for Pagination)
+def btn_parser(files, chat_id, query, offset=0, limit=10):
     """
     Generates buttons for Inline Result Mode with Pagination.
-    Accepts 'limit' to control results per page.
     """
     # Slice the files based on offset and limit
     current_files = files[offset : offset + limit]
@@ -152,6 +181,8 @@ def btn_parser(files, chat_id, query=None, offset=0, limit=10):
         f_name = file.get('file_name', 'Unknown File')
         f_size = get_size(file.get('file_size', 0))
         link_id = file.get('link_id')
+        # Use file_chat_id from cache, fallback to provided chat_id
+        f_chat_id = file.get('file_chat_id') or file.get('chat_id') or chat_id
         caption = file.get('caption')
 
         display_name = f_name
@@ -168,30 +199,20 @@ def btn_parser(files, chat_id, query=None, offset=0, limit=10):
         btn_text = f"📂 {display_name} [{f_size}]"
         
         if link_id is not None:
-            url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
+            url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
-    # --- PAGINATION BUTTONS ---
-    nav = []
+    # --- ADD PAGINATION ROW ---
+    # Max length for callback data is 64 bytes. Truncate query if too long.
+    safe_query = query[:20] if query else "blank"
     
-    # Clean Query for Callback Data (Max 64 bytes total)
-    # Callback format: next_{offset}_{query}
-    q_data = query[:20] if query else "blank" 
-
-    # Prev Button
-    if offset >= limit:
-        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"next_{offset - limit}_{q_data}"))
-    
-    # Next Button
-    if len(files) > offset + limit:
-        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"next_{offset + limit}_{q_data}"))
-        
-    if nav:
-        buttons.append(nav)
+    pagination = get_pagination_row(offset, limit, len(files), safe_query)
+    if pagination:
+        buttons.append(pagination)
             
     return buttons
 
-# ✅ 5. SHORTLINK GENERATOR
+# ✅ 6. SHORTLINK GENERATOR
 async def get_shortlink(site, api, link):
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}
@@ -209,7 +230,7 @@ async def get_shortlink(site, api, link):
         logger.error(f"Shortlink Exception ({site}): {e}")
         return None 
 
-# ✅ 6. FSUB STATUS HELPERS
+# ✅ 7. FSUB STATUS HELPERS
 async def _get_fsub_status(bot, user_id, channel_id):
     try:
         member = await bot.get_chat_member(channel_id, user_id)

@@ -5,8 +5,9 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-from info import PORT, SITE_URL 
-from utils import temp, btn_parser, format_text_results, format_detailed_results, post_to_telegraph, format_card_result
+from info import PORT, SITE_URL
+# ✅ Import get_pagination_row from utils
+from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,6 @@ async def auto_filter(client, message):
         # ✅ 1. Get Group Settings
         group_settings = await db.get_group_settings(message.chat.id)
         mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
-        # ✅ Fetch Limit (Default 10 if not set)
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
 
         # ✅ 2. Fetch Results
@@ -45,19 +45,22 @@ async def auto_filter(client, message):
             return
 
         # ==================================================================
-        # 🔀 MODE DISPATCHER (Dynamic Display Logic)
+        # 🔀 MODE DISPATCHER
         # ==================================================================
 
         # --- HYBRID MODE LOGIC ---
-        # Uses the 'limit' setting to decide between Button or Text
         if mode == 'hybrid':
             if len(files) <= limit: mode = 'button'
             else: mode = 'text'
 
-        # --- MODE A: BUTTON (Classic) ---
+        # Pagination variables for Page 1
+        offset = 0 
+        total_results = len(files)
+
+        # --- MODE A: BUTTON ---
         if mode == 'button':
-            # ✅ Pass 'limit' to btn_parser (Ensure utils.py is updated)
-            buttons = btn_parser(files, message.chat.id, query, limit=limit)
+            # btn_parser now handles pagination internally if offset/limit is passed
+            buttons = btn_parser(files, message.chat.id, query, offset, limit)
             
             msg_text = (
                 f"⚡ **Hey {message.from_user.mention}!**\n"
@@ -71,69 +74,71 @@ async def auto_filter(client, message):
 
         # --- MODE B: TEXT LIST ---
         elif mode == 'text':
-            # ✅ Slice using Dynamic Limit
-            display_files = files[:limit]
-            # Passed message.chat.id for link generation
-            text = format_text_results(display_files, query, message.chat.id)
-            await message.reply_text(text, disable_web_page_preview=True)
+            page_files = files[offset : offset + limit]
+            text = format_text_results(page_files, query, message.chat.id)
+            
+            # Add Pagination Row
+            btn = []
+            pagination = get_pagination_row(offset, limit, total_results, query)
+            if pagination: btn.append(pagination)
+            
+            await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
 
         # --- MODE C: DETAILED LIST ---
         elif mode == 'detailed':
-            # ✅ Slice using Dynamic Limit
-            display_files = files[:limit]
-            # Passed message.chat.id AND time_taken
-            text = format_detailed_results(display_files, query, message.chat.id, time_taken)
-            await message.reply_text(text, disable_web_page_preview=True)
+            page_files = files[offset : offset + limit]
+            text = format_detailed_results(page_files, query, message.chat.id, time_taken)
+            
+            # Add Pagination Row
+            btn = []
+            pagination = get_pagination_row(offset, limit, total_results, query)
+            if pagination: btn.append(pagination)
+            
+            await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
 
-        # --- MODE D: SITE (WEB VIEW - MONGODB PERSISTENCE) ---
+        # --- MODE D: SITE (WEB VIEW) ---
         elif mode == 'site':
-            # 1. Save to MongoDB & Get Unique ID
-            # ✅ FIX: Passing message.chat.id here to save it in DB (Fixes 'None' error)
+            # Save to MongoDB
             search_id = await Media.save_search_results(query, files, message.chat.id)
             
-            # 2. Construct Link
-            if not SITE_URL or not SITE_URL.startswith("http"):
-                # Fallback URL if config is missing
-                base_url = "http://127.0.0.1:8080"
-            else:
-                base_url = SITE_URL.rstrip('/')
-            
+            # Construct Link
+            base_url = SITE_URL.rstrip('/') if (SITE_URL and SITE_URL.startswith("http")) else "http://127.0.0.1:8080"
             final_site_url = f"{base_url}/results/{search_id}"
             
-            # 3. Reply with Button
             text = (
                 f"⚡ **Results for:** `{query}`\n"
-                f"📂 **Found:** {len(files)} files\n"
+                f"📂 **Found:** {total_results} files\n"
                 f"⏳ **Time:** {time_taken}s\n\n"
                 f"👇 **Click the button below to view results online**"
             )
             
+            # Main Button
             btn = [[InlineKeyboardButton("🔎 View Results Online", url=final_site_url)]]
+            
+            # Add Pagination Row (Updates the Link in Next/Prev)
+            pagination = get_pagination_row(offset, limit, total_results, query)
+            if pagination: btn.append(pagination)
             
             await message.reply_text(
                 text, 
                 reply_markup=InlineKeyboardMarkup(btn)
             )
 
-        # --- MODE E: CARD (Single Result View with Navigation) ---
+        # --- MODE E: CARD (Single Result) ---
         elif mode == 'card':
+            # Card mode has its own specific pagination logic
             file = files[0]
-            total = len(files)
-            text = format_card_result(file, 0, total)
+            text = format_card_result(file, 0, total_results)
             
             btn = []
-            
-            # Row 1: Get File
             link_id = file['link_id']
             chat_id = message.chat.id
             btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
 
-            # Row 2: Navigation (Only if > 1 result)
-            if total > 1:
+            if total_results > 1:
                 short_q = query[:20] 
-                # Logic: Page 1 shows "1/N" and "Next"
                 btn.append([
-                    InlineKeyboardButton(f"1/{total}", callback_data="pages"),
+                    InlineKeyboardButton(f"1/{total_results}", callback_data="pages"),
                     InlineKeyboardButton("Next ➡️", callback_data=f"card_next_0_{short_q}")
                 ])
 
@@ -143,96 +148,140 @@ async def auto_filter(client, message):
         logger.error(f"Search Error: {e}")
 
 # ==============================================================================
-# ⏭️ CARD NAVIGATION HANDLERS (Next/Prev Logic)
+# ⏭️ PAGINATION CALLBACK HANDLER (Next/Back Logic)
 # ==============================================================================
 
+@Client.on_callback_query(filters.regex(r"^next_"))
+async def handle_next_back(client, query):
+    try:
+        # Callback Data Format: next_{offset}_{req}
+        _, offset, req = query.data.split("_", 2) 
+        offset = int(offset)
+        
+        # 1. Fetch Files Again (Stateless)
+        files = await Media.get_search_results(req)
+        if not files:
+            return await query.answer("❌ Search expired or no files found.", show_alert=True)
+            
+        total_results = len(files)
+        
+        # 2. Get Settings Again (To check for updates)
+        group_settings = await db.get_group_settings(query.message.chat.id)
+        mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
+        limit = group_settings.get('result_page_limit', 10) if group_settings else 10
+
+        # Adjust Mode for Hybrid
+        if mode == 'hybrid':
+            mode = 'button' if len(files) <= limit else 'text'
+
+        # 3. Generate New Content
+        
+        # --- BUTTON MODE ---
+        if mode == 'button':
+            buttons = btn_parser(files, query.message.chat.id, req, offset, limit)
+            await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+            
+        # --- TEXT MODE ---
+        elif mode == 'text':
+            page_files = files[offset : offset + limit]
+            text = format_text_results(page_files, req, query.message.chat.id)
+            
+            btn = []
+            pagination = get_pagination_row(offset, limit, total_results, req)
+            if pagination: btn.append(pagination)
+            
+            await query.message.edit_text(
+                text, 
+                disable_web_page_preview=True, 
+                reply_markup=InlineKeyboardMarkup(btn) if btn else None
+            )
+
+        # --- DETAILED MODE ---
+        elif mode == 'detailed':
+            page_files = files[offset : offset + limit]
+            # Time taken passed as 0 or empty for edits
+            text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
+            
+            btn = []
+            pagination = get_pagination_row(offset, limit, total_results, req)
+            if pagination: btn.append(pagination)
+            
+            await query.message.edit_text(
+                text, 
+                disable_web_page_preview=True, 
+                reply_markup=InlineKeyboardMarkup(btn) if btn else None
+            )
+
+        # --- SITE MODE ---
+        elif mode == 'site':
+            # For site mode pagination, we generate a new ID and link pointing to the specific page
+            search_id = await Media.save_search_results(req, files, query.message.chat.id)
+            
+            # Calculate Page Number
+            page_no = int(offset / limit) + 1
+            
+            base_url = SITE_URL.rstrip('/') if (SITE_URL and SITE_URL.startswith("http")) else "http://127.0.0.1:8080"
+            final_site_url = f"{base_url}/results/{search_id}?page={page_no}"
+            
+            btn = [[InlineKeyboardButton("🔎 View Results Online", url=final_site_url)]]
+            
+            pagination = get_pagination_row(offset, limit, total_results, req)
+            if pagination: btn.append(pagination)
+            
+            await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
+
+    except Exception as e:
+        logger.error(f"Pagination Error: {e}")
+        await query.answer("⚠️ Error switching page.", show_alert=True)
+
+# Card Mode Handlers (Existing)
 @Client.on_callback_query(filters.regex(r"^card_next_"))
 async def card_next_nav(client, query):
     try:
-        # Split max 3 times: card, next, index, query_string
         _, _, index, q_text = query.data.split("_", 3) 
         current_index = int(index)
-        
-        # Re-fetch files (Stateless pagination)
         files = await Media.get_search_results(q_text)
-        if not files: return await query.answer("Results expired or not found.", show_alert=True)
-        
+        if not files: return await query.answer("Expired.", show_alert=True)
         total = len(files)
-        # Calculate Next Index
         next_index = current_index + 1
-        if next_index >= total: next_index = 0 # Loop back to start
-        
+        if next_index >= total: next_index = 0
         file = files[next_index]
         text = format_card_result(file, next_index, total)
-        
         btn = []
-        # Row 1: Get File
         link_id = file['link_id']
         chat_id = query.message.chat.id
         btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
-
-        # Row 2: Navigation
         nav_row = []
-        
-        # Prev Button (Show if not first page)
-        if next_index > 0:
-            nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{next_index}_{q_text}"))
-        
-        # Page Counter
+        if next_index > 0: nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{next_index}_{q_text}"))
         nav_row.append(InlineKeyboardButton(f"{next_index + 1}/{total}", callback_data="pages"))
-        
-        # Next Button (Show if not last page)
-        if next_index < total - 1:
-            nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{next_index}_{q_text}"))
-            
+        if next_index < total - 1: nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{next_index}_{q_text}"))
         btn.append(nav_row)
-        
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
-    except Exception as e:
-        await query.answer(f"Error: {e}", show_alert=True)
+    except Exception as e: await query.answer(f"Error: {e}", show_alert=True)
 
 @Client.on_callback_query(filters.regex(r"^card_prev_"))
 async def card_prev_nav(client, query):
     try:
         _, _, index, q_text = query.data.split("_", 3)
         current_index = int(index)
-        
         files = await Media.get_search_results(q_text)
-        if not files: return await query.answer("Results expired.", show_alert=True)
-        
+        if not files: return await query.answer("Expired.", show_alert=True)
         total = len(files)
-        # Calculate Previous Index
         prev_index = current_index - 1
-        if prev_index < 0: prev_index = total - 1 # Loop to end
-        
+        if prev_index < 0: prev_index = total - 1
         file = files[prev_index]
         text = format_card_result(file, prev_index, total)
-        
         btn = []
-        # Row 1: Get File
         link_id = file['link_id']
         chat_id = query.message.chat.id
         btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
-
-        # Row 2: Navigation
         nav_row = []
-        
-        # Prev Button
-        if prev_index > 0:
-            nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{prev_index}_{q_text}"))
-            
-        # Page Counter
+        if prev_index > 0: nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{prev_index}_{q_text}"))
         nav_row.append(InlineKeyboardButton(f"{prev_index + 1}/{total}", callback_data="pages"))
-        
-        # Next Button
-        if prev_index < total - 1:
-            nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{prev_index}_{q_text}"))
-            
+        if prev_index < total - 1: nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{prev_index}_{q_text}"))
         btn.append(nav_row)
-        
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
-    except Exception as e:
-        await query.answer(f"Error: {e}", show_alert=True)
+    except Exception as e: await query.answer(f"Error: {e}", show_alert=True)
 
 @Client.on_callback_query(filters.regex(r"^pages$"))
 async def page_counter_callback(client, query):

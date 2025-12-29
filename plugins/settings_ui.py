@@ -79,8 +79,11 @@ async def main_settings_menu(client, query):
         # Row 3 (Auto Features)
         [InlineKeyboardButton("🗑️ Auto-Delete", callback_data=f"autodel_menu#{chat_id}"),
          InlineKeyboardButton("👍 Auto Reaction", callback_data=f"autoreact_ui#{chat_id}")],
+
+        # Row 4 (Welcome Settings)
+        [InlineKeyboardButton("👋 Welcome Settings", callback_data=f"welcome_ui#{chat_id}")],
         
-        # Row 4
+        # Row 5
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
     
@@ -236,7 +239,7 @@ async def auto_delete_menu(client, query):
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🤖 BOT MESSAGE AUTO-DELETE UI (UPDATED WITH CHECKMARKS)
+# 🤖 BOT MESSAGE AUTO-DELETE UI
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^bot_del_ui#"))
@@ -247,16 +250,13 @@ async def bot_auto_delete_ui(client, query):
     del_time = group_data.get('auto_delete_time', 300) # Default 5 mins
     thanks_msg = group_data.get('delete_thanks_msg', True)
     
-    # Helper to add ✅ to active time
     def t_btn(label, seconds):
         return f"{label} ✅" if del_time == seconds else label
 
-    # Format Status
     if del_time == 0: time_display = "❌ Disabled"
     elif del_time < 60: time_display = f"{del_time} seconds"
     else: time_display = f"{int(del_time/60)} minute(s)"
     
-    # Format Toggle Button Text
     thanks_btn_text = "Thanks Msg on Delete: ✅ON" if thanks_msg else "Thanks Msg on Delete: ❌OFF"
     
     text = (
@@ -335,6 +335,187 @@ async def set_user_delete_handler(client, query):
     await db.update_group_settings(chat_id, {'auto_delete_user_msg': new_status})
     
     await user_auto_delete_ui(client, query)
+
+# ==============================================================================
+# 👋 WELCOME SETTINGS MENU (NEW)
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^welcome_ui#"))
+async def welcome_settings_ui(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    
+    # Fetch Settings
+    is_enabled = group_data.get('welcome_enabled', True)
+    mode = group_data.get('welcome_mode', 'default') # 'default' or 'custom'
+    
+    # Toggle Texts
+    status_icon = "✅ON" if is_enabled else "❌OFF"
+    
+    # Checkmark Logic
+    def chk(val): return "✅" if mode == val else ""
+    
+    text = (
+        f"👋 **Welcome Message Settings for:** `{chat_id}`\n\n"
+        "Configure the message sent to new users when they join.\n\n"
+        f"[Default Welcome Demo](https://graph.org/file/4d61886e61dfa37a25945.jpg)" 
+    )
+    
+    buttons = [
+        # Toggle On/Off
+        [InlineKeyboardButton(f"Welcome Message: {status_icon}", callback_data=f"wel_toggle#{chat_id}")],
+        
+        # Mode Selection
+        [InlineKeyboardButton(f"Default (Image){chk('default')}", callback_data=f"wel_mode#{chat_id}#default"),
+         InlineKeyboardButton(f"Custom{chk('custom')}", callback_data=f"wel_mode#{chat_id}#custom")],
+    ]
+    
+    # Show "Configure Custom" only if Custom is selected
+    if mode == 'custom':
+        buttons.append([InlineKeyboardButton("🎨 Configure Custom Welcome", callback_data=f"wel_cust_conf#{chat_id}")])
+        
+    buttons.append([InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+
+# Toggle Handler
+@Client.on_callback_query(filters.regex(r"^wel_toggle#"))
+async def welcome_toggle_handler(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    curr = group_data.get('welcome_enabled', True)
+    await db.update_group_settings(chat_id, {'welcome_enabled': not curr})
+    await welcome_settings_ui(client, query)
+
+# Mode Handler
+@Client.on_callback_query(filters.regex(r"^wel_mode#"))
+async def welcome_mode_handler(client, query):
+    _, chat_id, mode = query.data.split("#")
+    chat_id = int(chat_id)
+    await db.update_group_settings(chat_id, {'welcome_mode': mode})
+    await welcome_settings_ui(client, query)
+
+
+# ==============================================================================
+# 🎨 CONFIGURE CUSTOM WELCOME
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^wel_cust_conf#"))
+async def custom_welcome_config(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    
+    custom_text = group_data.get('custom_welcome_text')
+    custom_photo = group_data.get('custom_welcome_photo')
+    
+    # Generate Preview Text
+    if not custom_text and not custom_photo:
+        preview = "_Nothing set. Custom welcome is currently inactive._"
+    else:
+        # Show text preview
+        txt_prev = custom_text if custom_text else "_No text set._"
+        # Format a dummy preview
+        txt_prev = txt_prev.replace("{mention}", "User").replace("{username}", "@User").replace("{chat_name}", "Group")
+        
+        # Show photo status
+        img_prev = "🖼️ _A custom photo is set._" if custom_photo else "🖼️ _No custom photo is set._"
+        
+        preview = f"{txt_prev}\n\n{img_prev}"
+        
+    text = (
+        f"🎨 **Configure Custom Welcome for:** `{chat_id}`\n\n"
+        f"**Current Preview:**\n"
+        f"{preview}"
+    )
+    
+    buttons = [
+        [InlineKeyboardButton("✏️ Set Text", callback_data=f"wel_set_txt#{chat_id}"),
+         InlineKeyboardButton("🖼️ Set Photo", callback_data=f"wel_set_img#{chat_id}")],
+         
+        [InlineKeyboardButton("🔄 Reset Custom Welcome", callback_data=f"wel_reset#{chat_id}")],
+        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
+    ]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+# --- SET TEXT HANDLER ---
+@Client.on_callback_query(filters.regex(r"^wel_set_txt#"))
+async def set_welcome_text(client, query):
+    chat_id = int(query.data.split("#")[1])
+    
+    cancel_btn = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"wel_cust_conf#{chat_id}")]]
+    
+    await query.message.edit_text(
+        "📝 **Set Custom Text**\n\n"
+        "Please send the text you want to use.\n"
+        "Variables supported:\n"
+        "`{mention}` - User Mention\n"
+        "`{username}` - User Username\n"
+        "`{chat_name}` - Group Name",
+        reply_markup=InlineKeyboardMarkup(cancel_btn)
+    )
+    
+    try:
+        msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if msg.text:
+            await db.update_group_settings(chat_id, {'custom_welcome_text': msg.text})
+            await msg.reply("✅ **Custom welcome text has been set.**")
+            await asyncio.sleep(1)
+            await custom_welcome_config(client, query) # Return to menu
+        else:
+            await msg.reply("❌ Text only.")
+            await custom_welcome_config(client, query)
+    except Exception as e:
+        pass # Timeout or error
+
+# --- SET PHOTO HANDLER ---
+@Client.on_callback_query(filters.regex(r"^wel_set_img#"))
+async def set_welcome_photo(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    current_photo = group_data.get('custom_welcome_photo')
+    
+    cancel_btn = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"wel_cust_conf#{chat_id}")]]
+    
+    # Logic to show current photo if exists
+    if current_photo:
+        await query.message.reply_photo(
+            photo=current_photo,
+            caption="👆 **Current Welcome Photo**"
+        )
+        
+    await query.message.edit_text(
+        "🖼️ **Set Custom Photo**\n\n"
+        "Please send the **Photo** you want to use as the thumbnail.",
+        reply_markup=InlineKeyboardMarkup(cancel_btn)
+    )
+    
+    try:
+        msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if msg.photo:
+            file_id = msg.photo.file_id
+            await db.update_group_settings(chat_id, {'custom_welcome_photo': file_id})
+            await msg.reply("✅ **Custom welcome photo has been saved.**")
+            await asyncio.sleep(1)
+            await custom_welcome_config(client, query) # Return to menu
+        else:
+            await msg.reply("❌ Photo only.")
+            await custom_welcome_config(client, query)
+    except Exception as e:
+        pass 
+
+# --- RESET HANDLER ---
+@Client.on_callback_query(filters.regex(r"^wel_reset#"))
+async def reset_welcome(client, query):
+    chat_id = int(query.data.split("#")[1])
+    
+    await db.update_group_settings(chat_id, {
+        'custom_welcome_text': None, 
+        'custom_welcome_photo': None
+    })
+    
+    await query.answer("🔄 Custom Welcome Reset!", show_alert=True)
+    await custom_welcome_config(client, query)
 
 # ==============================================================================
 # 🔥 FSUB SELECTION MENU

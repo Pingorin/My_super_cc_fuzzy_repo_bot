@@ -26,7 +26,7 @@ CHANNELS = [int(ch) for ch in os.environ.get("CHANNELS", "0").split()] if os.env
 # ✅ SITE URL (REQUIRED FOR SITE MODE)
 # Render/Heroku users must set this in Environment Variables (e.g., https://my-app.onrender.com)
 # Do not add a trailing slash (/) at the end.
-SITE_URL = os.environ.get("SITE_URL", "http://localhost:8080")
+SITE_URL = os.environ.get("SITE_URL", "https://nainyj-56b575136034.herokuapp.com")
 
 # --- VERIFICATION SETTINGS ---
 IS_VERIFY = os.environ.get("IS_VERIFY", "True").lower() in ["true", "yes", "1"]

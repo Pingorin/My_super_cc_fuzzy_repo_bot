@@ -1,15 +1,41 @@
 import logging
 import time
 import re
+import random # ✅ Needed for Random Emoji
+import asyncio # ✅ Needed for Auto-Delete Timer
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import PORT, SITE_URL
-# ✅ Import get_pagination_row from utils
 from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row
 
 logger = logging.getLogger(__name__)
+
+# ✅ Random Positive Emojis
+REACTIONS = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🎉", "🤩"]
+
+# ✅ Helper for Auto-Delete Logic
+async def auto_delete_task(bot_message, user_message, delay, show_thanks):
+    if delay <= 0: return # Feature Disabled
+    
+    await asyncio.sleep(delay)
+    
+    try:
+        # Delete Bot Message
+        await bot_message.delete()
+        
+        # Optional: Show "Thanks" or "Deleted" Toast
+        if show_thanks:
+            notification = await user_message.reply_text(
+                f"🗑️ Search results for `{user_message.text[:20]}...` deleted automatically to keep group clean.",
+                quote=False
+            )
+            await asyncio.sleep(5) # Show for 5 seconds
+            await notification.delete()
+            
+    except Exception as e:
+        logger.error(f"Auto-Delete Error: {e}")
 
 @Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index", "set_shortner", "settings", "connect", "delreq"]))
 async def auto_filter(client, message):
@@ -32,8 +58,16 @@ async def auto_filter(client, message):
     try:
         # ✅ 1. Get Group Settings
         group_settings = await db.get_group_settings(message.chat.id)
+        
+        # Display Settings
         mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
+        
+        # Auto-Delete & Reaction Settings
+        auto_react = group_settings.get('auto_reaction', False)
+        auto_del_time = group_settings.get('auto_delete_time', 300) # Default 5 min
+        user_del = group_settings.get('auto_delete_user_msg', False)
+        del_thanks = group_settings.get('delete_thanks_msg', True)
 
         # ✅ 2. Fetch Results
         files = await Media.get_search_results(query)
@@ -43,6 +77,13 @@ async def auto_filter(client, message):
 
         if not files:
             return
+
+        # ✅ 3. Auto-Reaction Logic
+        if auto_react:
+            try:
+                emoji = random.choice(REACTIONS)
+                await message.react(emoji)
+            except: pass # Fails if bot isn't admin or reactions disabled
 
         # ==================================================================
         # 🔀 MODE DISPATCHER
@@ -56,18 +97,20 @@ async def auto_filter(client, message):
         # Pagination variables for Page 1
         offset = 0 
         total_results = len(files)
+        
+        # Placeholder for the message sent by bot (for auto-delete)
+        sent_msg = None 
 
         # --- MODE A: BUTTON ---
         if mode == 'button':
-            # btn_parser now handles pagination internally if offset/limit is passed
             buttons = btn_parser(files, message.chat.id, query, offset, limit)
-            
             msg_text = (
                 f"⚡ **Hey {message.from_user.mention}!**\n"
                 f"👻 **Here are your results for:** `{query}`\n"
                 f"⏳ **Time Taken:** {time_taken} seconds"
             )
-            await message.reply_text(
+            # ✅ Capture sent message
+            sent_msg = await message.reply_text(
                 text=msg_text,
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
@@ -77,24 +120,24 @@ async def auto_filter(client, message):
             page_files = files[offset : offset + limit]
             text = format_text_results(page_files, query, message.chat.id)
             
-            # Add Pagination Row
             btn = []
             pagination = get_pagination_row(offset, limit, total_results, query)
             if pagination: btn.append(pagination)
             
-            await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
+            # ✅ Capture sent message
+            sent_msg = await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
 
         # --- MODE C: DETAILED LIST ---
         elif mode == 'detailed':
             page_files = files[offset : offset + limit]
             text = format_detailed_results(page_files, query, message.chat.id, time_taken)
             
-            # Add Pagination Row
             btn = []
             pagination = get_pagination_row(offset, limit, total_results, query)
             if pagination: btn.append(pagination)
             
-            await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
+            # ✅ Capture sent message
+            sent_msg = await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
 
         # --- MODE D: SITE (WEB VIEW) ---
         elif mode == 'site':
@@ -112,21 +155,18 @@ async def auto_filter(client, message):
                 f"👇 **Click the button below to view results online**"
             )
             
-            # Main Button
             btn = [[InlineKeyboardButton("🔎 View Results Online", url=final_site_url)]]
-            
-            # Add Pagination Row (Updates the Link in Next/Prev)
             pagination = get_pagination_row(offset, limit, total_results, query)
             if pagination: btn.append(pagination)
             
-            await message.reply_text(
+            # ✅ Capture sent message
+            sent_msg = await message.reply_text(
                 text, 
                 reply_markup=InlineKeyboardMarkup(btn)
             )
 
         # --- MODE E: CARD (Single Result) ---
         elif mode == 'card':
-            # Card mode has its own specific pagination logic
             file = files[0]
             text = format_card_result(file, 0, total_results)
             
@@ -142,7 +182,22 @@ async def auto_filter(client, message):
                     InlineKeyboardButton("Next ➡️", callback_data=f"card_next_0_{short_q}")
                 ])
 
-            await message.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
+            # ✅ Capture sent message
+            sent_msg = await message.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
+            
+        # ==================================================================
+        # 🗑️ AUTO-DELETE LOGIC (POST-SEND)
+        # ==================================================================
+        
+        if sent_msg:
+            # 1. Delete User Message (Instant)
+            if user_del:
+                try: await message.delete()
+                except: pass
+            
+            # 2. Schedule Bot Message Deletion
+            if auto_del_time > 0:
+                asyncio.create_task(auto_delete_task(sent_msg, message, auto_del_time, del_thanks))
 
     except Exception as e:
         logger.error(f"Search Error: {e}")
@@ -165,7 +220,7 @@ async def handle_next_back(client, query):
             
         total_results = len(files)
         
-        # 2. Get Settings Again (To check for updates)
+        # 2. Get Settings Again
         group_settings = await db.get_group_settings(query.message.chat.id)
         mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
@@ -214,12 +269,10 @@ async def handle_next_back(client, query):
 
         # --- SITE MODE ---
         elif mode == 'site':
-            # For site mode pagination, we generate a new ID and link pointing to the specific page
+            # For site mode pagination, we generate a new ID and link
             search_id = await Media.save_search_results(req, files, query.message.chat.id)
             
-            # Calculate Page Number
             page_no = int(offset / limit) + 1
-            
             base_url = SITE_URL.rstrip('/') if (SITE_URL and SITE_URL.startswith("http")) else "http://127.0.0.1:8080"
             final_site_url = f"{base_url}/results/{search_id}?page={page_no}"
             

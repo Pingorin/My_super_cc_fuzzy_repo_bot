@@ -18,24 +18,31 @@ class UserChatDB:
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ MODIFIED: Accepts 'title' to save Group Name (Restart Proof Logic)
+    # ✅ MODIFIED: Added Auto-Reaction, Auto-Delete & Fixed Page Limit Key
     async def add_group(self, id, title):
         group = await self.groups.find_one({'id': int(id)})
         
         if not group:
-            # If new group, save Default Settings + Title
             default_settings = {
                 'id': int(id),
-                'title': title, # ✅ Save Title
+                'title': title,
                 'earning_method': 'shortlink', 
                 'shortener_mode': 'dynamic',   
                 'shorteners': {},              
                 'fsub_channels': {},           
                 'is_shortlink_active': True,
-                # New Result Mode Setting
-                'result_mode': 'button', # Default: button, hybrid, text, detailed, card, site
-                'result_per_page': 10,   # Placeholder for future logic
-                # Time Defaults
+                
+                # Search Settings
+                'result_mode': 'hybrid',        # Default: hybrid (Smart Mode)
+                'result_page_limit': 10,        # Renamed from result_per_page for consistency
+                
+                # ✅ NEW: Auto-Delete & Reaction Defaults
+                'auto_reaction': False,         # Default Disabled
+                'auto_delete_time': 300,        # Default 5 mins (300s)
+                'auto_delete_user_msg': False,  # Default Disabled
+                'delete_thanks_msg': True,      # Default ON
+
+                # Time Defaults (Verification/Link)
                 'time_dynamic': 86400,
                 'time_smart': 86400,
                 'time_together': 604800,       
@@ -45,7 +52,7 @@ class UserChatDB:
             }
             await self.groups.insert_one(default_settings)
         else:
-            # If group exists, update the Title (in case it changed)
+            # Update Title if changed
             await self.groups.update_one({'id': int(id)}, {'$set': {'title': title}})
 
     # --- ⚙️ GROUP SETTINGS HELPERS ---
@@ -74,7 +81,7 @@ class UserChatDB:
     # --- 🔒 FSUB CHANNEL MANAGEMENT ---
     
     async def update_fsub_channel(self, chat_id, slot, channel_id):
-        """Saves a specific channel ID to a specific slot (1, 2, or 3)"""
+        """Saves a specific channel ID to a specific slot"""
         try:
             group = await self.groups.find_one({'id': int(chat_id)})
             if group:
@@ -88,12 +95,8 @@ class UserChatDB:
         except Exception as e:
             print(f"Auto-Fix Error: {e}")
 
-        # Slot 5 special handling (can be link or ID)
         val_to_save = channel_id
-        if slot == '5':
-            # Ensure it's stored as string/int appropriately if handled upstream
-            pass
-        else:
+        if slot != '5':
             try: val_to_save = int(channel_id)
             except: pass
 
@@ -197,17 +200,16 @@ class UserChatDB:
             upsert=True
         )
 
-    # --- 🔥 ADVANCED FSUB PENDING LOGIC (Updated for Force Request) 🔥 ---
+    # --- 🔥 ADVANCED FSUB PENDING LOGIC ---
     
     async def add_pending_request(self, user_id, channel_id):
-        """Used when user clicks 'Request to Join'."""
         try:
             await self.fsub_pending.update_one(
                 {'_id': f"{user_id}_{channel_id}"},
                 {'$set': {
                     'user_id': int(user_id), 
                     'chat_id': int(channel_id),
-                    'date': time.time() # ✅ Added Timestamp
+                    'date': time.time()
                 }},
                 upsert=True
             )
@@ -215,19 +217,17 @@ class UserChatDB:
             print(f"Error adding pending request: {e}")
 
     async def remove_pending_request(self, user_id, channel_id):
-        """Used when Admin Approves/Declines or User Leaves."""
         try:
             await self.fsub_pending.delete_one({'_id': f"{user_id}_{channel_id}"})
         except Exception as e:
             print(f"Error removing pending request: {e}")
 
     async def is_user_pending(self, user_id, channel_id):
-        """Checks if user has a pending join request."""
         try:
             found = await self.fsub_pending.find_one({'_id': f"{user_id}_{channel_id}"})
             return bool(found)
         except:
             return False
 
-# ✅ INITIALIZATION: Using USER_DB_URI for the second database
+# ✅ INITIALIZATION
 db = UserChatDB(USER_DB_URI, DATABASE_NAME)

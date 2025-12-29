@@ -29,9 +29,11 @@ async def auto_filter(client, message):
     start_time = time.time()
 
     try:
-        # ✅ 1. Get Group Settings (Default to Hybrid)
+        # ✅ 1. Get Group Settings
         group_settings = await db.get_group_settings(message.chat.id)
         mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
+        # ✅ Fetch Limit (Default 10 if not set)
+        limit = group_settings.get('result_page_limit', 10) if group_settings else 10
 
         # ✅ 2. Fetch Results
         files = await Media.get_search_results(query)
@@ -47,13 +49,16 @@ async def auto_filter(client, message):
         # ==================================================================
 
         # --- HYBRID MODE LOGIC ---
+        # Uses the 'limit' setting to decide between Button or Text
         if mode == 'hybrid':
-            if len(files) <= 5: mode = 'button'
+            if len(files) <= limit: mode = 'button'
             else: mode = 'text'
 
         # --- MODE A: BUTTON (Classic) ---
         if mode == 'button':
-            buttons = btn_parser(files, message.chat.id, query)
+            # ✅ Pass 'limit' to btn_parser (Ensure utils.py is updated)
+            buttons = btn_parser(files, message.chat.id, query, limit=limit)
+            
             msg_text = (
                 f"⚡ **Hey {message.from_user.mention}!**\n"
                 f"👻 **Here are your results for:** `{query}`\n"
@@ -66,22 +71,24 @@ async def auto_filter(client, message):
 
         # --- MODE B: TEXT LIST ---
         elif mode == 'text':
-            display_files = files[:20]
-            # ✅ Passed message.chat.id for link generation
+            # ✅ Slice using Dynamic Limit
+            display_files = files[:limit]
+            # Passed message.chat.id for link generation
             text = format_text_results(display_files, query, message.chat.id)
             await message.reply_text(text, disable_web_page_preview=True)
 
         # --- MODE C: DETAILED LIST ---
         elif mode == 'detailed':
-            display_files = files[:10]
-            # ✅ Passed message.chat.id AND time_taken
+            # ✅ Slice using Dynamic Limit
+            display_files = files[:limit]
+            # Passed message.chat.id AND time_taken
             text = format_detailed_results(display_files, query, message.chat.id, time_taken)
             await message.reply_text(text, disable_web_page_preview=True)
 
         # --- MODE D: SITE (WEB VIEW - MONGODB PERSISTENCE) ---
         elif mode == 'site':
             # 1. Save to MongoDB & Get Unique ID
-            # ✅ FIX: Passing message.chat.id here to save it in DB
+            # ✅ FIX: Passing message.chat.id here to save it in DB (Fixes 'None' error)
             search_id = await Media.save_search_results(query, files, message.chat.id)
             
             # 2. Construct Link

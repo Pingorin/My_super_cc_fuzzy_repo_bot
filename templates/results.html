@@ -28,10 +28,16 @@
             align-items: center;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
             border-left: 5px solid var(--accent);
+            transition: transform 0.2s;
+        }
+        
+        .file-card:hover {
+            transform: translateY(-2px);
+            background: #252525;
         }
         
         .file-info { flex-grow: 1; padding-right: 15px; }
-        .filename { font-size: 16px; font-weight: bold; margin-bottom: 5px; display: block; }
+        .filename { font-size: 16px; font-weight: bold; margin-bottom: 5px; display: block; word-break: break-all; }
         .filesize { font-size: 12px; background: #333; padding: 2px 8px; border-radius: 4px; color: #00e676; }
         
         .get-btn {
@@ -62,7 +68,7 @@
                 <span class="filename">{{ file.file_name }}</span>
                 <span class="filesize">Size: {{ file.file_size }}</span>
             </div>
-            <a href="tg://resolve?domain={{ bot_username }}&start=get_{{ file.link_id }}_{{ file.chat_id }}" class="get-btn">
+            <a href="tg://resolve?domain={{ bot_username }}&start=get_{{ file.link_id }}_{{ file.target_chat_id }}" class="get-btn">
                 📂 Get File
             </a>
         </div>

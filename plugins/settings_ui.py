@@ -67,7 +67,7 @@ async def main_settings_menu(client, query):
     try: title = (await client.get_chat(chat_id)).title
     except: title = str(chat_id)
 
-    # ✅ UPDATED 2x2 GRID LAYOUT
+    # ✅ UPDATED GRID LAYOUT WITH NEW BUTTONS
     buttons = [
         # Row 1
         [InlineKeyboardButton("💰 Earning method", callback_data=f"set_earn#{chat_id}"),
@@ -77,30 +77,31 @@ async def main_settings_menu(client, query):
         [InlineKeyboardButton("📜 Result mode", callback_data=f"set_res_mode#{chat_id}"),
          InlineKeyboardButton("📄 Result per page", callback_data=f"set_page_limit#{chat_id}")],
         
-        # Row 3
+        # Row 3 (NEW FEATURES)
+        [InlineKeyboardButton("🗑️ Auto-Delete", callback_data=f"autodel_menu#{chat_id}"),
+         InlineKeyboardButton("👍 Auto Reaction", callback_data=f"autoreact_ui#{chat_id}")],
+        
+        # Row 4
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
     
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 📜 RESULT MODE SETTINGS (NEW FEATURE)
+# 📜 RESULT MODE SETTINGS
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^set_res_mode#"))
 async def result_mode_settings(client, query):
     chat_id = int(query.data.split("#")[1])
     
-    # Ensure group exists in DB
     group_data = await db.get_group_settings(chat_id)
     if not group_data: 
         await db.add_group(chat_id, "Unknown Group")
         group_data = await db.get_group_settings(chat_id)
 
-    # Default to 'button' mode if not set
     current = group_data.get('result_mode', 'button')
 
-    # Helper function to add checkmark
     def txt(mode_key, label):
         return f"✅ {label}" if current == mode_key else label
 
@@ -115,19 +116,12 @@ async def result_mode_settings(client, query):
     )
 
     buttons = [
-        # Row 1
         [InlineKeyboardButton(txt('button', "Button Mode"), callback_data=f"set_rmode#{chat_id}#button"),
          InlineKeyboardButton(txt('hybrid', "Hybrid Mode"), callback_data=f"set_rmode#{chat_id}#hybrid")],
-        
-        # Row 2
         [InlineKeyboardButton(txt('text', "Text Mode"), callback_data=f"set_rmode#{chat_id}#text"),
          InlineKeyboardButton(txt('detailed', "Detailed Text Mode"), callback_data=f"set_rmode#{chat_id}#detailed")],
-        
-        # Row 3
         [InlineKeyboardButton(txt('card', "Card Mode"), callback_data=f"set_rmode#{chat_id}#card"),
          InlineKeyboardButton(txt('site', "Site Mode"), callback_data=f"set_rmode#{chat_id}#site")],
-        
-        # Back
         [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
     ]
 
@@ -137,50 +131,35 @@ async def result_mode_settings(client, query):
 async def set_result_mode_handler(client, query):
     _, chat_id, mode = query.data.split("#")
     chat_id = int(chat_id)
-    
-    # Save to Database
     await db.update_group_settings(chat_id, {'result_mode': mode})
-    
     await query.answer(f"Updated to {mode.capitalize()} Mode!")
-    
-    # Refresh the Menu to show the new tick
     await result_mode_settings(client, query)
 
 # ==============================================================================
-# 📄 RESULT PER PAGE SETTINGS (UPDATED)
+# 📄 RESULT PER PAGE SETTINGS
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^set_page_limit#"))
 async def page_limit_settings(client, query):
     chat_id = int(query.data.split("#")[1])
-    
-    # Fetch current limit (Default 10)
     group_data = await db.get_group_settings(chat_id)
     current_limit = group_data.get('result_page_limit', 10)
     
-    # Define options: 3 to 12, plus 15
     options = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15]
-    
     btn = []
     temp_row = []
     
     for opt in options:
-        # Mark selected with ✅
         text = f"✅ {opt}" if opt == current_limit else f"{opt}"
         temp_row.append(InlineKeyboardButton(text, callback_data=f"set_limit#{opt}#{chat_id}"))
-        
-        # 4 Buttons per row
         if len(temp_row) == 4:
             btn.append(temp_row)
             temp_row = []
-            
     if temp_row:
         btn.append(temp_row)
         
-    # Back Button
     btn.append([InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
     
-    # Construct Message
     await query.message.edit_text(
         f"📄 **Results per Page Settings for:** `{chat_id}`\n\n"
         f"Select how many files (buttons or text entries) to show on each results page.\n\n"
@@ -192,19 +171,165 @@ async def page_limit_settings(client, query):
 @Client.on_callback_query(filters.regex(r"^set_limit#"))
 async def save_page_limit(client, query):
     _, limit, chat_id = query.data.split("#")
-    limit = int(limit)
-    chat_id = int(chat_id)
-    
-    await db.update_group_settings(chat_id, {'result_page_limit': limit})
+    await db.update_group_settings(int(chat_id), {'result_page_limit': int(limit)})
     await query.answer(f"Updated: {limit} files per page")
-    
-    # Refresh the menu to show updated selection
-    # We reconstruct the query data to call page_limit_settings again
     query.data = f"set_page_limit#{chat_id}"
     await page_limit_settings(client, query)
 
 # ==============================================================================
-# 🔥 FSUB SELECTION MENU (PRESERVED)
+# 👍 AUTO REACTION UI (NEW)
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^autoreact_ui#"))
+async def auto_reaction_ui(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    
+    is_enabled = group_data.get('auto_reaction', False)
+    
+    status_text = "✅ Enabled" if is_enabled else "❌ Disabled"
+    btn_text = "🔴 Disable" if is_enabled else "🟢 Enable"
+    toggle_data = "off" if is_enabled else "on"
+
+    text = (
+        f"👍 **Auto Reaction Settings for:** `{chat_id}`\n\n"
+        "When enabled, the bot will automatically react with a random positive emoji (e.g., 👍, ❤️, 🔥) to user messages that are valid search queries.\n\n"
+        "This provides quick feedback to users and makes the group more interactive.\n\n"
+        f"**Current Status:** {status_text}"
+    )
+
+    buttons = [
+        [InlineKeyboardButton(btn_text, callback_data=f"set_react#{chat_id}#{toggle_data}")],
+        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
+    ]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^set_react#"))
+async def set_reaction_handler(client, query):
+    _, chat_id, action = query.data.split("#")
+    chat_id = int(chat_id)
+    
+    new_status = True if action == "on" else False
+    await db.update_group_settings(chat_id, {'auto_reaction': new_status})
+    
+    await auto_reaction_ui(client, query)
+
+# ==============================================================================
+# 🗑️ AUTO DELETE MENU (NEW)
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^autodel_menu#"))
+async def auto_delete_menu(client, query):
+    chat_id = int(query.data.split("#")[1])
+    
+    text = (
+        f"🗑️ **Auto-Delete Settings for:** `{chat_id}`\n\n"
+        "Choose which type of messages you want to auto-delete."
+    )
+    
+    buttons = [
+        [InlineKeyboardButton("🤖 Bot's Result Message", callback_data=f"bot_del_ui#{chat_id}")],
+        [InlineKeyboardButton("👤 User's Result Message", callback_data=f"usr_del_ui#{chat_id}")],
+        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
+    ]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+# ==============================================================================
+# 🤖 BOT MESSAGE AUTO-DELETE UI (NEW)
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^bot_del_ui#"))
+async def bot_auto_delete_ui(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    
+    del_time = group_data.get('auto_delete_time', 300) # Default 5 mins
+    thanks_msg = group_data.get('delete_thanks_msg', True)
+    
+    if del_time == 0: time_display = "❌ Disabled"
+    elif del_time < 60: time_display = f"{del_time} seconds"
+    else: time_display = f"{int(del_time/60)} minute(s)"
+    
+    thanks_status = "ON" if thanks_msg else "OFF"
+    
+    text = (
+        f"🤖 **Auto-Delete Bot Messages for:** `{chat_id}`\n\n"
+        "Automatically delete the bot's search result messages after a set time.\n\n"
+        f"**Current Delay:** {time_display}"
+    )
+    
+    buttons = [
+        [InlineKeyboardButton("1 min", callback_data=f"set_bdel_time#{chat_id}#60"),
+         InlineKeyboardButton("2 min", callback_data=f"set_bdel_time#{chat_id}#120"),
+         InlineKeyboardButton("5 min", callback_data=f"set_bdel_time#{chat_id}#300"),
+         InlineKeyboardButton("10 min", callback_data=f"set_bdel_time#{chat_id}#600")],
+        [InlineKeyboardButton("🚫 Disable Auto-Delete", callback_data=f"set_bdel_time#{chat_id}#0")],
+        [InlineKeyboardButton(f"Thanks Msg on Delete: {thanks_status}", callback_data=f"toggle_thanks#{chat_id}")],
+        [InlineKeyboardButton("🔙 Back to Auto-Delete Menu", callback_data=f"autodel_menu#{chat_id}")]
+    ]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^set_bdel_time#"))
+async def set_bot_delete_time(client, query):
+    _, chat_id, seconds = query.data.split("#")
+    chat_id = int(chat_id)
+    await db.update_group_settings(chat_id, {'auto_delete_time': int(seconds)})
+    await query.answer("⏱ Time Updated!")
+    await bot_auto_delete_ui(client, query)
+
+@Client.on_callback_query(filters.regex(r"^toggle_thanks#"))
+async def toggle_thanks_msg(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    curr = group_data.get('delete_thanks_msg', True)
+    
+    await db.update_group_settings(chat_id, {'delete_thanks_msg': not curr})
+    await bot_auto_delete_ui(client, query)
+
+# ==============================================================================
+# 👤 USER MESSAGE AUTO-DELETE UI (NEW)
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^usr_del_ui#"))
+async def user_auto_delete_ui(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    
+    is_enabled = group_data.get('auto_delete_user_msg', False)
+    
+    status_text = "✅ Enabled" if is_enabled else "❌ Disabled"
+    btn_text = "🔴 Disable" if is_enabled else "🟢 Enable"
+    toggle_data = "off" if is_enabled else "on"
+    
+    text = (
+        f"👤 **Auto-Delete User Messages for:** `{chat_id}`\n\n"
+        "When enabled, the bot will instantly delete a user's message after it has replied with the search results.\n\n"
+        "This helps keep the group chat clean from search queries.\n\n"
+        f"**Current Status:** {status_text}"
+    )
+    
+    buttons = [
+        [InlineKeyboardButton(btn_text, callback_data=f"set_udel#{chat_id}#{toggle_data}")],
+        [InlineKeyboardButton("🔙 Back to Auto-Delete Menu", callback_data=f"autodel_menu#{chat_id}")]
+    ]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^set_udel#"))
+async def set_user_delete_handler(client, query):
+    _, chat_id, action = query.data.split("#")
+    chat_id = int(chat_id)
+    
+    new_status = True if action == "on" else False
+    await db.update_group_settings(chat_id, {'auto_delete_user_msg': new_status})
+    
+    await user_auto_delete_ui(client, query)
+
+# ==============================================================================
+# 🔥 FSUB SELECTION MENU
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^fsub_menu#"))
@@ -223,10 +348,6 @@ async def fsub_configure_menu(client, query):
     ]
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
-
-# ==============================================================================
-# 1️⃣ REQUEST FSUB MENU (Slots 1, 2, 4)
-# ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^fsub_req_menu#"))
 async def request_fsub_menu(client, query):
@@ -258,16 +379,12 @@ async def request_fsub_menu(client, query):
     )
 
     buttons = []
-
-    # Slot 1
     if s1: buttons.append([InlineKeyboardButton("✏️ Edit Slot 1", callback_data=f"set_fsub#{chat_id}#1"), InlineKeyboardButton("🗑️ Clear Slot 1", callback_data=f"clr_fsub#{chat_id}#1")])
     else: buttons.append([InlineKeyboardButton("➕ Set Slot 1", callback_data=f"set_fsub#{chat_id}#1")])
 
-    # Slot 2
     if s2: buttons.append([InlineKeyboardButton("✏️ Edit Slot 2", callback_data=f"set_fsub#{chat_id}#2"), InlineKeyboardButton("🗑️ Clear Slot 2", callback_data=f"clr_fsub#{chat_id}#2")])
     else: buttons.append([InlineKeyboardButton("➕ Set Slot 2", callback_data=f"set_fsub#{chat_id}#2")])
 
-    # Slot 4
     if s4: buttons.append([InlineKeyboardButton("✏️ Edit Slot 4", callback_data=f"set_fsub#{chat_id}#4"), InlineKeyboardButton("🗑️ Clear Slot 4", callback_data=f"clr_fsub#{chat_id}#4")])
     else: buttons.append([InlineKeyboardButton("➕ Set Slot 4", callback_data=f"set_fsub#{chat_id}#4")])
 
@@ -275,10 +392,6 @@ async def request_fsub_menu(client, query):
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"fsub_menu#{chat_id}")])
 
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
-
-# ==============================================================================
-# 2️⃣ NORMAL FSUB MENU (Slot 3, 5)
-# ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^fsub_norm_menu#"))
 async def normal_fsub_menu(client, query):
@@ -309,24 +422,19 @@ async def normal_fsub_menu(client, query):
     )
 
     buttons = []
-    
-    # Slot 3 Controls
     if s3: buttons.append([InlineKeyboardButton("✏️ Edit Slot 3", callback_data=f"set_fsub#{chat_id}#3"), InlineKeyboardButton("🗑️ Clear Slot 3", callback_data=f"clr_fsub#{chat_id}#3")])
     else: buttons.append([InlineKeyboardButton("➕ Set Slot 3", callback_data=f"set_fsub#{chat_id}#3")])
 
-    # Slot 5 Controls
     if s5: buttons.append([InlineKeyboardButton("✏️ Edit Slot 5", callback_data=f"set_fsub#{chat_id}#5"), InlineKeyboardButton("🗑️ Clear Slot 5", callback_data=f"clr_fsub#{chat_id}#5")])
     else: buttons.append([InlineKeyboardButton("➕ Set Slot 5", callback_data=f"set_fsub#{chat_id}#5")])
 
-    if s3 or s5:
-        buttons.append([InlineKeyboardButton("⛔ Remove All Normal Fsub", callback_data=f"rem_norm_all#{chat_id}")])
-
+    if s3 or s5: buttons.append([InlineKeyboardButton("⛔ Remove All Normal Fsub", callback_data=f"rem_norm_all#{chat_id}")])
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"fsub_menu#{chat_id}")])
 
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# ✍️ SET FSUB HANDLER (ROBUST: REFRESH + ADMIN CHECK)
+# ✍️ SET FSUB HANDLER
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^set_fsub#"))
@@ -335,10 +443,8 @@ async def set_fsub_input(client, query):
     chat_id = int(chat_id)
     user_id = query.from_user.id
     
-    # Determine Back Button logic
     back_cb = f"fsub_req_menu#{chat_id}" if slot in ['1', '2', '4'] else f"fsub_norm_menu#{chat_id}"
     
-    # Prompt Text
     txt = f"🆔 **Set Slot {slot}**\n\n"
     txt += "1. **Option A (Recommended):** Add bot as Admin in Channel & Forward Message.\n"
     if slot == '5':
@@ -353,7 +459,6 @@ async def set_fsub_input(client, query):
     )
     
     try:
-        # Listen for User Input
         msg = await client.listen(user_id, timeout=60)
     except asyncio.TimeoutError:
         return await query.message.edit_text("❌ Timeout.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=back_cb)]]))
@@ -363,34 +468,26 @@ async def set_fsub_input(client, query):
             input_identifier = None
             is_link_mode = False
 
-            # 1. Extract Input (ID or Link)
             if msg.forward_from_chat:
                 input_identifier = msg.forward_from_chat.id
             elif msg.text:
                 text = msg.text.strip()
-                # Check for Slot 5 Link Mode
                 if slot == '5' and ("t.me/" in text or "http" in text):
                     is_link_mode = True
                     input_identifier = text
                 else:
                     input_identifier = text
 
-            # 2. Process Input
             if is_link_mode:
-                # Direct Save for Links (Verification Impossible)
                 await db.update_fsub_channel(chat_id, slot, input_identifier)
                 await msg.reply(f"✅ **Saved Link!**\nSlot {slot}: `{input_identifier}`\n(Verification: OFF - Button Only)")
             
             else:
-                # ✅ STEP 1: FORCE REFRESH (Fixes PeerIdInvalid on Restart)
                 real_chat = await client.get_chat(input_identifier)
-                
-                # ✅ STEP 2: ADMIN CHECK
                 try:
                     me = await client.get_chat_member(real_chat.id, "me")
                     if me.status != enums.ChatMemberStatus.ADMINISTRATOR:
                         await msg.reply(f"❌ **Error:** I am not an Admin in **{real_chat.title}**!\nPlease promote me and try again.")
-                        # Return to menu
                         if slot in ['1', '2', '4']: return await request_fsub_menu(client, query)
                         else: return await normal_fsub_menu(client, query)
                 except Exception as e:
@@ -398,11 +495,9 @@ async def set_fsub_input(client, query):
                     if slot in ['1', '2', '4']: return await request_fsub_menu(client, query)
                     else: return await normal_fsub_menu(client, query)
 
-                # ✅ STEP 3: SAVE TO DATABASE
                 await db.update_fsub_channel(chat_id, slot, real_chat.id)
                 await msg.reply(f"✅ **Saved!**\nSlot {slot}: {real_chat.title}\nID: `{real_chat.id}`")
 
-            # Redirect to correct menu
             if slot in ['1', '2', '4']: await request_fsub_menu(client, query)
             else: await normal_fsub_menu(client, query)
 
@@ -419,7 +514,6 @@ async def set_fsub_input(client, query):
 # 🗑️ CLEAR & REMOVE HANDLERS
 # ==============================================================================
 
-# Clear Single Slot
 @Client.on_callback_query(filters.regex(r"^clr_fsub#"))
 async def clear_single_fsub(client, query):
     _, chat_id, slot = query.data.split("#")
@@ -429,7 +523,6 @@ async def clear_single_fsub(client, query):
     if slot in ['1', '2', '4']: await request_fsub_menu(client, query)
     else: await normal_fsub_menu(client, query)
 
-# Remove All Request Fsub (1, 2, 4)
 @Client.on_callback_query(filters.regex(r"^rem_req_all#"))
 async def remove_req_all(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -439,7 +532,6 @@ async def remove_req_all(client, query):
     await query.answer("All Request Fsub Channels Removed!", show_alert=True)
     await request_fsub_menu(client, query)
 
-# Remove All Normal Fsub (3, 5)
 @Client.on_callback_query(filters.regex(r"^rem_norm_all#"))
 async def remove_norm_all(client, query):
     chat_id = int(query.data.split("#")[1])

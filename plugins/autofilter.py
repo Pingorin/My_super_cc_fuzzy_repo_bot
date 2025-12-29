@@ -5,8 +5,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-from info import PORT, SITE_URL # ✅ Import SITE_URL from config
-# ✅ Removed RESULTS_CACHE import as we now use MongoDB
+from info import PORT, SITE_URL 
 from utils import temp, btn_parser, format_text_results, format_detailed_results, post_to_telegraph, format_card_result
 
 logger = logging.getLogger(__name__)
@@ -82,8 +81,8 @@ async def auto_filter(client, message):
         # --- MODE D: SITE (WEB VIEW - MONGODB PERSISTENCE) ---
         elif mode == 'site':
             # 1. Save to MongoDB & Get Unique ID
-            # (Requires 'save_search_results' method in ia_filterdb.py)
-            search_id = await Media.save_search_results(query, files)
+            # ✅ FIX: Passing message.chat.id here to save it in DB
+            search_id = await Media.save_search_results(query, files, message.chat.id)
             
             # 2. Construct Link
             if not SITE_URL or not SITE_URL.startswith("http"):

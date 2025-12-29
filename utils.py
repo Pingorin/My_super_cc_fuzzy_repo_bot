@@ -102,7 +102,6 @@ def format_card_result(file, current_index, total_count):
     """Generates the Single Card layout."""
     f_name = file['file_name']
     f_size = get_size(file['file_size'])
-    # Caption line removed as per request
     
     f_type = "Document"
     if f_name.endswith(('.mkv', '.mp4', '.avi', '.webm', '.mov')): f_type = "Video"
@@ -139,16 +138,24 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. BUTTON PARSER (Button Mode)
-def btn_parser(files, chat_id, query=None):
+# ✅ 4. BUTTON PARSER (Button Mode with Pagination Limit)
+def btn_parser(files, chat_id, query=None, offset=0, limit=10):
+    """
+    Generates buttons for Inline Result Mode with Pagination.
+    Accepts 'limit' to control results per page.
+    """
+    # Slice the files based on offset and limit
+    current_files = files[offset : offset + limit]
+    
     buttons = []
-    for file in files:
+    for file in current_files:
         f_name = file.get('file_name', 'Unknown File')
         f_size = get_size(file.get('file_size', 0))
         link_id = file.get('link_id')
         caption = file.get('caption')
 
         display_name = f_name
+        # Simple caption logic to highlight query
         if query and caption:
             q = query.lower()
             n = f_name.lower()
@@ -161,9 +168,26 @@ def btn_parser(files, chat_id, query=None):
         btn_text = f"📂 {display_name} [{f_size}]"
         
         if link_id is not None:
-            # We pass chat_id in the Deep Link to enforce Group Settings (Fsub/Shortener)
             url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
+            
+    # --- PAGINATION BUTTONS ---
+    nav = []
+    
+    # Clean Query for Callback Data (Max 64 bytes total)
+    # Callback format: next_{offset}_{query}
+    q_data = query[:20] if query else "blank" 
+
+    # Prev Button
+    if offset >= limit:
+        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"next_{offset - limit}_{q_data}"))
+    
+    # Next Button
+    if len(files) > offset + limit:
+        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"next_{offset + limit}_{q_data}"))
+        
+    if nav:
+        buttons.append(nav)
             
     return buttons
 

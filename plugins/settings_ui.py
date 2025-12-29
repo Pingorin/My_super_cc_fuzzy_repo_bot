@@ -75,7 +75,7 @@ async def main_settings_menu(client, query):
         
         # Row 2 (Result Mode & Per Page)
         [InlineKeyboardButton("📜 Result mode", callback_data=f"set_res_mode#{chat_id}"),
-         InlineKeyboardButton("📄 Result per page", callback_data=f"set_per_page#{chat_id}")],
+         InlineKeyboardButton("📄 Result per page", callback_data=f"set_page_limit#{chat_id}")],
         
         # Row 3
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
@@ -147,12 +147,61 @@ async def set_result_mode_handler(client, query):
     await result_mode_settings(client, query)
 
 # ==============================================================================
-# 📄 RESULT PER PAGE (Placeholder)
+# 📄 RESULT PER PAGE SETTINGS (UPDATED)
 # ==============================================================================
-@Client.on_callback_query(filters.regex(r"^set_per_page#"))
-async def result_per_page_placeholder(client, query):
-    await query.answer("Coming Soon! This feature is under development.", show_alert=True)
 
+@Client.on_callback_query(filters.regex(r"^set_page_limit#"))
+async def page_limit_settings(client, query):
+    chat_id = int(query.data.split("#")[1])
+    
+    # Fetch current limit (Default 10)
+    group_data = await db.get_group_settings(chat_id)
+    current_limit = group_data.get('result_page_limit', 10)
+    
+    # Define options: 3 to 12, plus 15
+    options = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15]
+    
+    btn = []
+    temp_row = []
+    
+    for opt in options:
+        # Mark selected with ✅
+        text = f"✅ {opt}" if opt == current_limit else f"{opt}"
+        temp_row.append(InlineKeyboardButton(text, callback_data=f"set_limit#{opt}#{chat_id}"))
+        
+        # 4 Buttons per row
+        if len(temp_row) == 4:
+            btn.append(temp_row)
+            temp_row = []
+            
+    if temp_row:
+        btn.append(temp_row)
+        
+    # Back Button
+    btn.append([InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
+    
+    # Construct Message
+    await query.message.edit_text(
+        f"📄 **Results per Page Settings for:** `{chat_id}`\n\n"
+        f"Select how many files (buttons or text entries) to show on each results page.\n\n"
+        f"**Current:** {current_limit} files per page.\n"
+        f"Values set for Button, Text, Detailed, Hybrid Mode.",
+        reply_markup=InlineKeyboardMarkup(btn)
+    )
+
+@Client.on_callback_query(filters.regex(r"^set_limit#"))
+async def save_page_limit(client, query):
+    _, limit, chat_id = query.data.split("#")
+    limit = int(limit)
+    chat_id = int(chat_id)
+    
+    await db.update_group_settings(chat_id, {'result_page_limit': limit})
+    await query.answer(f"Updated: {limit} files per page")
+    
+    # Refresh the menu to show updated selection
+    # We reconstruct the query data to call page_limit_settings again
+    query.data = f"set_page_limit#{chat_id}"
+    await page_limit_settings(client, query)
 
 # ==============================================================================
 # 🔥 FSUB SELECTION MENU (PRESERVED)

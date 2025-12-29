@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class MediaDB:
     def __init__(self, uri, database_name):
-        # ✅ Connection 1: Using DATABASE_URI (Exclusively for Files)
+        # ✅ Connection: Using DATABASE_URI (Exclusively for Files)
         self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         
@@ -173,9 +173,9 @@ class MediaDB:
                     }
                 }
 
-            pipeline = [search_stage, {"$limit": 10}]
+            pipeline = [search_stage, {"$limit": 50}] # Increased limit for better Site Mode results
             cursor = self.search_col.aggregate(pipeline)
-            files = await cursor.to_list(length=10)
+            files = await cursor.to_list(length=50)
             return files
             
         except Exception as e:
@@ -185,7 +185,7 @@ class MediaDB:
             
             cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})
             cursor.sort('$natural', -1)
-            return await cursor.to_list(length=10)
+            return await cursor.to_list(length=50)
 
     async def total_files_count(self):
         return await self.data_col.count_documents({})

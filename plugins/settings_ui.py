@@ -59,7 +59,7 @@ async def settings_command(client, message):
     await message.reply_text("⚙️ **Select a Group:**", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# ⚙️ MAIN SETTINGS MENU (UPDATED LAYOUT)
+# ⚙️ MAIN SETTINGS MENU
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^set_main#"))
 async def main_settings_menu(client, query):
@@ -67,7 +67,6 @@ async def main_settings_menu(client, query):
     try: title = (await client.get_chat(chat_id)).title
     except: title = str(chat_id)
 
-    # ✅ UPDATED GRID LAYOUT WITH NEW BUTTONS
     buttons = [
         # Row 1
         [InlineKeyboardButton("💰 Earning method", callback_data=f"set_earn#{chat_id}"),
@@ -77,7 +76,7 @@ async def main_settings_menu(client, query):
         [InlineKeyboardButton("📜 Result mode", callback_data=f"set_res_mode#{chat_id}"),
          InlineKeyboardButton("📄 Result per page", callback_data=f"set_page_limit#{chat_id}")],
         
-        # Row 3 (NEW FEATURES)
+        # Row 3 (Auto Features)
         [InlineKeyboardButton("🗑️ Auto-Delete", callback_data=f"autodel_menu#{chat_id}"),
          InlineKeyboardButton("👍 Auto Reaction", callback_data=f"autoreact_ui#{chat_id}")],
         
@@ -177,7 +176,7 @@ async def save_page_limit(client, query):
     await page_limit_settings(client, query)
 
 # ==============================================================================
-# 👍 AUTO REACTION UI (NEW)
+# 👍 AUTO REACTION UI
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^autoreact_ui#"))
@@ -216,7 +215,7 @@ async def set_reaction_handler(client, query):
     await auto_reaction_ui(client, query)
 
 # ==============================================================================
-# 🗑️ AUTO DELETE MENU (NEW)
+# 🗑️ AUTO DELETE MENU
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^autodel_menu#"))
@@ -237,7 +236,7 @@ async def auto_delete_menu(client, query):
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🤖 BOT MESSAGE AUTO-DELETE UI (NEW)
+# 🤖 BOT MESSAGE AUTO-DELETE UI (UPDATED WITH CHECKMARKS)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^bot_del_ui#"))
@@ -248,11 +247,17 @@ async def bot_auto_delete_ui(client, query):
     del_time = group_data.get('auto_delete_time', 300) # Default 5 mins
     thanks_msg = group_data.get('delete_thanks_msg', True)
     
+    # Helper to add ✅ to active time
+    def t_btn(label, seconds):
+        return f"{label} ✅" if del_time == seconds else label
+
+    # Format Status
     if del_time == 0: time_display = "❌ Disabled"
     elif del_time < 60: time_display = f"{del_time} seconds"
     else: time_display = f"{int(del_time/60)} minute(s)"
     
-    thanks_status = "ON" if thanks_msg else "OFF"
+    # Format Toggle Button Text
+    thanks_btn_text = "Thanks Msg on Delete: ✅ON" if thanks_msg else "Thanks Msg on Delete: ❌OFF"
     
     text = (
         f"🤖 **Auto-Delete Bot Messages for:** `{chat_id}`\n\n"
@@ -261,12 +266,15 @@ async def bot_auto_delete_ui(client, query):
     )
     
     buttons = [
-        [InlineKeyboardButton("1 min", callback_data=f"set_bdel_time#{chat_id}#60"),
-         InlineKeyboardButton("2 min", callback_data=f"set_bdel_time#{chat_id}#120"),
-         InlineKeyboardButton("5 min", callback_data=f"set_bdel_time#{chat_id}#300"),
-         InlineKeyboardButton("10 min", callback_data=f"set_bdel_time#{chat_id}#600")],
-        [InlineKeyboardButton("🚫 Disable Auto-Delete", callback_data=f"set_bdel_time#{chat_id}#0")],
-        [InlineKeyboardButton(f"Thanks Msg on Delete: {thanks_status}", callback_data=f"toggle_thanks#{chat_id}")],
+        [InlineKeyboardButton(t_btn("1 min", 60), callback_data=f"set_bdel_time#{chat_id}#60"),
+         InlineKeyboardButton(t_btn("2 min", 120), callback_data=f"set_bdel_time#{chat_id}#120"),
+         InlineKeyboardButton(t_btn("5 min", 300), callback_data=f"set_bdel_time#{chat_id}#300"),
+         InlineKeyboardButton(t_btn("10 min", 600), callback_data=f"set_bdel_time#{chat_id}#600")],
+        
+        [InlineKeyboardButton(t_btn("Disable Auto-Delete", 0), callback_data=f"set_bdel_time#{chat_id}#0")],
+        
+        [InlineKeyboardButton(thanks_btn_text, callback_data=f"toggle_thanks#{chat_id}")],
+        
         [InlineKeyboardButton("🔙 Back to Auto-Delete Menu", callback_data=f"autodel_menu#{chat_id}")]
     ]
     
@@ -290,7 +298,7 @@ async def toggle_thanks_msg(client, query):
     await bot_auto_delete_ui(client, query)
 
 # ==============================================================================
-# 👤 USER MESSAGE AUTO-DELETE UI (NEW)
+# 👤 USER MESSAGE AUTO-DELETE UI
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^usr_del_ui#"))

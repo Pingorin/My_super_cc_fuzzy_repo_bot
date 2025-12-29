@@ -18,7 +18,7 @@ class UserChatDB:
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ MODIFIED: Added Auto-Reaction, Auto-Delete & Fixed Page Limit Key
+    # ✅ MODIFIED: Added Welcome Settings Defaults
     async def add_group(self, id, title):
         group = await self.groups.find_one({'id': int(id)})
         
@@ -36,11 +36,17 @@ class UserChatDB:
                 'result_mode': 'hybrid',        # Default: hybrid (Smart Mode)
                 'result_page_limit': 10,        # Renamed from result_per_page for consistency
                 
-                # ✅ NEW: Auto-Delete & Reaction Defaults
+                # ✅ Auto-Delete & Reaction Defaults
                 'auto_reaction': False,         # Default Disabled
                 'auto_delete_time': 300,        # Default 5 mins (300s)
                 'auto_delete_user_msg': False,  # Default Disabled
                 'delete_thanks_msg': True,      # Default ON
+
+                # ✅ NEW: Welcome Settings Defaults
+                'welcome_enabled': True,       # Default: ON
+                'welcome_mode': 'default',     # 'default' or 'custom'
+                'custom_welcome_text': None,   # Stores custom text
+                'custom_welcome_photo': None,  # Stores file_id of photo
 
                 # Time Defaults (Verification/Link)
                 'time_dynamic': 86400,

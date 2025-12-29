@@ -201,8 +201,11 @@ class MediaDB:
     # 🌍 SITE MODE METHODS (Save & Retrieve Cache)
     # ==================================================================
 
-    async def save_search_results(self, query, files):
-        """Saves search results to MongoDB with a short UUID for Web View."""
+    async def save_search_results(self, query, files, chat_id):
+        """
+        Saves search results to MongoDB with a short UUID for Web View.
+        Added `chat_id` param to fix 'None' type error in Web Server.
+        """
         unique_id = str(uuid.uuid4())[:8] # Short 8-char ID
         
         # Simplify data to save space
@@ -212,13 +215,14 @@ class MediaDB:
                 "file_name": file['file_name'],
                 "file_size": file['file_size'],
                 "link_id": file['link_id'],
-                # Try to get chat_id from file dict, fallback to None (Web Server needs to handle logic if None)
-                "chat_id": file.get('chat_id') 
+                # Try to get specific chat_id from file dict
+                "file_chat_id": file.get('chat_id') 
             })
 
         await self.search_cache.insert_one({
             "_id": unique_id,
             "query": query,
+            "chat_id": chat_id, # ✅ Saves User ID for fallback link generation
             "files": simplified_files,
             "created_at": datetime.datetime.utcnow()
         })

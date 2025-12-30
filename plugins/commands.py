@@ -193,9 +193,9 @@ async def generate_single_link(client, chat_id, user_id, link_id, level, slot_da
     if not short_url:
         await send_shortener_alert(client, chat_id, site)
         return None
-        
-    # 📊 STATS: Link Generated (Updated for Domain Tracking)
-    try: await db.update_daily_stats(chat_id, 'link_gen', domain=site)
+    
+    # 🟢 STATS TRACKING: Generated (with Domain)
+    try: await db.update_daily_stats(chat_id, 'gen', count=1, domain=site)
     except: pass
     
     return short_url
@@ -209,10 +209,10 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
     await wait_msg.delete()
     
     if short_url:
-        # 📊 STATS: Link Generated (Updated for Domain Tracking)
-        try: await db.update_daily_stats(chat_id, 'link_gen', domain=site)
+        # 🟢 STATS TRACKING: Generated (with Domain)
+        try: await db.update_daily_stats(chat_id, 'gen', count=1, domain=site)
         except: pass
-        
+
         btn = [[InlineKeyboardButton(f"🚀 Verify Level {level}", url=short_url)]]
         text = f"⚠️ **Verification Required ({level}/?)**\n\n**Shortener:** {site}\n_Click the button below to verify and continue._"
         if level == 3: text = f"⚠️ **Final Step (3/3)**\n\n**Shortener:** {site}\n_Almost there! Verify this to unlock files._"
@@ -316,37 +316,40 @@ async def start_handler(client, message):
              if not await check_fsub(client, message.from_user.id, message): return
 
     # -------------------------------------------------------------------------
-    # 🔁 VERIFICATION RETURN LOGIC
+    # 🔁 VERIFICATION RETURN LOGIC (WITH STATS)
     # -------------------------------------------------------------------------
     if len(message.command) > 1 and message.command[1].startswith("verify_"):
         try:
             data = message.command[1].split("_")
             level = int(data[1])
-            verify_chatid = data[3]
+            verify_chatid = int(data[3]) 
             link_id = int(data[4]) if len(data) > 4 else 0
             
             await db.update_verify_status(message.from_user.id, verify_chatid, level)
             
-            # 📊 STATS: Link Verified (Updated for Domain Tracking)
-            try: 
-                # Find which domain was used for this level
-                gs = await db.get_group_settings(int(verify_chatid))
-                shorts = gs.get('shorteners', {})
+            # 🟢 STATS TRACKING: Verified (Updated for Domain)
+            try:
+                # Need to find which site was used for this level
+                group_settings = await db.get_group_settings(verify_chatid)
+                shorteners = group_settings.get('shorteners', {})
                 site_domain = None
                 
-                # Check Custom Settings
-                if str(level) in shorts:
-                    site_domain = shorts[str(level)]['site']
+                # Check DB settings first
+                if str(level) in shorteners:
+                    site_domain = shorteners[str(level)]['site']
                 
-                # Fallback to Defaults
+                # Fallback to info.py defaults if not in DB
                 if not site_domain:
                     if level == 1 and info.SHORTLINK_URL_1: site_domain = info.SHORTLINK_URL_1
                     elif level == 2 and info.SHORTLINK_URL_2: site_domain = info.SHORTLINK_URL_2
                     elif level == 3 and info.SHORTLINK_URL_3: site_domain = info.SHORTLINK_URL_3
-                    
-                await db.update_daily_stats(int(verify_chatid), 'link_ver', domain=site_domain)
-            except: pass
-            
+
+                if site_domain:
+                    await db.update_daily_stats(verify_chatid, 'ver', count=1, domain=site_domain)
+                    print(f"✅ Stat Updated: Ver +1 for {site_domain}")
+            except Exception as e:
+                print(f"Stats Error: {e}")
+
             if await check_verification(client, message.from_user.id, verify_chatid, link_id, message):
                 btn = [[InlineKeyboardButton("📂 Get Your File Now", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{verify_chatid}")]]
                 await message.reply(f"✅ **Verification Successful!**\n\nAb niche button par click karke file lein.", reply_markup=InlineKeyboardMarkup(btn))

@@ -1,5 +1,6 @@
 import motor.motor_asyncio
 import time
+import datetime
 from info import USER_DB_URI, DATABASE_NAME
 
 class UserChatDB:
@@ -20,7 +21,7 @@ class UserChatDB:
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ MODIFIED: Added Defaults for ALL New Features (Auto Post, Mention, Anti-Spam, etc.)
+    # ✅ MODIFIED: Added Defaults for ALL New Features
     async def add_group(self, id, title):
         group = await self.groups.find_one({'id': int(id)})
         
@@ -61,7 +62,7 @@ class UserChatDB:
                 'last_mention_time': 0,          
                 'pending_mentions': [],          # List of IDs
 
-                # ✅ Auto Post Defaults
+                # Auto Post Defaults
                 'autopost_enabled': False,      # Default: OFF
                 'autopost_interval': 1800,      # Default: 30 min (1800s)
                 'last_autopost_time': 0,        
@@ -69,8 +70,12 @@ class UserChatDB:
                 'autopost_image': None,         
                 'autopost_buttons': {},         
                 
-                # ✅ Admin Free Access Default
+                # Admin Free Access Default
                 'admin_free_access': False,     # Default: Disabled
+                
+                # Daily Stats
+                'daily_stats_notify': True,     # Default: ON
+                'stats': {},                    # Stores daily data
 
                 # Time Defaults
                 'time_dynamic': 86400,
@@ -93,7 +98,45 @@ class UserChatDB:
     async def update_group_settings(self, id, settings):
         await self.groups.update_one({'id': int(id)}, {'$set': settings})
 
-    # --- 📰 AUTO POST HELPERS (NEW) ---
+    # --- 📊 DAILY STATS HELPERS ---
+
+    def get_today_date(self):
+        # Returns YYYY-MM-DD string
+        return datetime.datetime.now().strftime("%Y-%m-%d")
+
+    async def update_daily_stats(self, chat_id, field, count=1):
+        """
+        Updates a specific stat field for TODAY.
+        Fields: 'req', 'suc', 'spam_w', 'spam_k', 'link_gen', 'link_ver'
+        """
+        today = self.get_today_date()
+        key = f"stats.{today}.{field}"
+        
+        await self.groups.update_one(
+            {'id': int(chat_id)},
+            {'$inc': {key: count}}, # Atomic increment
+            upsert=True
+        )
+
+    async def get_daily_stats(self, chat_id, date_str):
+        group = await self.groups.find_one({'id': int(chat_id)})
+        if group and 'stats' in group:
+            return group['stats'].get(date_str, {})
+        return {}
+
+    async def get_all_groups_stats(self, date_str):
+        """Fetches stats for ALL groups for a specific date (For Admin Report)"""
+        # Find groups that have an entry for the specific date
+        cursor = self.groups.find({f"stats.{date_str}": {"$exists": True}})
+        results = []
+        async for group in cursor:
+            stats = group['stats'][date_str]
+            stats['title'] = group.get('title', 'Unknown')
+            stats['id'] = group['id']
+            results.append(stats)
+        return results
+
+    # --- 📰 AUTO POST HELPERS ---
 
     async def set_autopost_button(self, chat_id, slot, text, url):
         key = f"autopost_buttons.{slot}"

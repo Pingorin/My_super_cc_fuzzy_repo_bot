@@ -1,5 +1,6 @@
 import asyncio
 import aiohttp
+import datetime
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
@@ -88,8 +89,9 @@ async def main_settings_menu(client, query):
         [InlineKeyboardButton("📢 Auto Post", callback_data=f"autopost_ui#{chat_id}"),
          InlineKeyboardButton("📣 Auto Mention", callback_data=f"automention_ui#{chat_id}")],
         
-        # Row 6 (Admin Access)
-        [InlineKeyboardButton("👑 Admin Free Access", callback_data=f"adm_access_ui#{chat_id}")],
+        # Row 6 (Admin Access & Daily Stats)
+        [InlineKeyboardButton("👑 Admin Free Access", callback_data=f"adm_access_ui#{chat_id}"),
+         InlineKeyboardButton("📊 Daily Stats", callback_data=f"daily_stats#{chat_id}#today")],
 
         # Row 7
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
@@ -924,6 +926,162 @@ async def admin_access_toggle(client, query):
     await db.update_group_settings(chat_id, {'admin_free_access': new_status})
     
     await admin_access_ui(client, query)
+
+# ==============================================================================
+# 📊 DAILY STATS UI
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^daily_stats#"))
+async def daily_stats_ui(client, query):
+    _, chat_id, date_param = query.data.split("#")
+    chat_id = int(chat_id)
+    
+    # 1. Determine Date
+    today = datetime.datetime.now()
+    if date_param == "today":
+        target_date = today
+    else:
+        target_date = datetime.datetime.strptime(date_param, "%Y-%m-%d")
+    
+    date_str = target_date.strftime("%Y-%m-%d")
+    display_date = target_date.strftime("%B %d, %Y")
+    if date_str == today.strftime("%Y-%m-%d"): display_date = "Today"
+
+    # 2. Fetch Data
+    stats = await db.get_daily_stats(chat_id, date_str)
+    group_settings = await db.get_group_settings(chat_id)
+    notify_status = "ON" if group_settings.get('daily_stats_notify', True) else "OFF"
+    
+    # 3. Extract Values
+    req = stats.get('req', 0)
+    suc = stats.get('suc', 0)
+    failed = req - suc
+    spam_w = stats.get('spam_w', 0)
+    spam_k = stats.get('spam_k', 0)
+    refs = stats.get('referrals', 0)
+    
+    link_gen = stats.get('link_gen', 0)
+    link_ver = stats.get('link_ver', 0)
+    
+    # Ratios
+    search_ratio = round((suc / req * 100), 2) if req > 0 else 0.0
+    link_ratio = round((link_ver / link_gen * 100), 2) if link_gen > 0 else 0.0
+
+    # 4. Build Text
+    text = (
+        f"📊 **Daily Stats for {display_date}**\n"
+        f"_(Group ID: {chat_id})_\n\n"
+        f"**Mode:** NONE\n\n"
+        f"🔍 **Search Statistics:**\n"
+        f"  - Total Requests: {req}\n"
+        f"  - Successful: {suc}\n"
+        f"  - Failed: {failed}\n"
+        f"  - Success Ratio: {search_ratio}%\n\n"
+        f"🛡️ **Anti-Spam Statistics:**\n"
+        f"  - Warned Users: {spam_w}\n"
+        f"  - Kicked Users: {spam_k}\n\n"
+        f"🤝 **Today's Referrals:** {refs}\n\n"
+        f"🔗 **Shortener Statistics:**\n"
+        f"  - (All Shorteners)\n"
+        f"    - Generated Links: {link_gen}\n"
+        f"    - Verified Links: {link_ver}\n"
+        f"    - Success Ratio: {link_ratio}%"
+    )
+
+    # 5. Build Buttons (Navigation)
+    buttons = []
+    nav_row = []
+    
+    # Prev Day (Limit to 7 days back)
+    prev_date = target_date - datetime.timedelta(days=1)
+    limit_date = today - datetime.timedelta(days=7)
+    
+    if prev_date >= limit_date:
+        nav_row.append(InlineKeyboardButton("⬅️ Prev Day", callback_data=f"daily_stats#{chat_id}#{prev_date.strftime('%Y-%m-%d')}"))
+    
+    nav_row.append(InlineKeyboardButton("🔄", callback_data=f"daily_stats#{chat_id}#{date_str}"))
+
+    # Next Day (Only if not today)
+    next_date = target_date + datetime.timedelta(days=1)
+    if next_date <= today:
+        nav_row.append(InlineKeyboardButton("Next Day ➡️", callback_data=f"daily_stats#{chat_id}#{next_date.strftime('%Y-%m-%d')}"))
+
+    buttons.append(nav_row)
+    
+    # Toggle Notify
+    buttons.append([InlineKeyboardButton(f"Daily Notify: {notify_status}", callback_data=f"ds_notify#{chat_id}#{date_str}")])
+    buttons.append([InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
+
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^ds_notify#"))
+async def daily_stats_notify_toggle(client, query):
+    _, chat_id, current_view_date = query.data.split("#")
+    chat_id = int(chat_id)
+    group_settings = await db.get_group_settings(chat_id)
+    curr = group_settings.get('daily_stats_notify', True)
+    
+    await db.update_group_settings(chat_id, {'daily_stats_notify': not curr})
+    # Refresh View
+    query.data = f"daily_stats#{chat_id}#{current_view_date}"
+    await daily_stats_ui(client, query)
+
+# ==============================================================================
+# 📊 ADMIN FULL REPORT PAGINATION
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^admin_report#"))
+async def admin_full_report_nav(client, query):
+    # data format: admin_report#{date_str}#{page_index}
+    parts = query.data.split("#")
+    date_str = parts[1]
+    page = int(parts[2])
+    
+    all_groups = await db.get_all_groups_stats(date_str)
+    total_groups = len(all_groups)
+    
+    if total_groups == 0:
+        return await query.answer("No data found for this date.", show_alert=True)
+    
+    if page >= total_groups: page = 0
+    if page < 0: page = total_groups - 1
+    
+    # Get specific group data
+    data = all_groups[page]
+    
+    # Build Display
+    req = data.get('req', 0)
+    suc = data.get('suc', 0)
+    failed = req - suc
+    ratio = round((suc / req * 100), 2) if req > 0 else 0.0
+    
+    link_gen = data.get('link_gen', 0)
+    link_ver = data.get('link_ver', 0)
+    l_ratio = round((link_ver / link_gen * 100), 2) if link_gen > 0 else 0.0
+    
+    text = (
+        f"📊 **Full Daily Report for {date_str}**\n\n"
+        f"» **Group ({page + 1}/{total_groups}):** {data['title']}\n"
+        f"Mode: NONE\n\n"
+        f"🔍 **Search Statistics:**\n"
+        f"  - Total Requests: {req}\n"
+        f"  - Successful: {suc}\n"
+        f"  - Failed: {failed}\n"
+        f"  - Success Ratio: {ratio}%\n\n"
+        f"🔗 **Shortener Statistics:**\n"
+        f"  - Generated: {link_gen} | Verified: {link_ver} | Ratio: {l_ratio}%"
+    )
+    
+    buttons = []
+    nav = []
+    nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"admin_report#{date_str}#{page-1}"))
+    nav.append(InlineKeyboardButton(f"{page + 1}/{total_groups}", callback_data="ignore"))
+    nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"admin_report#{date_str}#{page+1}"))
+    buttons.append(nav)
+    
+    buttons.append([InlineKeyboardButton("❌ Close", callback_data="close_data")])
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
 # 🔥 FSUB SELECTION MENU

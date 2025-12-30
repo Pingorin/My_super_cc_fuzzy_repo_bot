@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import pytz
 from pyrogram import Client
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
 from info import ADMINS
 
@@ -18,7 +19,7 @@ async def daily_report_scheduler(client: Client):
             
         wait_seconds = (target_time - now).total_seconds()
         
-        # Wait...
+        # Wait until 12:01 AM
         await asyncio.sleep(wait_seconds)
         
         # --- 🕛 12:01 AM TRIGGERED ---
@@ -35,25 +36,48 @@ async def daily_report_scheduler(client: Client):
         # 3. Send Individual Group Reports (If Notify is ON)
         for stat in all_stats:
             chat_id = stat['id']
-            # Check if notification is enabled for this group
             settings = await db.get_group_settings(chat_id)
+            
+            # Check if notification is enabled for this group
             if settings.get('daily_stats_notify', True):
                 try:
-                    # Construct simple report for the group
+                    # --- A. Search Stats ---
                     req = stat.get('req', 0)
                     suc = stat.get('suc', 0)
                     ratio = round((suc / req * 100), 2) if req > 0 else 0.0
                     
+                    # --- B. Shortener Stats Breakdown ---
+                    shortener_data = stat.get('shorteners', {})
+                    shortener_text = ""
+                    
+                    if shortener_data:
+                        shortener_text = "\n🔗 **Shortener Statistics:**\n"
+                        for safe_domain, data in shortener_data.items():
+                            # Restore domain name (underscore to dot)
+                            real_domain = safe_domain.replace('_', '.').capitalize()
+                            
+                            gen = data.get('gen', 0)
+                            ver = data.get('ver', 0)
+                            s_ratio = round((ver / gen * 100), 2) if gen > 0 else 0.0
+                            
+                            shortener_text += (
+                                f"  - {real_domain}\n"
+                                f"    - Gen: {gen} | Ver: {ver} | Ratio: {s_ratio}%\n"
+                            )
+                    
+                    # --- C. Construct Message ---
                     msg = (
                         f"📊 **Daily Report Generated**\n\n"
                         f"📅 Date: {yesterday}\n"
                         f"Total Searches: {req}\n"
-                        f"Total Successful: {suc} ({ratio}%)"
+                        f"Total Successful: {suc} ({ratio}%)\n"
+                        f"{shortener_text}"
                     )
                     await client.send_message(chat_id, msg)
-                except: pass
+                except Exception as e:
+                    pass # Ignore if bot was kicked or perm error
             
-            # Aggregate Globals
+            # Aggregate Globals for Admin Report
             total_req += stat.get('req', 0)
             total_suc += stat.get('suc', 0)
             
@@ -66,7 +90,7 @@ async def daily_report_scheduler(client: Client):
                 f"Total Successful: {total_suc}"
             )
             
-            from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            # Button to view detailed pagination
             btn = [[InlineKeyboardButton("See Full Report", callback_data=f"admin_report#{yesterday}#0")]]
             
             for admin_id in ADMINS:
@@ -76,7 +100,3 @@ async def daily_report_scheduler(client: Client):
         
         # Wait a bit to avoid double trigger
         await asyncio.sleep(60)
-
-# Add this to Bot.py start()
-# from plugins.daily_reporter import daily_report_scheduler
-# asyncio.create_task(daily_report_scheduler(self))

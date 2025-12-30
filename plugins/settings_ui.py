@@ -87,8 +87,11 @@ async def main_settings_menu(client, query):
         # Row 5 (Auto Mention & Auto Post)
         [InlineKeyboardButton("📢 Auto Post", callback_data=f"autopost_ui#{chat_id}"),
          InlineKeyboardButton("📣 Auto Mention", callback_data=f"automention_ui#{chat_id}")],
+        
+        # Row 6 (Admin Access)
+        [InlineKeyboardButton("👑 Admin Free Access", callback_data=f"adm_access_ui#{chat_id}")],
 
-        # Row 6
+        # Row 7
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
     
@@ -849,6 +852,78 @@ async def ap_delete_button(client, query):
     _, chat_id, slot = query.data.split("#")
     await db.remove_autopost_button(int(chat_id), slot)
     await ap_buttons_menu(client, query)
+
+# ==============================================================================
+# 👑 ADMIN FREE ACCESS UI
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^adm_access_ui#"))
+async def admin_access_ui(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    
+    is_enabled = group_data.get('admin_free_access', False)
+    
+    # 1. Get Real-Time Member Count
+    try:
+        count = await client.get_chat_members_count(chat_id)
+    except Exception as e:
+        count = 0 
+        
+    REQ_COUNT = 100
+    
+    # 2. Determine Status Text
+    status_icon = "✅ Enable" if is_enabled else "❌ Disabled"
+    
+    # 3. Determine Requirement Text
+    if count >= REQ_COUNT:
+        req_text = f"✅ Group must have over {REQ_COUNT} members (Currently: {count})."
+        can_enable = True
+    else:
+        req_text = f"❌ Group must have over {REQ_COUNT} members (Currently: {count})."
+        can_enable = False
+
+    text = (
+        f"👑 **Admin Free Access Settings for:** `{chat_id}`\n\n"
+        "When enabled, all administrators in this group will be treated as premium users. "
+        "They will bypass all shorteners and payment steps to get direct file access.\n\n"
+        f"**Current Status:** {status_icon}\n\n"
+        f"**Requirement to Enable:**\n"
+        f"{req_text}"
+    )
+    
+    buttons = []
+    
+    # 4. Button Logic
+    if can_enable:
+        if is_enabled:
+            buttons.append([InlineKeyboardButton("Disable Admin Access", callback_data=f"adm_acc_toggle#{chat_id}#off")])
+        else:
+            buttons.append([InlineKeyboardButton("Enable Admin Access", callback_data=f"adm_acc_toggle#{chat_id}#on")])
+    else:
+        # If requirements not met, show Re-check
+        buttons.append([InlineKeyboardButton("🔄 Re-check Requirements", callback_data=f"adm_access_ui#{chat_id}")])
+
+    buttons.append([InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^adm_acc_toggle#"))
+async def admin_access_toggle(client, query):
+    _, chat_id, action = query.data.split("#")
+    chat_id = int(chat_id)
+    
+    # Double Check Count (Security)
+    try: count = await client.get_chat_members_count(chat_id)
+    except: count = 0
+    
+    if action == "on" and count < 100:
+        return await query.answer("❌ Requirements not met!", show_alert=True)
+        
+    new_status = True if action == "on" else False
+    await db.update_group_settings(chat_id, {'admin_free_access': new_status})
+    
+    await admin_access_ui(client, query)
 
 # ==============================================================================
 # 🔥 FSUB SELECTION MENU

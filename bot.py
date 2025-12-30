@@ -19,6 +19,8 @@ import aiohttp_jinja2
 import jinja2
 # ✅ New Import for Auto Mention
 from plugins.auto_mention import auto_mention_scheduler
+# ✅ New Import for Auto Post
+from plugins.auto_post import auto_post_scheduler
 
 # Logging Setup
 logging.config.fileConfig('logging.conf')
@@ -60,10 +62,16 @@ class Bot(Client):
         print(f"{me.first_name} is started now ❤️")
 
         # ==================================================================
-        # 📣 START AUTO MENTION SCHEDULER (Background Task)
+        # 📣 START BACKGROUND SCHEDULERS
         # ==================================================================
+        
+        # 1. Auto Mention Task
         asyncio.create_task(auto_mention_scheduler(self))
         print("Auto Mention Scheduler Started ⏳")
+
+        # 2. Auto Post Task (Ads)
+        asyncio.create_task(auto_post_scheduler(self))
+        print("Auto Post Scheduler Started 📰")
         
         # ==================================================================
         # 🌐 WEB SERVER & JINJA2 SETUP (For Site Mode)

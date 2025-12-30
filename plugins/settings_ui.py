@@ -84,7 +84,10 @@ async def main_settings_menu(client, query):
         [InlineKeyboardButton("👋 Welcome Settings", callback_data=f"welcome_ui#{chat_id}"),
          InlineKeyboardButton("🛡️ Anti-Spam", callback_data=f"antispam_ui#{chat_id}")],
         
-        # Row 5
+        # Row 5 (Auto Mention)
+        [InlineKeyboardButton("📣 Auto Mention", callback_data=f"automention_ui#{chat_id}")],
+
+        # Row 6
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
     
@@ -588,6 +591,61 @@ async def as_time(client, query):
     _, chat_id, val = query.data.split("#")
     await db.update_group_settings(int(chat_id), {'mute_duration': int(val)})
     await antispam_settings_ui(client, query)
+
+# ==============================================================================
+# 📣 AUTO MENTION SETTINGS UI
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^automention_ui#"))
+async def auto_mention_settings_ui(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    
+    is_enabled = group_data.get('automention_enabled', True)
+    interval = group_data.get('mention_interval', 300)
+    
+    status_icon = "✅ Enabled" if is_enabled else "❌ Disabled"
+    btn_text = "Disable" if is_enabled else "Enable"
+    toggle_val = "off" if is_enabled else "on"
+    
+    # Time Check
+    def t_chk(val): return "✅" if interval == val and is_enabled else ""
+
+    text = (
+        f"📣 **Auto Mention Settings for:** `{chat_id}`\n\n"
+        "This feature will periodically mention 5 new members in the group who haven't been mentioned before, encouraging them to search for content.\n\n"
+        f"**Current Status:** {status_icon}\n"
+        f"**Interval:** Every {int(interval/60)} minutes.\n\n"
+        f"[Auto Mention Demo](https://graph.org/file/4d61886e61dfa37a25945.jpg)"
+    )
+    
+    buttons = [
+        # Toggle
+        [InlineKeyboardButton(btn_text, callback_data=f"am_toggle#{chat_id}#{toggle_val}")],
+        
+        # Time Options
+        [InlineKeyboardButton(f"5min{t_chk(300)}", callback_data=f"am_time#{chat_id}#300"),
+         InlineKeyboardButton(f"10min{t_chk(600)}", callback_data=f"am_time#{chat_id}#600"),
+         InlineKeyboardButton(f"30min{t_chk(1800)}", callback_data=f"am_time#{chat_id}#1800"),
+         InlineKeyboardButton(f"60min{t_chk(3600)}", callback_data=f"am_time#{chat_id}#3600")],
+         
+        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
+    ]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+
+@Client.on_callback_query(filters.regex(r"^am_toggle#"))
+async def am_toggle_handler(client, query):
+    _, chat_id, action = query.data.split("#")
+    new_status = True if action == "on" else False
+    await db.update_group_settings(int(chat_id), {'automention_enabled': new_status})
+    await auto_mention_settings_ui(client, query)
+
+@Client.on_callback_query(filters.regex(r"^am_time#"))
+async def am_time_handler(client, query):
+    _, chat_id, val = query.data.split("#")
+    await db.update_group_settings(int(chat_id), {'mention_interval': int(val)})
+    await auto_mention_settings_ui(client, query)
 
 # ==============================================================================
 # 🔥 FSUB SELECTION MENU

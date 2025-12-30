@@ -20,7 +20,7 @@ class UserChatDB:
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ MODIFIED: Added Defaults for ALL New Features
+    # ✅ MODIFIED: Added Defaults for ALL New Features (Auto Post, Mention, Anti-Spam, etc.)
     async def add_group(self, id, title):
         group = await self.groups.find_one({'id': int(id)})
         
@@ -55,11 +55,19 @@ class UserChatDB:
                 'antispam_action': 'mute',      # 'mute' (Warn) or 'kick'
                 'mute_duration': 600,           # Default: 10 Minutes (600s)
 
-                # ✅ Auto Mention Defaults
+                # Auto Mention Defaults
                 'automention_enabled': True,     # Default: ON
                 'mention_interval': 300,         # Default: 5 min
                 'last_mention_time': 0,          
                 'pending_mentions': [],          # List of IDs
+
+                # ✅ Auto Post Defaults
+                'autopost_enabled': False,      # Default: OFF
+                'autopost_interval': 1800,      # Default: 30 min (1800s)
+                'last_autopost_time': 0,        
+                'autopost_text': None,          
+                'autopost_image': None,         
+                'autopost_buttons': {},         
 
                 # Time Defaults
                 'time_dynamic': 86400,
@@ -82,7 +90,33 @@ class UserChatDB:
     async def update_group_settings(self, id, settings):
         await self.groups.update_one({'id': int(id)}, {'$set': settings})
 
-    # --- 📣 AUTO MENTION HELPERS (NEW) ---
+    # --- 📰 AUTO POST HELPERS (NEW) ---
+
+    async def set_autopost_button(self, chat_id, slot, text, url):
+        key = f"autopost_buttons.{slot}"
+        await self.groups.update_one(
+            {'id': int(chat_id)},
+            {'$set': {key: {'text': text, 'url': url}}}
+        )
+
+    async def remove_autopost_button(self, chat_id, slot):
+        key = f"autopost_buttons.{slot}"
+        await self.groups.update_one(
+            {'id': int(chat_id)},
+            {'$unset': {key: ""}}
+        )
+
+    async def reset_autopost_content(self, chat_id):
+        await self.groups.update_one(
+            {'id': int(chat_id)},
+            {'$set': {
+                'autopost_text': None, 
+                'autopost_image': None, 
+                'autopost_buttons': {}
+            }}
+        )
+
+    # --- 📣 AUTO MENTION HELPERS ---
 
     async def add_pending_mention(self, chat_id, user_id):
         """Adds a user to the pending mention list if not already present."""
@@ -97,7 +131,7 @@ class UserChatDB:
         return group.get('pending_mentions', []) if group else []
 
     async def remove_pending_mentions(self, chat_id, user_ids):
-        """Removes mentioned users from the list."""
+        """Removes mentioned users from the list and updates timestamp."""
         await self.groups.update_one(
             {'id': int(chat_id)},
             {'$pull': {'pending_mentions': {'$in': user_ids}}}

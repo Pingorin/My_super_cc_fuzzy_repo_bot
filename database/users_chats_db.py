@@ -11,14 +11,16 @@ class UserChatDB:
         self.groups = self.db.groups
         self.banned = self.db.banned 
         # ✅ Yeh collection pending Join Requests store karega
-        self.fsub_pending = self.db.fsub_pending 
+        self.fsub_pending = self.db.fsub_pending
+        # ✅ Yeh collection warnings store karega
+        self.warnings = self.db.warnings 
 
     async def add_user(self, id):
         user = await self.users.find_one({'id': int(id)})
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ MODIFIED: Added Welcome Settings Defaults
+    # ✅ MODIFIED: Added Welcome & Anti-Spam Settings Defaults
     async def add_group(self, id, title):
         group = await self.groups.find_one({'id': int(id)})
         
@@ -33,22 +35,27 @@ class UserChatDB:
                 'is_shortlink_active': True,
                 
                 # Search Settings
-                'result_mode': 'hybrid',        # Default: hybrid (Smart Mode)
-                'result_page_limit': 10,        # Renamed from result_per_page for consistency
+                'result_mode': 'hybrid',        # Default: hybrid
+                'result_page_limit': 10,        
                 
-                # ✅ Auto-Delete & Reaction Defaults
-                'auto_reaction': False,         # Default Disabled
-                'auto_delete_time': 300,        # Default 5 mins (300s)
-                'auto_delete_user_msg': False,  # Default Disabled
-                'delete_thanks_msg': True,      # Default ON
+                # Auto-Delete & Reaction Defaults
+                'auto_reaction': False,         
+                'auto_delete_time': 300,        
+                'auto_delete_user_msg': False,  
+                'delete_thanks_msg': True,      
 
-                # ✅ NEW: Welcome Settings Defaults
-                'welcome_enabled': True,       # Default: ON
-                'welcome_mode': 'default',     # 'default' or 'custom'
-                'custom_welcome_text': None,   # Stores custom text
-                'custom_welcome_photo': None,  # Stores file_id of photo
+                # Welcome Settings Defaults
+                'welcome_enabled': True,       
+                'welcome_mode': 'default',     
+                'custom_welcome_text': None,   
+                'custom_welcome_photo': None,  
 
-                # Time Defaults (Verification/Link)
+                # ✅ NEW: Anti-Spam Defaults
+                'antispam_enabled': False,      # Default: OFF
+                'antispam_action': 'mute',      # 'mute' (Warn) or 'kick'
+                'mute_duration': 600,           # Default: 10 Minutes (600s)
+
+                # Time Defaults
                 'time_dynamic': 86400,
                 'time_smart': 86400,
                 'time_together': 604800,       
@@ -68,6 +75,26 @@ class UserChatDB:
 
     async def update_group_settings(self, id, settings):
         await self.groups.update_one({'id': int(id)}, {'$set': settings})
+
+    # --- 🛡️ WARNING MANAGEMENT (ANTI-SPAM) ---
+
+    async def get_spam_warnings(self, chat_id, user_id):
+        # Retrieve warning count for a specific user in a specific group
+        doc = await self.warnings.find_one({"chat_id": int(chat_id), "user_id": int(user_id)})
+        return doc['count'] if doc else 0
+
+    async def add_spam_warning(self, chat_id, user_id):
+        # Increment warning count by 1
+        await self.warnings.update_one(
+            {"chat_id": int(chat_id), "user_id": int(user_id)},
+            {"$inc": {"count": 1}},
+            upsert=True
+        )
+        return await self.get_spam_warnings(chat_id, user_id)
+
+    async def reset_spam_warnings(self, chat_id, user_id):
+        # Reset warnings (e.g., after a ban or manual reset)
+        await self.warnings.delete_one({"chat_id": int(chat_id), "user_id": int(user_id)})
 
     # --- SHORTENER MANAGEMENT ---
     async def add_shortener(self, chat_id, slot, site, api):

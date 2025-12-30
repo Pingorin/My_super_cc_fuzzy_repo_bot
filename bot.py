@@ -17,6 +17,8 @@ import time
 # ✅ New Imports for Site Mode
 import aiohttp_jinja2
 import jinja2
+# ✅ New Import for Auto Mention
+from plugins.auto_mention import auto_mention_scheduler
 
 # Logging Setup
 logging.config.fileConfig('logging.conf')
@@ -56,6 +58,12 @@ class Bot(Client):
         self.username = '@' + me.username
         
         print(f"{me.first_name} is started now ❤️")
+
+        # ==================================================================
+        # 📣 START AUTO MENTION SCHEDULER (Background Task)
+        # ==================================================================
+        asyncio.create_task(auto_mention_scheduler(self))
+        print("Auto Mention Scheduler Started ⏳")
         
         # ==================================================================
         # 🌐 WEB SERVER & JINJA2 SETUP (For Site Mode)

@@ -68,6 +68,9 @@ class UserChatDB:
                 'autopost_text': None,          
                 'autopost_image': None,         
                 'autopost_buttons': {},         
+                
+                # ✅ Admin Free Access Default
+                'admin_free_access': False,     # Default: Disabled
 
                 # Time Defaults
                 'time_dynamic': 86400,

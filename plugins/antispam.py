@@ -79,7 +79,7 @@ async def robust_antispam(client, message):
     # ==================================================================
     
     if is_spam:
-        # 1. Instant Delete (Hamesha Delete Karega)
+        # 1. Instant Delete (Always)
         try: await message.delete()
         except: pass 
 
@@ -91,6 +91,10 @@ async def robust_antispam(client, message):
         if is_nsfw:
             try:
                 await client.ban_chat_member(chat_id, user_id)
+                
+                # 📊 STATS: Count as Kicked/Banned
+                await db.update_daily_stats(chat_id, 'spam_k') 
+
                 msg = await message.reply_text(f"🚫 **Banned:** {first_name}\nReason: {reason}")
                 asyncio.create_task(delete_after_delay(msg, 120))
             except: pass
@@ -99,11 +103,11 @@ async def robust_antispam(client, message):
         # 🟨 CHECK SETTINGS
         action = settings.get('antispam_action', 'mute') # default 'mute'
         
-        # Ensure Duration is Integer (Fixes potential bugs)
+        # Ensure Duration is Integer
         try:
             mute_seconds = int(settings.get('mute_duration', 600))
         except:
-            mute_seconds = 600 # Fallback to 10 mins if DB error
+            mute_seconds = 600 
             
         mute_minutes = int(mute_seconds / 60)
 
@@ -113,20 +117,21 @@ async def robust_antispam(client, message):
                 await client.ban_chat_member(chat_id, user_id)
                 await client.unban_chat_member(chat_id, user_id) # Unban immediately = Kick
                 
+                # 📊 STATS: Count as Kicked
+                await db.update_daily_stats(chat_id, 'spam_k')
+
                 alert_text = f"👢 {first_name}, you have been Kicked. Reason: {reason}"
                 msg = await message.reply_text(alert_text)
                 asyncio.create_task(delete_after_delay(msg, 120))
             except Exception as e:
-                # Agar Kick fail hua to error print karega
                 print(f"Kick Error: {e}")
 
         # --- OPTION B: ACTION = MUTE (WARN) ---
         else:
             try:
-                # ✅ FIX: Time Calculation using timedelta
+                # Calculate precise time
                 until_time = datetime.now() + timedelta(seconds=mute_seconds)
                 
-                # Permissions Set: Sirf Msg bhejna band karega, baaki sab allowed
                 permissions = ChatPermissions(can_send_messages=False)
                 
                 # Apply Restriction
@@ -137,6 +142,9 @@ async def robust_antispam(client, message):
                     until_date=until_time
                 )
                 
+                # 📊 STATS: Count as Warned
+                await db.update_daily_stats(chat_id, 'spam_w')
+
                 # Send Alert Message
                 alert_text = (
                     f"🔇 {first_name}, you have been muted for {mute_minutes} minutes.\n"
@@ -146,8 +154,4 @@ async def robust_antispam(client, message):
                 asyncio.create_task(delete_after_delay(msg, 120))
                 
             except Exception as e:
-                # 🛑 DEBUG: Agar Bot Admin nahi hai to ye error Group me bhej dega (Temporary)
-                # Isse aapko pata chal jayega kya galti hai.
-                # error_msg = await message.reply_text(f"❌ Error Muting User: `{e}`\nCheck Bot Permissions!")
-                # asyncio.create_task(delete_after_delay(error_msg, 20))
                 print(f"Mute Error: {e}")

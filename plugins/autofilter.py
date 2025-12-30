@@ -53,6 +53,26 @@ async def auto_delete_task(bot_message, user_message, delay, show_thanks, query=
 async def auto_filter(client, message):
     
     raw_query = message.text
+
+    # ==================================================================
+    # 🛑 ANTI-SPAM IGNORE LAYER (Search Block)
+    # ==================================================================
+    # This prevents the bot from replying to Links, Forwards, or Spam
+    
+    # 1. Block Forwards & Via Bot
+    if message.forward_from or message.forward_from_chat or message.via_bot:
+        return
+
+    # 2. Block Links & Mentions (@username)
+    if re.search(r"(https?://|www\.|t\.me/|@\w+)", raw_query):
+        return
+
+    # 3. Block NSFW Keywords (Extra Safety)
+    NSFW_KEYWORDS = ["porn", "sex", "xxx", "nude", "horny", "gore", "adult", "dick", "pussy"]
+    if any(word in raw_query.lower() for word in NSFW_KEYWORDS):
+        return
+    # ==================================================================
+
     if len(raw_query) < 2: return
 
     # --- 🧹 CLEANING LOGIC ---

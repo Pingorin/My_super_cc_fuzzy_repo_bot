@@ -84,8 +84,9 @@ async def main_settings_menu(client, query):
         [InlineKeyboardButton("👋 Welcome Settings", callback_data=f"welcome_ui#{chat_id}"),
          InlineKeyboardButton("🛡️ Anti-Spam", callback_data=f"antispam_ui#{chat_id}")],
         
-        # Row 5 (Auto Mention)
-        [InlineKeyboardButton("📣 Auto Mention", callback_data=f"automention_ui#{chat_id}")],
+        # Row 5 (Auto Mention & Auto Post)
+        [InlineKeyboardButton("📢 Auto Post", callback_data=f"autopost_ui#{chat_id}"),
+         InlineKeyboardButton("📣 Auto Mention", callback_data=f"automention_ui#{chat_id}")],
 
         # Row 6
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
@@ -646,6 +647,208 @@ async def am_time_handler(client, query):
     _, chat_id, val = query.data.split("#")
     await db.update_group_settings(int(chat_id), {'mention_interval': int(val)})
     await auto_mention_settings_ui(client, query)
+
+# ==============================================================================
+# 📰 AUTO POST SETTINGS UI
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^autopost_ui#"))
+async def auto_post_settings_ui(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    
+    # Fetch Data
+    is_enabled = group_data.get('autopost_enabled', False)
+    interval = group_data.get('autopost_interval', 1800)
+    ad_text = group_data.get('autopost_text')
+    ad_image = group_data.get('autopost_image')
+    buttons_data = group_data.get('autopost_buttons', {})
+    
+    # Display Logic
+    status_icon = "✅ Enabled" if is_enabled else "❌ Disabled"
+    btn_text = "Disable" if is_enabled else "Enable"
+    toggle_val = "off" if is_enabled else "on"
+    
+    txt_status = "Set" if ad_text else "Not Set"
+    img_status = "Set" if ad_image else "Not Set"
+    btn_count = len(buttons_data)
+    
+    def t_chk(val): return "✅" if interval == val else ""
+
+    text = (
+        f"📰 **Auto Post Settings for:** `{chat_id}`\n\n"
+        "This feature will periodically post a custom advertisement in your group.\n\n"
+        f"**Current Status:** {status_icon}\n"
+        f"**Interval:** Every {int(interval/60)} minutes.\n"
+        f"**Ad Text:** {txt_status}\n"
+        f"**Ad Image:** {img_status}\n"
+        f"**Buttons Configured:** {btn_count}/3\n\n"
+        f"[Auto Ads Demo](https://graph.org/file/4d61886e61dfa37a25945.jpg)"
+    )
+    
+    buttons = [
+        # Toggle
+        [InlineKeyboardButton(btn_text, callback_data=f"ap_toggle#{chat_id}#{toggle_val}")],
+        
+        # Content Management
+        [InlineKeyboardButton("Set Text", callback_data=f"ap_set_txt#{chat_id}"),
+         InlineKeyboardButton("Set Image", callback_data=f"ap_set_img#{chat_id}")],
+         
+        [InlineKeyboardButton("Manage Buttons", callback_data=f"ap_btn_menu#{chat_id}"),
+         InlineKeyboardButton("Reset Ad Content", callback_data=f"ap_reset#{chat_id}")],
+        
+        # Time Intervals
+        [InlineKeyboardButton(f"5min{t_chk(300)}", callback_data=f"ap_time#{chat_id}#300"),
+         InlineKeyboardButton(f"10min{t_chk(600)}", callback_data=f"ap_time#{chat_id}#600"),
+         InlineKeyboardButton(f"30min{t_chk(1800)}", callback_data=f"ap_time#{chat_id}#1800"),
+         InlineKeyboardButton(f"60min{t_chk(3600)}", callback_data=f"ap_time#{chat_id}#3600")],
+         
+        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
+    ]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+
+# --- TOGGLE & TIME HANDLERS ---
+@Client.on_callback_query(filters.regex(r"^ap_toggle#"))
+async def ap_toggle_handler(client, query):
+    _, chat_id, action = query.data.split("#")
+    chat_id = int(chat_id)
+    # Check if content exists before enabling
+    if action == "on":
+        g_data = await db.get_group_settings(chat_id)
+        if not g_data.get('autopost_text') and not g_data.get('autopost_image'):
+            return await query.answer("❌ Set Text or Image first!", show_alert=True)
+            
+    await db.update_group_settings(chat_id, {'autopost_enabled': (action == "on")})
+    await auto_post_settings_ui(client, query)
+
+@Client.on_callback_query(filters.regex(r"^ap_time#"))
+async def ap_time_handler(client, query):
+    _, chat_id, val = query.data.split("#")
+    await db.update_group_settings(int(chat_id), {'autopost_interval': int(val)})
+    await auto_post_settings_ui(client, query)
+
+@Client.on_callback_query(filters.regex(r"^ap_reset#"))
+async def ap_reset_handler(client, query):
+    chat_id = int(query.data.split("#")[1])
+    await db.reset_autopost_content(chat_id)
+    await db.update_group_settings(chat_id, {'autopost_enabled': False}) # Disable on reset
+    await query.answer("🔄 Ad Content Reset!", show_alert=True)
+    await auto_post_settings_ui(client, query)
+
+
+# ==============================================================================
+# 📝 CONTENT SETTERS (TEXT & IMAGE)
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^ap_set_txt#"))
+async def ap_set_text(client, query):
+    chat_id = int(query.data.split("#")[1])
+    cancel_btn = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"autopost_ui#{chat_id}")]]
+    
+    await query.message.edit_text("📝 **Please send the ad text.**", reply_markup=InlineKeyboardMarkup(cancel_btn))
+    try:
+        msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if msg.text:
+            await db.update_group_settings(chat_id, {'autopost_text': msg.text})
+            await msg.reply("✅ **Ad text has been saved.**")
+            await asyncio.sleep(1)
+            await auto_post_settings_ui(client, query)
+        else:
+            await msg.reply("❌ Text only.")
+            await auto_post_settings_ui(client, query)
+    except: pass
+
+@Client.on_callback_query(filters.regex(r"^ap_set_img#"))
+async def ap_set_image(client, query):
+    chat_id = int(query.data.split("#")[1])
+    cancel_btn = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"autopost_ui#{chat_id}")]]
+    
+    await query.message.edit_text("🖼️ **Please send the ad image.**", reply_markup=InlineKeyboardMarkup(cancel_btn))
+    try:
+        msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if msg.photo:
+            await db.update_group_settings(chat_id, {'autopost_image': msg.photo.file_id})
+            await msg.reply("✅ **Ad image has been saved.**")
+            await asyncio.sleep(1)
+            await auto_post_settings_ui(client, query)
+        else:
+            await msg.reply("❌ Photo only.")
+            await auto_post_settings_ui(client, query)
+    except: pass
+
+
+# ==============================================================================
+# 🎛️ MANAGE BUTTONS UI
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^ap_btn_menu#"))
+async def ap_buttons_menu(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    buttons_data = group_data.get('autopost_buttons', {})
+    
+    text = (
+        f"🎛️ **Manage Ad Buttons for:** `{chat_id}`\n\n"
+        "Configure up to 3 URL buttons for your ad."
+    )
+    
+    kb = []
+    
+    for i in range(1, 4):
+        slot = str(i)
+        if slot in buttons_data:
+            btn_name = buttons_data[slot]['text']
+            kb.append([
+                InlineKeyboardButton(f"Btn {slot}: {btn_name}", callback_data="ignore"),
+                InlineKeyboardButton("🗑️ Delete", callback_data=f"ap_del_btn#{chat_id}#{slot}")
+            ])
+        else:
+            kb.append([InlineKeyboardButton(f"➕ Set Button {slot}", callback_data=f"ap_set_btn#{chat_id}#{slot}")])
+            
+    kb.append([InlineKeyboardButton("🔙 Back to Ad Settings", callback_data=f"autopost_ui#{chat_id}")])
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(kb))
+
+@Client.on_callback_query(filters.regex(r"^ap_set_btn#"))
+async def ap_set_button_step1(client, query):
+    _, chat_id, slot = query.data.split("#")
+    chat_id = int(chat_id)
+    cancel_btn = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"ap_btn_menu#{chat_id}")]]
+    
+    # Step 1: Name
+    await query.message.edit_text(f"📝 **Send button name for Slot {slot}**", reply_markup=InlineKeyboardMarkup(cancel_btn))
+    
+    try:
+        # Listen for Name
+        name_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if not name_msg.text: return await query.message.edit_text("❌ Text only.", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        btn_name = name_msg.text
+        
+        # Step 2: URL
+        await query.message.edit_text(
+            f"✅ Button text set to **{btn_name}**.\n\nNow, please send the **Full URL** for this button.",
+            reply_markup=InlineKeyboardMarkup(cancel_btn)
+        )
+        
+        url_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if not url_msg.text: return await query.message.edit_text("❌ Text only.", reply_markup=InlineKeyboardMarkup(cancel_btn))
+        btn_url = url_msg.text
+        
+        # Save
+        await db.set_autopost_button(chat_id, slot, btn_name, btn_url)
+        await query.message.edit_text(f"✅ **Button for Slot {slot} has been saved.**")
+        await asyncio.sleep(1)
+        await ap_buttons_menu(client, query)
+        
+    except Exception as e:
+        print(e)
+
+@Client.on_callback_query(filters.regex(r"^ap_del_btn#"))
+async def ap_delete_button(client, query):
+    _, chat_id, slot = query.data.split("#")
+    await db.remove_autopost_button(int(chat_id), slot)
+    await ap_buttons_menu(client, query)
 
 # ==============================================================================
 # 🔥 FSUB SELECTION MENU

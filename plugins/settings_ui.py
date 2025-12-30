@@ -80,8 +80,9 @@ async def main_settings_menu(client, query):
         [InlineKeyboardButton("🗑️ Auto-Delete", callback_data=f"autodel_menu#{chat_id}"),
          InlineKeyboardButton("👍 Auto Reaction", callback_data=f"autoreact_ui#{chat_id}")],
 
-        # Row 4 (Welcome Settings)
-        [InlineKeyboardButton("👋 Welcome Settings", callback_data=f"welcome_ui#{chat_id}")],
+        # Row 4 (Welcome & Anti-Spam)
+        [InlineKeyboardButton("👋 Welcome Settings", callback_data=f"welcome_ui#{chat_id}"),
+         InlineKeyboardButton("🛡️ Anti-Spam", callback_data=f"antispam_ui#{chat_id}")],
         
         # Row 5
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
@@ -337,7 +338,7 @@ async def set_user_delete_handler(client, query):
     await user_auto_delete_ui(client, query)
 
 # ==============================================================================
-# 👋 WELCOME SETTINGS MENU (NEW)
+# 👋 WELCOME SETTINGS MENU
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^welcome_ui#"))
@@ -516,6 +517,77 @@ async def reset_welcome(client, query):
     
     await query.answer("🔄 Custom Welcome Reset!", show_alert=True)
     await custom_welcome_config(client, query)
+
+# ==============================================================================
+# 🛡️ ANTI-SPAM SETTINGS UI
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^antispam_ui#"))
+async def antispam_settings_ui(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    
+    is_enabled = group_data.get('antispam_enabled', False)
+    action = group_data.get('antispam_action', 'mute') # 'mute' = Warn/Mute, 'kick' = Kick
+    mute_dur = group_data.get('mute_duration', 600)
+    
+    # Text Formatters
+    status_icon = "✅ON" if is_enabled else "❌OFF"
+    
+    def act_chk(val): return "✅" if action == val else ""
+    def time_chk(val): return "✅" if mute_dur == val and action == 'mute' else ""
+
+    text = (
+        f"🛡️ **Anti-Spam Settings for:** `{chat_id}`\n\n"
+        "Automatically delete messages containing links or usernames from non-admin users."
+    )
+    
+    # Conditional Text for Mute Duration
+    if action == 'mute':
+        minutes = int(mute_dur / 60)
+        text += f"\n\n**Mute Duration:** {minutes} minutes"
+
+    buttons = [
+        # Toggle
+        [InlineKeyboardButton(f"Anti-Spam: {status_icon}", callback_data=f"as_toggle#{chat_id}")],
+        
+        # Action Mode
+        [InlineKeyboardButton(f"Action: Warn{act_chk('mute')}", callback_data=f"as_action#{chat_id}#mute"),
+         InlineKeyboardButton(f"Action: Kick{act_chk('kick')}", callback_data=f"as_action#{chat_id}#kick")]
+    ]
+    
+    # Show Time Options only if "Warn" (Mute) is selected
+    if action == 'mute':
+        buttons.append([
+            InlineKeyboardButton(f"10m{time_chk(600)}", callback_data=f"as_time#{chat_id}#600"),
+            InlineKeyboardButton(f"20m{time_chk(1200)}", callback_data=f"as_time#{chat_id}#1200"),
+            InlineKeyboardButton(f"30m{time_chk(1800)}", callback_data=f"as_time#{chat_id}#1800"),
+            InlineKeyboardButton(f"60m{time_chk(3600)}", callback_data=f"as_time#{chat_id}#3600")
+        ])
+        
+    buttons.append([InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+# Handlers
+@Client.on_callback_query(filters.regex(r"^as_toggle#"))
+async def as_toggle(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    await db.update_group_settings(chat_id, {'antispam_enabled': not group_data.get('antispam_enabled', False)})
+    await antispam_settings_ui(client, query)
+
+@Client.on_callback_query(filters.regex(r"^as_action#"))
+async def as_action(client, query):
+    _, chat_id, val = query.data.split("#")
+    await db.update_group_settings(int(chat_id), {'antispam_action': val})
+    await antispam_settings_ui(client, query)
+
+@Client.on_callback_query(filters.regex(r"^as_time#"))
+async def as_time(client, query):
+    _, chat_id, val = query.data.split("#")
+    await db.update_group_settings(int(chat_id), {'mute_duration': int(val)})
+    await antispam_settings_ui(client, query)
 
 # ==============================================================================
 # 🔥 FSUB SELECTION MENU

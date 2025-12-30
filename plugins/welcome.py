@@ -16,7 +16,17 @@ async def welcome_handler(client, message):
             await db.add_group(chat_id, message.chat.title)
             return
 
-        # Check if Welcome is Enabled
+        # ==================================================================
+        # ✅ AUTO MENTION HOOK (Add Users to Pending List)
+        # ==================================================================
+        # We do this BEFORE checking if welcome message is enabled, 
+        # because Auto Mention is a separate feature.
+        for user in message.new_chat_members:
+            if not user.is_bot:
+                await db.add_pending_mention(chat_id, user.id)
+        # ==================================================================
+
+        # Check if Welcome Message is Enabled
         if not group_settings.get('welcome_enabled', True):
             return
 
@@ -28,7 +38,11 @@ async def welcome_handler(client, message):
 
             # --- DEFAULT MODE ---
             if mode == 'default':
-                text = f"👋 **Hello {user.mention}!**\n\nWelcome to **{message.chat.title}**.\nEnjoy your stay here! ✨"
+                # ✅ Updated Text as per your request
+                text = (
+                    f"Hello {user.mention}, thanks for joining!\n"
+                    f"A WARM WELCOME TO YOU!"
+                )
                 await message.reply_photo(photo=DEFAULT_WELCOME_IMG, caption=text)
 
             # --- CUSTOM MODE ---

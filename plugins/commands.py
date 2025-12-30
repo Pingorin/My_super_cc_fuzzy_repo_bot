@@ -83,7 +83,7 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
     if not IS_VERIFY: return True 
 
     # ==================================================================
-    # 👑 ADMIN FREE ACCESS CHECK (NEW)
+    # 👑 ADMIN FREE ACCESS CHECK
     # ==================================================================
     try:
         group_settings = await db.get_group_settings(chat_id)
@@ -193,6 +193,11 @@ async def generate_single_link(client, chat_id, user_id, link_id, level, slot_da
     if not short_url:
         await send_shortener_alert(client, chat_id, site)
         return None
+        
+    # 📊 STATS: Link Generated
+    try: await db.update_daily_stats(chat_id, 'link_gen')
+    except: pass
+    
     return short_url
 
 async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, level, slot_data):
@@ -204,6 +209,10 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
     await wait_msg.delete()
     
     if short_url:
+        # 📊 STATS: Link Generated
+        try: await db.update_daily_stats(chat_id, 'link_gen')
+        except: pass
+        
         btn = [[InlineKeyboardButton(f"🚀 Verify Level {level}", url=short_url)]]
         text = f"⚠️ **Verification Required ({level}/?)**\n\n**Shortener:** {site}\n_Click the button below to verify and continue._"
         if level == 3: text = f"⚠️ **Final Step (3/3)**\n\n**Shortener:** {site}\n_Almost there! Verify this to unlock files._"
@@ -317,6 +326,10 @@ async def start_handler(client, message):
             link_id = int(data[4]) if len(data) > 4 else 0
             
             await db.update_verify_status(message.from_user.id, verify_chatid, level)
+            
+            # 📊 STATS: Link Verified
+            try: await db.update_daily_stats(int(verify_chatid), 'link_ver')
+            except: pass
             
             if await check_verification(client, message.from_user.id, verify_chatid, link_id, message):
                 btn = [[InlineKeyboardButton("📂 Get Your File Now", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{verify_chatid}")]]

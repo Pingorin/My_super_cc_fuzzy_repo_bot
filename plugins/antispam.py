@@ -1,10 +1,11 @@
 import re
 import asyncio
+from datetime import datetime, timedelta
 from pyrogram import Client, filters, enums
 from pyrogram.types import ChatPermissions
 from database.users_chats_db import db
 
-# 🔞 Keywords for Instant Ban (NSFW remains strict for safety)
+# 🔞 Keywords for Instant Ban
 NSFW_KEYWORDS = ["porn", "sex", "xxx", "nude", "horny", "gore", "adult", "dick", "pussy"]
 
 # --- HELPER: DELETE BOT MESSAGE AFTER 2 MIN ---
@@ -46,7 +47,7 @@ async def robust_antispam(client, message):
         is_nsfw = True
         reason = "NSFW Content 🔞"
 
-    # B. Entities Check (Links, Text Links, Mentions)
+    # B. Entities Check
     if not is_spam and message.entities:
         for entity in message.entities:
             if entity.type in [enums.MessageEntityType.URL, enums.MessageEntityType.TEXT_LINK]:
@@ -58,29 +59,27 @@ async def robust_antispam(client, message):
                 reason = "🏷️ Mention without authorization"
                 break
     
-    # C. Raw Link Regex (Fallback)
+    # C. Raw Link Regex
     if not is_spam:
         url_pattern = r"(https?://[^\s]+)|(www\.[^\s]+)|([^\s]+\.com)"
         if re.search(url_pattern, text):
             is_spam = True
             reason = "🔗 Link without authorization"
 
-    # D. Forward Check
+    # D. Forward/Inline Check
     if not is_spam and (message.forward_from or message.forward_from_chat):
         is_spam = True
         reason = "⏩ Forwarded Message"
-
-    # E. Inline Button Check
     if not is_spam and message.reply_markup:
         is_spam = True
         reason = "⌨️ Inline Button"
 
     # ==================================================================
-    # 🔨 PUNISHMENT LOGIC (DIRECT ACTION - NO WARNINGS)
+    # 🔨 PUNISHMENT LOGIC
     # ==================================================================
     
     if is_spam:
-        # 1. Instant Delete (Always)
+        # 1. Instant Delete (Hamesha Delete Karega)
         try: await message.delete()
         except: pass 
 
@@ -88,7 +87,7 @@ async def robust_antispam(client, message):
         chat_id = message.chat.id
         first_name = message.from_user.first_name
 
-        # 🟥 EXCEPTION: NSFW IS ALWAYS BAN (Safety First)
+        # 🟥 EXCEPTION: NSFW IS ALWAYS BAN
         if is_nsfw:
             try:
                 await client.ban_chat_member(chat_id, user_id)
@@ -97,39 +96,58 @@ async def robust_antispam(client, message):
             except: pass
             return
 
-        # 🟨 GENERAL SPAM: CHECK SETTINGS
-        action = settings.get('antispam_action', 'mute') # 'mute' or 'kick'
-        mute_seconds = settings.get('mute_duration', 600) # Default 10 mins
+        # 🟨 CHECK SETTINGS
+        action = settings.get('antispam_action', 'mute') # default 'mute'
+        
+        # Ensure Duration is Integer (Fixes potential bugs)
+        try:
+            mute_seconds = int(settings.get('mute_duration', 600))
+        except:
+            mute_seconds = 600 # Fallback to 10 mins if DB error
+            
         mute_minutes = int(mute_seconds / 60)
 
         # --- OPTION A: ACTION = KICK ---
         if action == 'kick':
             try:
-                # Kick = Ban then Unban
                 await client.ban_chat_member(chat_id, user_id)
-                await client.unban_chat_member(chat_id, user_id)
+                await client.unban_chat_member(chat_id, user_id) # Unban immediately = Kick
                 
                 alert_text = f"👢 {first_name}, you have been Kicked. Reason: {reason}"
                 msg = await message.reply_text(alert_text)
-                
                 asyncio.create_task(delete_after_delay(msg, 120))
             except Exception as e:
+                # Agar Kick fail hua to error print karega
                 print(f"Kick Error: {e}")
 
         # --- OPTION B: ACTION = MUTE (WARN) ---
         else:
             try:
-                # Mute for Specific Time (e.g., 10 mins)
-                permissions = ChatPermissions(can_send_messages=False)
-                await client.restrict_chat_member(chat_id, user_id, permissions, until_date=message.date + mute_seconds)
+                # ✅ FIX: Time Calculation using timedelta
+                until_time = datetime.now() + timedelta(seconds=mute_seconds)
                 
-                # Simple Alert Message (No strike count)
+                # Permissions Set: Sirf Msg bhejna band karega, baaki sab allowed
+                permissions = ChatPermissions(can_send_messages=False)
+                
+                # Apply Restriction
+                await client.restrict_chat_member(
+                    chat_id, 
+                    user_id, 
+                    permissions, 
+                    until_date=until_time
+                )
+                
+                # Send Alert Message
                 alert_text = (
                     f"🔇 {first_name}, you have been muted for {mute_minutes} minutes.\n"
                     f"Reason: {reason}"
                 )
                 msg = await message.reply_text(alert_text)
-                
                 asyncio.create_task(delete_after_delay(msg, 120))
+                
             except Exception as e:
+                # 🛑 DEBUG: Agar Bot Admin nahi hai to ye error Group me bhej dega (Temporary)
+                # Isse aapko pata chal jayega kya galti hai.
+                # error_msg = await message.reply_text(f"❌ Error Muting User: `{e}`\nCheck Bot Permissions!")
+                # asyncio.create_task(delete_after_delay(error_msg, 20))
                 print(f"Mute Error: {e}")

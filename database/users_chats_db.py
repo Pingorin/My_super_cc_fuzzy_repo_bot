@@ -12,7 +12,7 @@ class UserChatDB:
         self.banned = self.db.banned 
         # ✅ Yeh collection pending Join Requests store karega
         self.fsub_pending = self.db.fsub_pending
-        # ✅ Yeh collection warnings store karega
+        # ✅ Yeh collection warnings store karega (Anti-Spam)
         self.warnings = self.db.warnings 
 
     async def add_user(self, id):
@@ -20,7 +20,7 @@ class UserChatDB:
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ MODIFIED: Added Welcome & Anti-Spam Settings Defaults
+    # ✅ MODIFIED: Added Defaults for ALL New Features
     async def add_group(self, id, title):
         group = await self.groups.find_one({'id': int(id)})
         
@@ -50,10 +50,16 @@ class UserChatDB:
                 'custom_welcome_text': None,   
                 'custom_welcome_photo': None,  
 
-                # ✅ NEW: Anti-Spam Defaults
+                # Anti-Spam Defaults
                 'antispam_enabled': False,      # Default: OFF
                 'antispam_action': 'mute',      # 'mute' (Warn) or 'kick'
                 'mute_duration': 600,           # Default: 10 Minutes (600s)
+
+                # ✅ Auto Mention Defaults
+                'automention_enabled': True,     # Default: ON
+                'mention_interval': 300,         # Default: 5 min
+                'last_mention_time': 0,          
+                'pending_mentions': [],          # List of IDs
 
                 # Time Defaults
                 'time_dynamic': 86400,
@@ -76,15 +82,39 @@ class UserChatDB:
     async def update_group_settings(self, id, settings):
         await self.groups.update_one({'id': int(id)}, {'$set': settings})
 
-    # --- 🛡️ WARNING MANAGEMENT (ANTI-SPAM) ---
+    # --- 📣 AUTO MENTION HELPERS (NEW) ---
+
+    async def add_pending_mention(self, chat_id, user_id):
+        """Adds a user to the pending mention list if not already present."""
+        await self.groups.update_one(
+            {'id': int(chat_id)},
+            {'$addToSet': {'pending_mentions': int(user_id)}}
+        )
+
+    async def get_pending_mentions(self, chat_id):
+        """Fetches the list of pending users."""
+        group = await self.groups.find_one({'id': int(chat_id)})
+        return group.get('pending_mentions', []) if group else []
+
+    async def remove_pending_mentions(self, chat_id, user_ids):
+        """Removes mentioned users from the list."""
+        await self.groups.update_one(
+            {'id': int(chat_id)},
+            {'$pull': {'pending_mentions': {'$in': user_ids}}}
+        )
+        # Update last run time to now
+        await self.groups.update_one(
+            {'id': int(chat_id)},
+            {'$set': {'last_mention_time': time.time()}}
+        )
+
+    # --- 🛡️ ANTI-SPAM WARNING MANAGEMENT ---
 
     async def get_spam_warnings(self, chat_id, user_id):
-        # Retrieve warning count for a specific user in a specific group
         doc = await self.warnings.find_one({"chat_id": int(chat_id), "user_id": int(user_id)})
         return doc['count'] if doc else 0
 
     async def add_spam_warning(self, chat_id, user_id):
-        # Increment warning count by 1
         await self.warnings.update_one(
             {"chat_id": int(chat_id), "user_id": int(user_id)},
             {"$inc": {"count": 1}},
@@ -93,7 +123,6 @@ class UserChatDB:
         return await self.get_spam_warnings(chat_id, user_id)
 
     async def reset_spam_warnings(self, chat_id, user_id):
-        # Reset warnings (e.g., after a ban or manual reset)
         await self.warnings.delete_one({"chat_id": int(chat_id), "user_id": int(user_id)})
 
     # --- SHORTENER MANAGEMENT ---
@@ -114,12 +143,10 @@ class UserChatDB:
     # --- 🔒 FSUB CHANNEL MANAGEMENT ---
     
     async def update_fsub_channel(self, chat_id, slot, channel_id):
-        """Saves a specific channel ID to a specific slot"""
         try:
             group = await self.groups.find_one({'id': int(chat_id)})
             if group:
                 raw_data = group.get('fsub_channels')
-                # Auto-fix if data is corrupted
                 if isinstance(raw_data, list):
                     await self.groups.update_one(
                         {'id': int(chat_id)}, 

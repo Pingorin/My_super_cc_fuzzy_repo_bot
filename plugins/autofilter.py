@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # ✅ CONSTANTS
 REACTIONS = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🎉", "🤩"]
-DELETE_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg" # You can change this link
+DELETE_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg" # Image for Thanks Message
 
 # ✅ HELPER: Auto-Delete Logic with Thanks Message
 async def auto_delete_task(bot_message, user_message, delay, show_thanks, query="files"):
@@ -101,6 +101,9 @@ async def auto_filter(client, message):
         user_del = group_settings.get('auto_delete_user_msg', False)
         del_thanks = group_settings.get('delete_thanks_msg', True)
 
+        # 📊 UPDATE STATS: Total Request
+        await db.update_daily_stats(message.chat.id, 'req')
+
         # ✅ 2. Fetch Results
         files = await Media.get_search_results(query)
         
@@ -109,6 +112,9 @@ async def auto_filter(client, message):
 
         if not files:
             return
+            
+        # 📊 UPDATE STATS: Successful Search
+        await db.update_daily_stats(message.chat.id, 'suc')
 
         # ✅ 3. Auto-Reaction Logic
         if auto_react:

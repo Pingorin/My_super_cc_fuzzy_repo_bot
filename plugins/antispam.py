@@ -36,7 +36,7 @@ async def robust_antispam(client, message):
     # ==================================================================
     is_spam = False
     is_nsfw = False
-    reason = "Spam"
+    reason = "Spam Content"
 
     text = message.text or message.caption or ""
     
@@ -80,7 +80,7 @@ async def robust_antispam(client, message):
     # ==================================================================
     
     if is_spam:
-        # ⚡ FAST DELETE (First Action)
+        # ⚡ 1. FAST DELETE MSG
         try: await message.delete()
         except: pass 
 
@@ -98,19 +98,17 @@ async def robust_antispam(client, message):
             return
 
         # 🟨 3-STRIKE WARNING SYSTEM
-        # We ignore 'Action: Kick' setting here to enforce the 3-warning rule requested.
-        
         warnings = await db.add_spam_warning(chat_id, user_id)
-        mute_time = settings.get('mute_duration', 600) # Default 10 mins
+        mute_time = settings.get('mute_duration', 600) # Default 10 mins (fetch from settings)
 
         # --- WARNING 1 & 2: MUTE ---
         if warnings < 3:
             try:
-                # Mute User
+                # Mute User for 'mute_time' seconds
                 permissions = ChatPermissions(can_send_messages=False)
                 await client.restrict_chat_member(chat_id, user_id, permissions, until_date=message.date + mute_time)
                 
-                # Send Custom Message
+                # Send Warning Message
                 alert_text = (
                     f"{mention} has sent a {reason}.\n"
                     f"• Warns now: ({warnings}/3) ❕\n"
@@ -118,22 +116,23 @@ async def robust_antispam(client, message):
                 )
                 msg = await message.reply_text(alert_text)
                 
-                # Auto-Delete Bot Message after 2 Minutes (120 seconds)
+                # Auto-Delete Bot Message after 2 Minutes
                 asyncio.create_task(delete_after_delay(msg, 120))
                 
             except Exception as e:
-                print(f"AntiSpam Error: {e}")
+                print(f"AntiSpam Mute Error: {e}")
 
-        # --- WARNING 3: BAN ---
+        # --- WARNING 3: BAN/KICK ---
         else:
             try:
-                # Ban User
+                # Determine Action (Ban or Kick based on strictness)
+                # Defaulting to BAN for 3rd strike as it's the final punishment
                 await client.ban_chat_member(chat_id, user_id)
                 
-                # Reset Warnings (Optional: Clean DB)
+                # Reset Warnings
                 await db.reset_spam_warnings(chat_id, user_id)
                 
-                # Send Custom Message
+                # Send Final Alert
                 alert_text = (
                     f"{mention} has sent a {reason}.\n"
                     f"• Warns now: (3/3) ❕\n"

@@ -194,8 +194,8 @@ async def generate_single_link(client, chat_id, user_id, link_id, level, slot_da
         await send_shortener_alert(client, chat_id, site)
         return None
         
-    # 📊 STATS: Link Generated
-    try: await db.update_daily_stats(chat_id, 'link_gen')
+    # 📊 STATS: Link Generated (Updated for Domain Tracking)
+    try: await db.update_daily_stats(chat_id, 'link_gen', domain=site)
     except: pass
     
     return short_url
@@ -209,8 +209,8 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
     await wait_msg.delete()
     
     if short_url:
-        # 📊 STATS: Link Generated
-        try: await db.update_daily_stats(chat_id, 'link_gen')
+        # 📊 STATS: Link Generated (Updated for Domain Tracking)
+        try: await db.update_daily_stats(chat_id, 'link_gen', domain=site)
         except: pass
         
         btn = [[InlineKeyboardButton(f"🚀 Verify Level {level}", url=short_url)]]
@@ -327,8 +327,24 @@ async def start_handler(client, message):
             
             await db.update_verify_status(message.from_user.id, verify_chatid, level)
             
-            # 📊 STATS: Link Verified
-            try: await db.update_daily_stats(int(verify_chatid), 'link_ver')
+            # 📊 STATS: Link Verified (Updated for Domain Tracking)
+            try: 
+                # Find which domain was used for this level
+                gs = await db.get_group_settings(int(verify_chatid))
+                shorts = gs.get('shorteners', {})
+                site_domain = None
+                
+                # Check Custom Settings
+                if str(level) in shorts:
+                    site_domain = shorts[str(level)]['site']
+                
+                # Fallback to Defaults
+                if not site_domain:
+                    if level == 1 and info.SHORTLINK_URL_1: site_domain = info.SHORTLINK_URL_1
+                    elif level == 2 and info.SHORTLINK_URL_2: site_domain = info.SHORTLINK_URL_2
+                    elif level == 3 and info.SHORTLINK_URL_3: site_domain = info.SHORTLINK_URL_3
+                    
+                await db.update_daily_stats(int(verify_chatid), 'link_ver', domain=site_domain)
             except: pass
             
             if await check_verification(client, message.from_user.id, verify_chatid, link_id, message):

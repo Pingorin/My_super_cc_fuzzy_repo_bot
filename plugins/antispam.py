@@ -36,26 +36,19 @@ async def robust_antispam(client, message):
     # ==================================================================
     is_spam = False
     is_nsfw = False
-    reason = "Spam Content"
-
+    
     text = message.text or message.caption or ""
     
     # A. 18+ Keyword Check
     if any(word in text.lower() for word in NSFW_KEYWORDS):
         is_spam = True
         is_nsfw = True
-        reason = "NSFW Content 🔞"
 
     # B. Entities Check (Links, Text Links, Mentions)
     if not is_spam and message.entities:
         for entity in message.entities:
-            if entity.type in [enums.MessageEntityType.URL, enums.MessageEntityType.TEXT_LINK]:
+            if entity.type in [enums.MessageEntityType.URL, enums.MessageEntityType.TEXT_LINK, enums.MessageEntityType.MENTION]:
                 is_spam = True
-                reason = "🔗 Link without authorization"
-                break
-            if entity.type == enums.MessageEntityType.MENTION:
-                is_spam = True
-                reason = "🏷️ Mention without authorization"
                 break
     
     # C. Raw Link Regex (Fallback)
@@ -63,84 +56,76 @@ async def robust_antispam(client, message):
         url_pattern = r"(https?://[^\s]+)|(www\.[^\s]+)|([^\s]+\.com)"
         if re.search(url_pattern, text):
             is_spam = True
-            reason = "🔗 Link without authorization"
 
     # D. Forward Check
     if not is_spam and (message.forward_from or message.forward_from_chat):
         is_spam = True
-        reason = "⏩ Forwarded Message"
 
     # E. Inline Button Check
     if not is_spam and message.reply_markup:
         is_spam = True
-        reason = "⌨️ Inline Button"
 
     # ==================================================================
-    # 🔨 PUNISHMENT LOGIC (3 STRIKES)
+    # 🔨 PUNISHMENT LOGIC (4 STRIKES SYSTEM)
     # ==================================================================
     
     if is_spam:
-        # ⚡ 1. FAST DELETE MSG
+        # ⚡ FAST DELETE (First Action)
         try: await message.delete()
         except: pass 
 
         user_id = message.from_user.id
         chat_id = message.chat.id
-        mention = message.from_user.mention
+        first_name = message.from_user.first_name
         
         # 🟥 INSTANT BAN FOR NSFW
         if is_nsfw:
             try:
                 await client.ban_chat_member(chat_id, user_id)
-                msg = await message.reply_text(f"🚫 **Banned:** {mention}\nReason: {reason}")
+                msg = await message.reply_text(f"🚫 **Banned:** {first_name}\nReason: NSFW Content 🔞")
                 asyncio.create_task(delete_after_delay(msg, 120))
             except: pass
             return
 
-        # 🟨 3-STRIKE WARNING SYSTEM
+        # 🟨 4-STRIKE WARNING SYSTEM
+        # Warnings 1, 2, 3 = MUTE
+        # Warning 4 = BAN
+        
         warnings = await db.add_spam_warning(chat_id, user_id)
-        mute_time = settings.get('mute_duration', 600) # Default 10 mins (fetch from settings)
+        mute_seconds = settings.get('mute_duration', 600) # Default 10 mins
+        mute_minutes = int(mute_seconds / 60)
 
-        # --- WARNING 1 & 2: MUTE ---
-        if warnings < 3:
+        # --- WARNING 1, 2, 3: MUTE ---
+        if warnings < 4:
             try:
-                # Mute User for 'mute_time' seconds
+                # Mute User
                 permissions = ChatPermissions(can_send_messages=False)
-                await client.restrict_chat_member(chat_id, user_id, permissions, until_date=message.date + mute_time)
+                await client.restrict_chat_member(chat_id, user_id, permissions, until_date=message.date + mute_seconds)
                 
-                # Send Warning Message
-                alert_text = (
-                    f"{mention} has sent a {reason}.\n"
-                    f"• Warns now: ({warnings}/3) ❕\n"
-                    f"• Action: Muted 🔇"
-                )
+                # Send Custom Message
+                alert_text = f"🔇 {first_name}, you have been muted for {mute_minutes} minutes. Reason: spam."
                 msg = await message.reply_text(alert_text)
                 
                 # Auto-Delete Bot Message after 2 Minutes
                 asyncio.create_task(delete_after_delay(msg, 120))
                 
             except Exception as e:
-                print(f"AntiSpam Mute Error: {e}")
+                print(f"AntiSpam Error: {e}")
 
-        # --- WARNING 3: BAN/KICK ---
+        # --- WARNING 4: BAN ---
         else:
             try:
-                # Determine Action (Ban or Kick based on strictness)
-                # Defaulting to BAN for 3rd strike as it's the final punishment
+                # Ban User
                 await client.ban_chat_member(chat_id, user_id)
                 
-                # Reset Warnings
+                # Reset Warnings (Optional)
                 await db.reset_spam_warnings(chat_id, user_id)
                 
-                # Send Final Alert
-                alert_text = (
-                    f"{mention} has sent a {reason}.\n"
-                    f"• Warns now: (3/3) ❕\n"
-                    f"• Action: Banned 🚫"
-                )
+                # Send Ban Message
+                alert_text = f"🚫 {first_name}, you have been banned. Reason: Repeated Spam (4/4)."
                 msg = await message.reply_text(alert_text)
                 
-                # Auto-Delete Bot Message after 2 Minutes
+                # Auto-Delete Bot Message
                 asyncio.create_task(delete_after_delay(msg, 120))
 
             except Exception as e:

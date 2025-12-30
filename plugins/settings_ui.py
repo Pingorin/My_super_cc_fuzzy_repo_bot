@@ -1,6 +1,6 @@
 import asyncio
-import aiohttp
 import datetime
+import aiohttp
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
@@ -967,7 +967,30 @@ async def daily_stats_ui(client, query):
     search_ratio = round((suc / req * 100), 2) if req > 0 else 0.0
     link_ratio = round((link_ver / link_gen * 100), 2) if link_gen > 0 else 0.0
 
-    # 4. Build Text
+    # 4. Extract & Format Shortener Stats
+    shortener_data = stats.get('shorteners', {})
+    shortener_text = ""
+    
+    if not shortener_data:
+        shortener_text = "  - No data available."
+    else:
+        # Loop through each domain (e.g., softurl_in)
+        for safe_domain, data in shortener_data.items():
+            # Restore dot: softurl_in -> softurl.in
+            real_domain = safe_domain.replace('_', '.').capitalize()
+            
+            gen = data.get('gen', 0)
+            ver = data.get('ver', 0)
+            ratio = round((ver / gen * 100), 2) if gen > 0 else 0.0
+            
+            shortener_text += (
+                f"  - **{real_domain}**\n"
+                f"    - Generated Links: {gen}\n"
+                f"    - Verified Links: {ver}\n"
+                f"    - Success Ratio: {ratio}%\n"
+            )
+
+    # 5. Build Text
     text = (
         f"📊 **Daily Stats for {display_date}**\n"
         f"_(Group ID: {chat_id})_\n\n"
@@ -982,13 +1005,10 @@ async def daily_stats_ui(client, query):
         f"  - Kicked Users: {spam_k}\n\n"
         f"🤝 **Today's Referrals:** {refs}\n\n"
         f"🔗 **Shortener Statistics:**\n"
-        f"  - (All Shorteners)\n"
-        f"    - Generated Links: {link_gen}\n"
-        f"    - Verified Links: {link_ver}\n"
-        f"    - Success Ratio: {link_ratio}%"
+        f"{shortener_text}"
     )
 
-    # 5. Build Buttons (Navigation)
+    # 6. Build Buttons (Navigation)
     buttons = []
     nav_row = []
     
@@ -1058,6 +1078,24 @@ async def admin_full_report_nav(client, query):
     link_gen = data.get('link_gen', 0)
     link_ver = data.get('link_ver', 0)
     l_ratio = round((link_ver / link_gen * 100), 2) if link_gen > 0 else 0.0
+
+    # Extract & Format Shortener Stats for Full Report
+    shortener_data = data.get('shorteners', {})
+    shortener_text = ""
+    
+    if not shortener_data:
+        shortener_text = "  - No data available."
+    else:
+        for safe_domain, s_data in shortener_data.items():
+            real_domain = safe_domain.replace('_', '.').capitalize()
+            gen = s_data.get('gen', 0)
+            ver = s_data.get('ver', 0)
+            s_ratio = round((ver / gen * 100), 2) if gen > 0 else 0.0
+            
+            shortener_text += (
+                f"  - **{real_domain}**\n"
+                f"    - Generated: {gen} | Verified: {ver} | Ratio: {s_ratio}%\n"
+            )
     
     text = (
         f"📊 **Full Daily Report for {date_str}**\n\n"
@@ -1069,7 +1107,7 @@ async def admin_full_report_nav(client, query):
         f"  - Failed: {failed}\n"
         f"  - Success Ratio: {ratio}%\n\n"
         f"🔗 **Shortener Statistics:**\n"
-        f"  - Generated: {link_gen} | Verified: {link_ver} | Ratio: {l_ratio}%"
+        f"{shortener_text}"
     )
     
     buttons = []

@@ -104,19 +104,33 @@ class UserChatDB:
         # Returns YYYY-MM-DD string
         return datetime.datetime.now().strftime("%Y-%m-%d")
 
-    async def update_daily_stats(self, chat_id, field, count=1):
+    async def update_daily_stats(self, chat_id, field, count=1, domain=None):
         """
         Updates a specific stat field for TODAY.
         Fields: 'req', 'suc', 'spam_w', 'spam_k', 'link_gen', 'link_ver'
+        If domain is provided, it updates stats.{date}.shorteners.{domain}.{field}
         """
         today = self.get_today_date()
-        key = f"stats.{today}.{field}"
         
-        await self.groups.update_one(
-            {'id': int(chat_id)},
-            {'$inc': {key: count}}, # Atomic increment
-            upsert=True
-        )
+        if domain:
+            # MongoDB doesn't like dots in keys, replace '.' with '_'
+            safe_domain = domain.replace('.', '_')
+            
+            # Key format: stats.2025-12-30.shorteners.softurl_in.gen
+            key = f"stats.{today}.shorteners.{safe_domain}.{field}"
+            
+            await self.groups.update_one(
+                {'id': int(chat_id)},
+                {'$inc': {key: count}},
+                upsert=True
+            )
+        else:
+            key = f"stats.{today}.{field}"
+            await self.groups.update_one(
+                {'id': int(chat_id)},
+                {'$inc': {key: count}}, # Atomic increment
+                upsert=True
+            )
 
     async def get_daily_stats(self, chat_id, date_str):
         group = await self.groups.find_one({'id': int(chat_id)})

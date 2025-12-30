@@ -81,9 +81,28 @@ async def grant_full_access(user_id, chat_id):
 
 async def check_verification(client, user_id, chat_id, link_id, message_obj):
     if not IS_VERIFY: return True 
+
+    # ==================================================================
+    # 👑 ADMIN FREE ACCESS CHECK (NEW)
+    # ==================================================================
+    try:
+        group_settings = await db.get_group_settings(chat_id)
+        if group_settings and group_settings.get('admin_free_access', False):
+            # Check if user is Admin/Owner in that specific group
+            member = await client.get_chat_member(chat_id, user_id)
+            if member.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
+                # BYPASS ALL CHECKS
+                return True
+    except:
+        pass
+    # ==================================================================
+
     if await db.get_verify_status(user_id, chat_id): return True 
 
-    group_settings = await db.get_group_settings(chat_id)
+    # Reload settings if not fetched above, or reuse
+    if not group_settings:
+        group_settings = await db.get_group_settings(chat_id)
+
     mode = group_settings.get('shortener_mode', 'dynamic') if group_settings else 'dynamic'
     active_slots = await get_active_shorteners(chat_id)
     current_time = time.time()

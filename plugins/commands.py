@@ -452,7 +452,7 @@ async def start_handler(client, message):
                 return # ⛔ STOP
 
             # ==================================================================
-            # ✅ STEP 4: SEND FILE + CLEAN CAPTION (FIXED FOR NONE CAPTIONS)
+            # ✅ STEP 4: SEND FILE + CAPTION URL + BUTTONS
             # ==================================================================
 
             file_data = await Media.get_file_details(link_id)
@@ -460,50 +460,74 @@ async def start_handler(client, message):
             
             if not file_data: return await message.reply("❌ **File Not Found.**")
             
+            # --- 1. CAPTION GENERATION & CLEANING ---
             file_name = search_data.get('file_name', 'Unknown File')
             raw_caption = search_data.get('caption')
 
-            # ✅ LOGIC START: Check if caption exists
             if not raw_caption:
-                # Agar Caption NULL hai, to seedha File Name use karein (Regex skip karein)
-                caption = f"📂 <b>{file_name}</b>"
+                # Agar Caption NULL hai, to File Name use karein
+                caption = f"{file_name}"
             else:
-                # Agar Caption hai, to use String me convert karein (Safety) aur Clean karein
                 caption = str(raw_caption)
-                
-                # 1. Remove "https://t.me/..."
+                # Cleaning Regex
                 caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", "", caption, flags=re.IGNORECASE)
-                
-                # 2. Remove other HTTP links
                 caption = re.sub(r"https?://[^\s]+", "", caption, flags=re.IGNORECASE)
-                
-                # 3. Remove Spam Text
-                remove_patterns = [
-                    r"Join\s?(Now|Channel|Us|Here)", 
-                    r"Aa\s?Jao", 
-                    r"🤞", r"➜", r"\)⁠➜", r"👉", 
-                    r"\[@\w+\]", r"@\w+"
-                ]
+                remove_patterns = [r"Join\s?(Now|Channel|Us|Here)", r"Aa\s?Jao", r"🤞", r"➜", r"\)⁠➜", r"👉", r"\[@\w+\]", r"@\w+"]
                 for pattern in remove_patterns:
                     caption = re.sub(pattern, "", caption, flags=re.IGNORECASE)
-
-                # 4. Final Trim
                 caption = re.sub(r"\s+", " ", caption).strip()
                 
-                # Agar cleaning ke baad caption khali ho jaye, to wapas filename laga do
                 if not caption:
-                    caption = f"📂 <b>{file_name}</b>"
+                    caption = f"{file_name}"
 
-            # ✅ LOGIC END
+            # --- 2. CAPTION URL LOGIC (Make Name Blue) ---
+            # Group settings fetch karein (Agar upar fetch nahi hua to)
+            if not group_settings:
+                group_settings = await db.get_group_settings(src_chat_id)
             
+            cap_url = group_settings.get('caption_url')
+            
+            # Agar URL set hai, to pure caption/filename ko Link bana do
+            if cap_url:
+                final_caption = f"<b><a href='{cap_url}'>{caption}</a></b>"
+            else:
+                final_caption = f"<b>{caption}</b>"
+
+            # Footer add karein
+            final_caption += f"\n\n{script.CUSTOM_FOOTER}"
+
+            # --- 3. CUSTOM BUTTONS LOGIC ---
+            reply_markup = None
+            btn_rows = []
+
+            # A) Caption Button (Set)
+            cap_btn_text = group_settings.get('caption_btn_text')
+            cap_btn_url = group_settings.get('caption_btn_url')
+            
+            if cap_btn_text and cap_btn_url:
+                btn_rows.append([InlineKeyboardButton(cap_btn_text, url=cap_btn_url)])
+
+            # B) Group Link (Back to Group)
+            grp_link = group_settings.get('group_link')
+            
+            if grp_link:
+                btn_rows.append([InlineKeyboardButton("Back to Group 🔙", url=grp_link)])
+
+            # Convert to Markup if buttons exist
+            if btn_rows:
+                reply_markup = InlineKeyboardMarkup(btn_rows)
+
+            # --- 4. SEND MEDIA ---
             try: 
                 await client.send_cached_media(
                     chat_id=message.from_user.id, 
                     file_id=file_data.get('file_id'), 
-                    caption=f"{caption}\n\n{script.CUSTOM_FOOTER}", 
+                    caption=final_caption, 
+                    reply_markup=reply_markup,
                     parse_mode=enums.ParseMode.HTML
                 )
-            except Exception as e: await message.reply(f"❌ Error sending file: `{e}`")
+            except Exception as e: 
+                await message.reply(f"❌ Error sending file: `{e}`")
                 
         except Exception as e: await message.reply(f"❌ Error: {e}")
         return

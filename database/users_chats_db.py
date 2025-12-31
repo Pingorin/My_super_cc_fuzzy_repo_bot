@@ -383,10 +383,57 @@ class UserChatDB:
         except:
             return False
 
-    # ✅ REQUIRED FOR "RESET SETTINGS" FEATURE
-    async def delete_group(self, chat_id):
-        """Permanently deletes a group's settings from the database."""
-        await self.groups.delete_one({'id': int(chat_id)})
+    # ✅ REQUIRED FOR "RESET SETTINGS" FEATURE (Replaces Delete Group)
+    async def reset_group_settings(self, chat_id):
+        """Resets a group's settings to default without removing the group."""
+        default_settings = {
+            # --- CORE DEFAULTS ---
+            'earning_method': 'shortlink', 
+            'shortener_mode': 'dynamic',   
+            'shorteners': {},              
+            'fsub_channels': {},           
+            'is_shortlink_active': True,
+            'result_mode': 'button',
+            'result_page_limit': 10,
+            
+            # --- AUTO DELETE & REACTION ---
+            'auto_reaction': False,
+            'auto_delete_time': 300,
+            'auto_delete_user_msg': False,
+            'delete_thanks_msg': True,
+            
+            # --- WELCOME ---
+            'welcome_enabled': True,
+            'welcome_mode': 'default',
+            'custom_welcome_text': None,
+            'custom_welcome_photo': None,
+            
+            # --- ANTI-SPAM ---
+            'antispam_enabled': False,
+            'antispam_action': 'mute',
+            'mute_duration': 600,
+            
+            # --- AUTO MENTION ---
+            'automention_enabled': True,
+            'mention_interval': 300,
+            'pending_mentions': [],
+            
+            # --- AUTO POST ---
+            'autopost_enabled': False,
+            'autopost_interval': 1800,
+            'autopost_text': None,
+            'autopost_image': None,
+            'autopost_buttons': {},
+            
+            # --- ADMIN ACCESS ---
+            'admin_free_access': False,
+            'daily_stats_notify': True
+        }
+        
+        await self.groups.update_one(
+            {'id': int(chat_id)},
+            {'$set': default_settings}
+        )
 
-# ✅ INITIALIZATION
+# ✅ INITIALIZATION: Using USER_DB_URI for the second database
 db = UserChatDB(USER_DB_URI, DATABASE_NAME)

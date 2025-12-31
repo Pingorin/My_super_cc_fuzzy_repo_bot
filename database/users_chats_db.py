@@ -383,5 +383,10 @@ class UserChatDB:
         except:
             return False
 
+    # ✅ REQUIRED FOR "RESET SETTINGS" FEATURE
+    async def delete_group(self, chat_id):
+        """Permanently deletes a group's settings from the database."""
+        await self.groups.delete_one({'id': int(chat_id)})
+
 # ✅ INITIALIZATION
 db = UserChatDB(USER_DB_URI, DATABASE_NAME)

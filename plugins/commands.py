@@ -460,11 +460,22 @@ async def start_handler(client, message):
             
             if not file_data: return await message.reply("❌ **File Not Found.**")
             
-            # 1. Fetch File Name & Initial Caption
-            file_name = file_data.get('file_name', 'Unknown File')
-            caption = search_data.get('caption', f"📂 <b>{file_name}</b>")
+            # 1. Best Effort to get File Name
+            file_name = search_data.get('file_name') or file_data.get('file_name')
             
-            # 🧹🧹 CAPTION CLEANING LOGIC (Existing) 🧹🧹
+            # If still None, check caption
+            raw_caption = search_data.get('caption', "")
+            if not file_name or file_name == "Unknown File":
+                if raw_caption:
+                    file_name = raw_caption.split('\n')[0] # Use first line of caption as name
+            
+            if not file_name:
+                file_name = "File"
+
+            # 2. Base Caption
+            caption = raw_caption if raw_caption else file_name
+            
+            # 🧹🧹 CAPTION CLEANING LOGIC 🧹🧹
             caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", "", caption, flags=re.IGNORECASE)
             caption = re.sub(r"https?://[^\s]+", "", caption, flags=re.IGNORECASE)
             remove_patterns = [r"Join\s?(Now|Channel|Us|Here)", r"Aa\s?Jao", r"🤞", r"➜", r"\)⁠➜", r"👉", r"\[@\w+\]", r"@\w+"]
@@ -476,8 +487,12 @@ async def start_handler(client, message):
             # 🔗 APPLY "OTHER URLS" SETTINGS
             # ==================================================================
             
+            # Fetch Settings for the Source Group
+            group_settings = await db.get_group_settings(src_chat_id)
+            
             # 1. CAPTION URL (Blue Link on Filename)
             cap_url = group_settings.get('caption_url')
+            
             if cap_url:
                 # Create Hyperlink: <a href="URL">Filename</a>
                 hyperlink = f"<a href='{cap_url}'>{file_name}</a>"
@@ -486,8 +501,10 @@ async def start_handler(client, message):
                 # Otherwise, put it at the top.
                 if file_name in caption:
                     caption = caption.replace(file_name, hyperlink)
-                else:
+                elif "Unknown" not in file_name:
                     caption = f"📂 {hyperlink}\n\n{caption}"
+                else:
+                    caption = f"<a href='{cap_url}'>{caption}</a>"
             else:
                 # Default behavior if no URL set (just bold)
                 if file_name in caption:

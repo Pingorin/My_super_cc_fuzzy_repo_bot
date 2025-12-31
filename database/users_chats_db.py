@@ -21,7 +21,7 @@ class UserChatDB:
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ MODIFIED: Added Defaults for ALL New Features
+    # ✅ MODIFIED: Added Defaults for ALL New Features (Including Other URLs)
     async def add_group(self, id, title):
         group = await self.groups.find_one({'id': int(id)})
         
@@ -76,6 +76,13 @@ class UserChatDB:
                 # Daily Stats
                 'daily_stats_notify': True,     # Default: ON
                 'stats': {},                    # Stores daily data
+
+                # ✅ OTHER URLS DEFAULTS
+                'caption_url': None,
+                'caption_btn_text': None,
+                'caption_btn_url': None,
+                'howto_url': None,
+                'group_link': None,
 
                 # Time Defaults
                 'time_dynamic': 86400,
@@ -383,7 +390,7 @@ class UserChatDB:
         except:
             return False
 
-    # ✅ REQUIRED FOR "RESET SETTINGS" FEATURE (Replaces Delete Group)
+    # ✅ REQUIRED FOR "RESET SETTINGS" FEATURE (Including Other URLs)
     async def reset_group_settings(self, chat_id):
         """Resets a group's settings to default without removing the group."""
         default_settings = {
@@ -427,7 +434,14 @@ class UserChatDB:
             
             # --- ADMIN ACCESS ---
             'admin_free_access': False,
-            'daily_stats_notify': True
+            'daily_stats_notify': True,
+
+            # ✅ OTHER URLS DEFAULTS
+            'caption_url': None,
+            'caption_btn_text': None,
+            'caption_btn_url': None,
+            'howto_url': None,
+            'group_link': None
         }
         
         await self.groups.update_one(
@@ -435,5 +449,5 @@ class UserChatDB:
             {'$set': default_settings}
         )
 
-# ✅ INITIALIZATION: Using USER_DB_URI for the second database
+# ✅ INITIALIZATION
 db = UserChatDB(USER_DB_URI, DATABASE_NAME)

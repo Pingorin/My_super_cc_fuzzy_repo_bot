@@ -75,6 +75,7 @@ async def grant_full_access(user_id, chat_id):
     else: duration = group_settings.get('time_dynamic', 86400) 
 
     await db.update_verify_status(user_id, chat_id, 0, duration)
+    # Reset individual levels
     await db.update_verify_status(user_id, chat_id, 1, is_reset=True)
     await db.update_verify_status(user_id, chat_id, 2, is_reset=True)
     await db.update_verify_status(user_id, chat_id, 3, is_reset=True)
@@ -104,6 +105,9 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
     mode = group_settings.get('shortener_mode', 'dynamic') if group_settings else 'dynamic'
     active_slots = await get_active_shorteners(chat_id)
     current_time = time.time()
+
+    # If no shorteners active, bypass
+    if not active_slots: return True
 
     if mode == 'together':
         buttons = []
@@ -167,7 +171,7 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
                 res = await attempt_send_link(client, user_id, chat_id, link_id, message_obj, 3, active_slots['3'])
                 if res == "SENT": return False
 
-    else: 
+    else: # Dynamic Mode (Standard 1 -> 2 -> 3)
         if active_slots.get('1') and await db.get_level_time(user_id, chat_id, 1) == 0:
             res = await attempt_send_link(client, user_id, chat_id, link_id, message_obj, 1, active_slots['1'])
             if res == "SENT": return False 
@@ -194,7 +198,6 @@ async def generate_single_link(client, chat_id, user_id, link_id, level, slot_da
     
     try: await db.update_daily_stats(chat_id, 'gen', count=1, domain=site)
     except: pass
-    
     return short_url
 
 async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, level, slot_data):
@@ -219,7 +222,7 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(f"⚠️ **Alert:** Shortener {site} is down. Skipping Level {level}... ⏩")
         return "SKIP"
 
-# --- 🔥 PRE-VERIFY FSUB CHECK (Slots 1, 2, 3) ---
+# --- 🔥 PRE-VERIFY FSUB CHECK ---
 
 async def check_fsub(client, user_id, message_obj):
     src_chat_id = None
@@ -249,12 +252,12 @@ async def check_fsub(client, user_id, message_obj):
         
         try:
             chat_obj = await client.get_chat(channel_id)
-            channel_id = chat_obj.id
-        except: pass
+            real_chat_id = chat_obj.id
+        except: continue
 
         is_member = False
         try:
-            member = await client.get_chat_member(channel_id, user_id)
+            member = await client.get_chat_member(real_chat_id, user_id)
             if member.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
                 is_member = True
         except UserNotParticipant: pass 
@@ -264,13 +267,13 @@ async def check_fsub(client, user_id, message_obj):
 
         if slot == '3':
             try:
-                invite = await client.create_chat_invite_link(channel_id)
+                invite = await client.create_chat_invite_link(real_chat_id)
                 btn_row_2.append(InlineKeyboardButton(f"📢 Join Channel {slot}", url=invite.invite_link))
             except: pass
         else:
-            if await db.is_user_pending(user_id, channel_id): continue 
+            if await db.is_user_pending(user_id, real_chat_id): continue 
             try:
-                invite = await client.create_chat_invite_link(channel_id, creates_join_request=True)
+                invite = await client.create_chat_invite_link(real_chat_id, creates_join_request=True)
                 btn_row_1.append(InlineKeyboardButton(f"📢 Request {slot}", url=invite.invite_link))
             except: pass
 
@@ -296,16 +299,21 @@ async def check_fsub(client, user_id, message_obj):
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start_handler(client, message):
+    # 1. Group Start
     if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         await db.add_group(message.chat.id, message.chat.title)
         if len(message.command) == 1: return await message.reply("✅ Bot is Alive!")
         return 
 
+    # 2. Private Start
     if message.chat.type == enums.ChatType.PRIVATE:
         await db.add_user(message.from_user.id)
         if len(message.command) > 1 and not (message.command[1].startswith("verify_") or message.command[1].startswith("get_")):
              if not await check_fsub(client, message.from_user.id, message): return
 
+    # -------------------------------------------------------------------------
+    # ✅ HANDLER 1: VERIFY (Return from Shortener)
+    # -------------------------------------------------------------------------
     if len(message.command) > 1 and message.command[1].startswith("verify_"):
         try:
             data = message.command[1].split("_")
@@ -315,6 +323,7 @@ async def start_handler(client, message):
             
             await db.update_verify_status(message.from_user.id, verify_chatid, level)
             
+            # Update Stats
             try:
                 group_settings = await db.get_group_settings(verify_chatid)
                 shorteners = group_settings.get('shorteners', {})
@@ -323,6 +332,7 @@ async def start_handler(client, message):
                 if str(level) in shorteners:
                     site_domain = shorteners[str(level)]['site']
                 
+                # Fallback to default if not found in group
                 if not site_domain:
                     if level == 1 and info.SHORTLINK_URL_1: site_domain = info.SHORTLINK_URL_1
                     elif level == 2 and info.SHORTLINK_URL_2: site_domain = info.SHORTLINK_URL_2
@@ -341,22 +351,27 @@ async def start_handler(client, message):
         except Exception as e: return await message.reply(f"❌ Error: {e}")
 
     # -------------------------------------------------------------------------
-    # 🔥 MAIN FLOW (get_linkid_chatid)
+    # 🔥 MAIN FLOW: GET FILE
     # -------------------------------------------------------------------------
     if len(message.command) > 1 and message.command[1].startswith("get_"):
         try:
             data = message.command[1].split("_")
             link_id = int(data[1])
-            src_chat_id = data[2] if len(data) > 2 else str(message.chat.id)
             
-            # 1. Pre-Verify
+            # ✅ CRITICAL FIX: Ensure src_chat_id is Integer
+            if len(data) > 2:
+                src_chat_id = int(data[2])
+            else:
+                src_chat_id = message.chat.id
+            
+            # 1. Pre-Verify FSub
             if not await check_fsub(client, message.from_user.id, message): return 
 
             # 2. Shortener Verification
             if not await check_verification(client, message.from_user.id, src_chat_id, link_id, message): return 
 
             # ==================================================================
-            # 🛑 STEP 3: SLOT 4 & 5
+            # 🛑 STEP 3: SLOT 4 & 5 (Post-Verify FSub)
             # ==================================================================
             
             group_settings = await db.get_group_settings(src_chat_id)
@@ -367,6 +382,7 @@ async def start_handler(client, message):
             
             post_verify_buttons = []
 
+            # Slot 4 (Request Mode)
             if id_4:
                 try:
                     id_4 = int(id_4)
@@ -384,6 +400,7 @@ async def start_handler(client, message):
                          post_verify_buttons.append(InlineKeyboardButton("📢 Request Final (Slot 4)", url=invite4.invite_link))
                 except: pass
 
+            # Slot 5 (Join Mode)
             if id_5:
                 is_joined_5 = False
                 slot5_btn_url = None
@@ -405,6 +422,7 @@ async def start_handler(client, message):
                             slot5_btn_url = invite5.invite_link
                     except: pass
                 else:
+                    # Logic for username/link
                     is_joined_5 = False 
                     slot5_btn_url = str_id_5
 
@@ -425,7 +443,7 @@ async def start_handler(client, message):
                 return 
 
             # ==================================================================
-            # ✅ STEP 4: SEND FILE + CLEAN CAPTION + APPLY CUSTOM SETTINGS
+            # ✅ STEP 4: SEND FILE + APPLY CUSTOM SETTINGS (Fixed)
             # ==================================================================
 
             file_data = await Media.get_file_details(link_id)
@@ -433,12 +451,17 @@ async def start_handler(client, message):
             
             if not file_data: return await message.reply("❌ **File Not Found.**")
             
-            # 1. Get File Name & Caption
-            file_name = search_data.get('file_name') or file_data.get('file_name')
-            raw_caption = search_data.get('caption', "")
+            # 1. Fetch File Name & Caption
+            file_name = None
+            raw_caption = None
             
-            # Fallback
-            if not file_name: file_name = "File"
+            # Try getting from search_data first, then file_data
+            if search_data:
+                file_name = search_data.get('file_name')
+                raw_caption = search_data.get('caption')
+            
+            if not file_name:
+                file_name = file_data.get('file_name', "File")
             
             # 2. Base Caption
             caption = raw_caption if raw_caption else file_name
@@ -462,8 +485,6 @@ async def start_handler(client, message):
             
             if cap_url:
                 # 🔵 EXACT MATCH BLUE LINK LOGIC
-                # If file_name is found, replace ONLY it with link.
-                # If not found, wrap the whole caption in link (fallback).
                 if file_name in caption:
                     hyperlink = f"<a href='{cap_url}'>{file_name}</a>"
                     caption = caption.replace(file_name, hyperlink)
@@ -508,6 +529,7 @@ async def start_handler(client, message):
         except Exception as e: await message.reply(f"❌ Error: {e}")
         return
 
+    # Private Start Message (Default)
     if message.chat.type == enums.ChatType.PRIVATE:
         text = f"Hello {message.from_user.mention} 👋,\nI am a Powerul Auto Filter Bot."
         buttons = [

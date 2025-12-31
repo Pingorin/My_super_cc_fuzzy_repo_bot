@@ -452,7 +452,7 @@ async def start_handler(client, message):
                 return # ⛔ STOP
 
             # ==================================================================
-            # ✅ STEP 4: SEND FILE + CLEAN CAPTION
+            # ✅ STEP 4: SEND FILE + CLEAN CAPTION (FIXED FOR NONE CAPTIONS)
             # ==================================================================
 
             file_data = await Media.get_file_details(link_id)
@@ -460,31 +460,42 @@ async def start_handler(client, message):
             
             if not file_data: return await message.reply("❌ **File Not Found.**")
             
-            # Original Caption
-            caption = search_data.get('caption', f"📂 <b>{search_data.get('file_name')}</b>")
-            
-            # 🧹🧹 CAPTION CLEANING LOGIC 🧹🧹
-            
-            # 1. Remove "https://t.me/..." or "https://t me/..."
-            caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", "", caption, flags=re.IGNORECASE)
-            
-            # 2. Remove other HTTP links
-            caption = re.sub(r"https?://[^\s]+", "", caption, flags=re.IGNORECASE)
-            
-            # 3. Remove Spam Text (Join Now, Aa Jao, Arrows, Emojis)
-            remove_patterns = [
-                r"Join\s?(Now|Channel|Us|Here)", 
-                r"Aa\s?Jao", 
-                r"🤞", r"➜", r"\)⁠➜", r"👉", 
-                r"\[@\w+\]", r"@\w+"
-            ]
-            
-            for pattern in remove_patterns:
-                caption = re.sub(pattern, "", caption, flags=re.IGNORECASE)
+            file_name = search_data.get('file_name', 'Unknown File')
+            raw_caption = search_data.get('caption')
 
-            # 4. Final Trim
-            caption = re.sub(r"\s+", " ", caption).strip()
+            # ✅ LOGIC START: Check if caption exists
+            if not raw_caption:
+                # Agar Caption NULL hai, to seedha File Name use karein (Regex skip karein)
+                caption = f"📂 <b>{file_name}</b>"
+            else:
+                # Agar Caption hai, to use String me convert karein (Safety) aur Clean karein
+                caption = str(raw_caption)
+                
+                # 1. Remove "https://t.me/..."
+                caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", "", caption, flags=re.IGNORECASE)
+                
+                # 2. Remove other HTTP links
+                caption = re.sub(r"https?://[^\s]+", "", caption, flags=re.IGNORECASE)
+                
+                # 3. Remove Spam Text
+                remove_patterns = [
+                    r"Join\s?(Now|Channel|Us|Here)", 
+                    r"Aa\s?Jao", 
+                    r"🤞", r"➜", r"\)⁠➜", r"👉", 
+                    r"\[@\w+\]", r"@\w+"
+                ]
+                for pattern in remove_patterns:
+                    caption = re.sub(pattern, "", caption, flags=re.IGNORECASE)
 
+                # 4. Final Trim
+                caption = re.sub(r"\s+", " ", caption).strip()
+                
+                # Agar cleaning ke baad caption khali ho jaye, to wapas filename laga do
+                if not caption:
+                    caption = f"📂 <b>{file_name}</b>"
+
+            # ✅ LOGIC END
+            
             try: 
                 await client.send_cached_media(
                     chat_id=message.from_user.id, 

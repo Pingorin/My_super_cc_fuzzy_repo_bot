@@ -92,8 +92,11 @@ async def main_settings_menu(client, query):
         # Row 6 (Admin Access & Daily Stats)
         [InlineKeyboardButton("👑 Admin Free Access", callback_data=f"adm_access_ui#{chat_id}"),
          InlineKeyboardButton("📊 Daily Stats", callback_data=f"daily_stats#{chat_id}#today")],
+         
+        # Row 7 (Reset)
+        [InlineKeyboardButton("🧨 Reset Settings", callback_data=f"reset_grp_ui#{chat_id}")],
 
-        # Row 7
+        # Row 8 (Back)
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
     
@@ -1334,8 +1337,35 @@ async def remove_norm_all(client, query):
     await normal_fsub_menu(client, query)
 
 @Client.on_callback_query(filters.regex(r"^set_back_home"))
-async def back_home(client, query):
-    await settings_command(client, query.message)
+async def back_to_group_list(client, query):
+    user_id = query.from_user.id
+    
+    # Reuse the logic from settings_command but for editing
+    user_groups = []
+    async for group in db.groups.find({}):
+        try:
+            chat_id = group['id']
+            # Check Admin Status
+            try:
+                member = await client.get_chat_member(chat_id, user_id)
+            except: continue 
+            
+            if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
+                try: chat_info = await client.get_chat(chat_id)
+                except: chat_info = None
+                
+                title = chat_info.title if chat_info else f"Group {chat_id}"
+                user_groups.append((title, chat_id))
+        except: continue 
+
+    if not user_groups:
+        return await query.message.edit_text("❌ **No Groups Found!**\nMake sure I am added to your group and you are an Admin there.")
+
+    buttons = []
+    for title, chat_id in user_groups:
+        buttons.append([InlineKeyboardButton(f"📂 {title}", callback_data=f"set_main#{chat_id}")])
+    
+    await query.message.edit_text("⚙️ **Select a Group:**", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
 # 💰 EARNING & SHORTENER SETTINGS
@@ -1559,3 +1589,48 @@ async def toggle_act(client, query):
     _, chat_id, action = query.data.split("#")
     await db.update_group_settings(int(chat_id), {'is_shortlink_active': (action == "on")})
     await disable_menu(client, query)
+
+# ==============================================================================
+# 🧨 RESET SETTINGS UI
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^reset_grp_ui#"))
+async def reset_confirm_ui(client, query):
+    chat_id = int(query.data.split("#")[1])
+    
+    text = (
+        f"⚠️ **Are you sure?**\n\n"
+        "This will **PERMANENTLY DELETE** all settings for this group, including:\n"
+        "• Fsub Channels\n"
+        "• All Shortener & Earning Configurations\n"
+        "• Welcome Messages, Anti-Spam, etc.\n\n"
+        "**This action is IRREVERSIBLE.**\n"
+        "_(This will NOT affect user verification data)_"
+    )
+    
+    buttons = [
+        [InlineKeyboardButton("✅ Yes, Reset All Settings", callback_data=f"reset_grp_now#{chat_id}")],
+        [InlineKeyboardButton("❌ Cancel", callback_data=f"set_main#{chat_id}")]
+    ]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+
+@Client.on_callback_query(filters.regex(r"^reset_grp_now#"))
+async def reset_group_now(client, query):
+    chat_id = int(query.data.split("#")[1])
+    
+    # 1. Perform Deletion
+    await db.delete_group(chat_id)
+    
+    # 2. Show Success Message
+    text = (
+        "✅ **Settings Reset Complete!**\n\n"
+        "All settings for this group have been wiped from the database. "
+        "The group is now disconnected. You can run `/connect` in the group to start over."
+    )
+    
+    # 3. Button to go back to Group List
+    btn = [[InlineKeyboardButton("🔙 Return to Group List", callback_data="set_back_home")]]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))

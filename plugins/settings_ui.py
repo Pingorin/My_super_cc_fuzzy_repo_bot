@@ -93,8 +93,9 @@ async def main_settings_menu(client, query):
         [InlineKeyboardButton("👑 Admin Free Access", callback_data=f"adm_access_ui#{chat_id}"),
          InlineKeyboardButton("📊 Daily Stats", callback_data=f"daily_stats#{chat_id}#today")],
          
-        # Row 7 (Reset)
-        [InlineKeyboardButton("🧨 Reset Settings", callback_data=f"reset_grp_ui#{chat_id}")],
+        # Row 7 (Reset & Other URLs)
+        [InlineKeyboardButton("🧨 Reset Settings", callback_data=f"reset_grp_ui#{chat_id}"),
+         InlineKeyboardButton("🔗 Other URLs", callback_data=f"other_urls_ui#{chat_id}")], # ✅ NEW
 
         # Row 8 (Back)
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
@@ -1634,3 +1635,234 @@ async def reset_group_now(client, query):
     btn = [[InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]]
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
+
+# ==============================================================================
+# 🔗 OTHER URLS & BUTTON SETTINGS UI
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^other_urls_ui#"))
+async def other_urls_ui(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    
+    # Check Statuses
+    cap_url = "Set" if group_data.get('caption_url') else "Not Set"
+    cap_btn = "Set" if (group_data.get('caption_btn_text') and group_data.get('caption_btn_url')) else "Not Set"
+    howto = "Set" if group_data.get('howto_url') else "Not Set"
+    grp_link = "Set" if group_data.get('group_link') else "Not Set"
+
+    text = (
+        f"🔗 **Other URL & Button Settings for:** `{chat_id}`\n\n"
+        "Configure miscellaneous links and buttons used by the bot.\n\n"
+        "[Caption URL Demo](https://graph.org/file/4d61886e61dfa37a25945.jpg) | "
+        "[Caption Button Demo](https://graph.org/file/4d61886e61dfa37a25945.jpg) | "
+        "[How-To URL Demo](https://graph.org/file/4d61886e61dfa37a25945.jpg) | "
+        "[Group Link Demo](https://graph.org/file/4d61886e61dfa37a25945.jpg)"
+    )
+    
+    buttons = [
+        [InlineKeyboardButton(f"Caption URL ({cap_url})", callback_data=f"set_cap_url#{chat_id}")],
+        [InlineKeyboardButton(f"Caption Button ({cap_btn})", callback_data=f"cap_btn_ui#{chat_id}")],
+        [InlineKeyboardButton(f"How To Download Button ({howto})", callback_data=f"set_howto#{chat_id}")],
+        [InlineKeyboardButton(f"Group Link ({grp_link})", callback_data=f"set_grp_link#{chat_id}")],
+        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
+    ]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+
+
+# ==============================================================================
+# 1. CAPTION URL SETTER
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^set_cap_url#"))
+async def set_caption_url_handler(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    current = group_data.get('caption_url')
+    
+    status_text = f"\n\n**Current URL:**\n`{current}`" if current else ""
+    
+    text = (
+        "Please send the URL to be used for the file name hyperlink.\n"
+        f"{status_text}\n\n"
+        "Send `remove` to delete the current URL."
+    )
+    
+    cancel_btn = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"other_urls_ui#{chat_id}")]]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(cancel_btn))
+    
+    try:
+        msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if msg.text:
+            if msg.text.lower() == "remove":
+                await db.update_group_settings(chat_id, {'caption_url': None})
+                await msg.reply("🗑️ **Caption URL has been removed.**")
+            elif "http" in msg.text:
+                await db.update_group_settings(chat_id, {'caption_url': msg.text.strip()})
+                await msg.reply("✅ **Caption URL has been set.**")
+            else:
+                await msg.reply("❌ Invalid URL. Must start with http/https.")
+            
+            await asyncio.sleep(1)
+            await other_urls_ui(client, query)
+    except: pass
+
+
+# ==============================================================================
+# 2. CAPTION BUTTON SETTINGS (SUB-MENU)
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^cap_btn_ui#"))
+async def caption_btn_ui(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    
+    curr_text = group_data.get('caption_btn_text')
+    curr_url = group_data.get('caption_btn_url')
+    
+    if curr_text and curr_url:
+        status_info = (
+            f"**Current Text:**\n{curr_text}\n\n"
+            f"**Current URL:**\n{curr_url}"
+        )
+    else:
+        status_info = "**Status:** Not configured."
+
+    text = (
+        f"✨ **Caption Button Settings for:** `{chat_id}`\n\n"
+        "This button will appear below all files sent to users.\n\n"
+        f"{status_info}"
+    )
+    
+    buttons = [
+        [InlineKeyboardButton("Set Text", callback_data=f"set_cb_txt#{chat_id}"),
+         InlineKeyboardButton("Set URL", callback_data=f"set_cb_url#{chat_id}")],
+         
+        [InlineKeyboardButton("Reset Button", callback_data=f"reset_cb#{chat_id}")],
+        [InlineKeyboardButton("🔙 Back to Other URLs", callback_data=f"other_urls_ui#{chat_id}")]
+    ]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+
+# Set CB Text
+@Client.on_callback_query(filters.regex(r"^set_cb_txt#"))
+async def set_cap_btn_text(client, query):
+    chat_id = int(query.data.split("#")[1])
+    cancel_btn = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"cap_btn_ui#{chat_id}")]]
+    
+    await query.message.edit_text("Please send the **text** for your custom button.", reply_markup=InlineKeyboardMarkup(cancel_btn))
+    
+    try:
+        msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if msg.text:
+            await db.update_group_settings(chat_id, {'caption_btn_text': msg.text})
+            await msg.reply("✅ **Custom button text has been updated.**")
+            await asyncio.sleep(1)
+            await caption_btn_ui(client, query)
+    except: pass
+
+# Set CB URL
+@Client.on_callback_query(filters.regex(r"^set_cb_url#"))
+async def set_cap_btn_url(client, query):
+    chat_id = int(query.data.split("#")[1])
+    cancel_btn = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"cap_btn_ui#{chat_id}")]]
+    
+    await query.message.edit_text("Please send the **full URL** (starting with http:// or https://) for your custom button.", reply_markup=InlineKeyboardMarkup(cancel_btn))
+    
+    try:
+        msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if msg.text and "http" in msg.text:
+            await db.update_group_settings(chat_id, {'caption_btn_url': msg.text.strip()})
+            await msg.reply("✅ **Custom button URL has been updated.**")
+            await asyncio.sleep(1)
+            await caption_btn_ui(client, query)
+        else:
+            await msg.reply("❌ Invalid URL.")
+            await caption_btn_ui(client, query)
+    except: pass
+
+# Reset CB
+@Client.on_callback_query(filters.regex(r"^reset_cb#"))
+async def reset_caption_btn(client, query):
+    chat_id = int(query.data.split("#")[1])
+    await db.update_group_settings(chat_id, {'caption_btn_text': None, 'caption_btn_url': None})
+    await query.answer("Button Reset!", show_alert=True)
+    await caption_btn_ui(client, query)
+
+
+# ==============================================================================
+# 3. HOW TO DOWNLOAD URL
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^set_howto#"))
+async def set_howto_url_handler(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    current = group_data.get('howto_url')
+    
+    status_text = f"\n\n**Current URL:**\n{current}" if current else ""
+    
+    text = (
+        "Please send the new URL for the 'How to Download' button.\n"
+        f"{status_text}\n\n"
+        "Send `remove` to delete the current URL."
+    )
+    
+    cancel_btn = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"other_urls_ui#{chat_id}")]]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(cancel_btn), disable_web_page_preview=True)
+    
+    try:
+        msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if msg.text:
+            if msg.text.lower() == "remove":
+                await db.update_group_settings(chat_id, {'howto_url': None})
+                await msg.reply("🗑️ **How-To URL has been removed.**")
+            elif "http" in msg.text:
+                await db.update_group_settings(chat_id, {'howto_url': msg.text.strip()})
+                await msg.reply("✅ **How-To URL has been set.**")
+            else:
+                await msg.reply("❌ Invalid URL.")
+            
+            await asyncio.sleep(1)
+            await other_urls_ui(client, query)
+    except: pass
+
+
+# ==============================================================================
+# 4. GROUP LINK
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^set_grp_link#"))
+async def set_group_link_handler(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    current = group_data.get('group_link')
+    
+    status_text = f"\n\n**Current Link:**\n{current}" if current else ""
+    
+    text = (
+        "Please send the invite link for your group.\n"
+        "This will be used for the 'Go Back' button on sent files.\n"
+        f"{status_text}\n\n"
+        "Send `remove` to delete the current link."
+    )
+    
+    cancel_btn = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"other_urls_ui#{chat_id}")]]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(cancel_btn), disable_web_page_preview=True)
+    
+    try:
+        msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if msg.text:
+            if msg.text.lower() == "remove":
+                await db.update_group_settings(chat_id, {'group_link': None})
+                await msg.reply("🗑️ **Group link has been removed.**")
+            elif "t.me" in msg.text or "http" in msg.text:
+                await db.update_group_settings(chat_id, {'group_link': msg.text.strip()})
+                await msg.reply("✅ **Group link has been set.**")
+            else:
+                await msg.reply("❌ Invalid Link.")
+            
+            await asyncio.sleep(1)
+            await other_urls_ui(client, query)
+    except: pass

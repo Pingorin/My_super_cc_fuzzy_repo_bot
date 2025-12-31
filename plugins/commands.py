@@ -106,6 +106,9 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
     mode = group_settings.get('shortener_mode', 'dynamic') if group_settings else 'dynamic'
     active_slots = await get_active_shorteners(chat_id)
     current_time = time.time()
+    
+    # ✅ Fetch How To URL
+    howto_url = group_settings.get('howto_url')
 
     if mode == 'together':
         buttons = []
@@ -139,6 +142,10 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
         await wait_msg.delete()
 
         if buttons:
+            # ✅ ADD HOW TO BUTTON (TOGETHER MODE)
+            if howto_url:
+                buttons.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
+                
             await message_obj.reply_text(info_text, reply_markup=InlineKeyboardMarkup(buttons))
             return False
         else:
@@ -214,6 +221,15 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         except: pass
 
         btn = [[InlineKeyboardButton(f"🚀 Verify Level {level}", url=short_url)]]
+        
+        # ✅ ADD HOW TO BUTTON (SINGLE/DYNAMIC MODE)
+        try:
+            grp = await db.get_group_settings(chat_id)
+            howto_url = grp.get('howto_url')
+            if howto_url:
+                btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
+        except: pass
+
         text = f"⚠️ **Verification Required ({level}/?)**\n\n**Shortener:** {site}\n_Click the button below to verify and continue._"
         if level == 3: text = f"⚠️ **Final Step (3/3)**\n\n**Shortener:** {site}\n_Almost there! Verify this to unlock files._"
         await message_obj.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))

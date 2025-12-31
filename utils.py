@@ -54,7 +54,10 @@ def format_text_results(files, query, chat_id):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
-        f_chat_id = file.get('file_chat_id') or file.get('chat_id') or chat_id
+        
+        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id) for the link
+        # This ensures the bot checks THIS group's settings, not the file's source channel
+        f_chat_id = chat_id
         
         # Link directs to the bot with the specific Group ID
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
@@ -77,7 +80,9 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
-        f_chat_id = file.get('file_chat_id') or file.get('chat_id') or chat_id
+
+        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
+        f_chat_id = chat_id
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         
@@ -126,7 +131,9 @@ async def post_to_telegraph(files, query, chat_id):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
-        f_chat_id = file.get('file_chat_id') or file.get('chat_id') or chat_id
+        
+        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
+        f_chat_id = chat_id
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         html_content += f"<p>📂 <a href='{link}'>{f_name}</a> [{f_size}]</p><hr>"
@@ -181,8 +188,10 @@ def btn_parser(files, chat_id, query, offset=0, limit=10):
         f_name = file.get('file_name', 'Unknown File')
         f_size = get_size(file.get('file_size', 0))
         link_id = file.get('link_id')
-        # Use file_chat_id from cache, fallback to provided chat_id
-        f_chat_id = file.get('file_chat_id') or file.get('chat_id') or chat_id
+        
+        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
+        f_chat_id = chat_id
+        
         caption = file.get('caption')
 
         display_name = f_name

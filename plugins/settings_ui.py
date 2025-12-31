@@ -1620,17 +1620,17 @@ async def reset_confirm_ui(client, query):
 async def reset_group_now(client, query):
     chat_id = int(query.data.split("#")[1])
     
-    # 1. Perform Deletion
-    await db.delete_group(chat_id)
+    # 1. Perform Reset (Reset Settings Only, DO NOT Delete Group)
+    await db.reset_group_settings(chat_id)
     
     # 2. Show Success Message
     text = (
         "✅ **Settings Reset Complete!**\n\n"
-        "All settings for this group have been wiped from the database. "
-        "The group is now disconnected. You can run `/connect` in the group to start over."
+        "All settings (Shorteners, Fsub, Welcome, etc.) have been restored to **Default**.\n"
+        "The bot is still connected to the group."
     )
     
-    # 3. Button to go back to Group List
-    btn = [[InlineKeyboardButton("🔙 Return to Group List", callback_data="set_back_home")]]
+    # 3. Return to Main Settings
+    btn = [[InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]]
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))

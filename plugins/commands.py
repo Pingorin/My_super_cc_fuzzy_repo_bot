@@ -452,7 +452,7 @@ async def start_handler(client, message):
                 return # ⛔ STOP
 
             # ==================================================================
-            # ✅ STEP 4: SEND FILE + CLEAN CAPTION
+            # ✅ STEP 4: SEND FILE + CLEAN CAPTION + APPLY CUSTOM SETTINGS
             # ==================================================================
 
             file_data = await Media.get_file_details(link_id)
@@ -460,39 +460,73 @@ async def start_handler(client, message):
             
             if not file_data: return await message.reply("❌ **File Not Found.**")
             
-            # Original Caption
-            caption = search_data.get('caption', f"📂 <b>{search_data.get('file_name')}</b>")
+            # 1. Fetch File Name & Initial Caption
+            file_name = file_data.get('file_name', 'Unknown File')
+            caption = search_data.get('caption', f"📂 <b>{file_name}</b>")
             
-            # 🧹🧹 CAPTION CLEANING LOGIC 🧹🧹
-            
-            # 1. Remove "https://t.me/..." or "https://t me/..."
+            # 🧹🧹 CAPTION CLEANING LOGIC (Existing) 🧹🧹
             caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", "", caption, flags=re.IGNORECASE)
-            
-            # 2. Remove other HTTP links
             caption = re.sub(r"https?://[^\s]+", "", caption, flags=re.IGNORECASE)
-            
-            # 3. Remove Spam Text (Join Now, Aa Jao, Arrows, Emojis)
-            remove_patterns = [
-                r"Join\s?(Now|Channel|Us|Here)", 
-                r"Aa\s?Jao", 
-                r"🤞", r"➜", r"\)⁠➜", r"👉", 
-                r"\[@\w+\]", r"@\w+"
-            ]
-            
+            remove_patterns = [r"Join\s?(Now|Channel|Us|Here)", r"Aa\s?Jao", r"🤞", r"➜", r"\)⁠➜", r"👉", r"\[@\w+\]", r"@\w+"]
             for pattern in remove_patterns:
                 caption = re.sub(pattern, "", caption, flags=re.IGNORECASE)
-
-            # 4. Final Trim
             caption = re.sub(r"\s+", " ", caption).strip()
+
+            # ==================================================================
+            # 🔗 APPLY "OTHER URLS" SETTINGS
+            # ==================================================================
+            
+            # 1. CAPTION URL (Blue Link on Filename)
+            cap_url = group_settings.get('caption_url')
+            if cap_url:
+                # Create Hyperlink: <a href="URL">Filename</a>
+                hyperlink = f"<a href='{cap_url}'>{file_name}</a>"
+                
+                # If the filename exists in the caption, replace it. 
+                # Otherwise, put it at the top.
+                if file_name in caption:
+                    caption = caption.replace(file_name, hyperlink)
+                else:
+                    caption = f"📂 {hyperlink}\n\n{caption}"
+            else:
+                # Default behavior if no URL set (just bold)
+                if file_name in caption:
+                    caption = caption.replace(file_name, f"<b>{file_name}</b>")
+
+            # 2. PREPARE BUTTONS
+            buttons = []
+            
+            # A. Custom Caption Button
+            c_text = group_settings.get('caption_btn_text')
+            c_url = group_settings.get('caption_btn_url')
+            if c_text and c_url:
+                buttons.append([InlineKeyboardButton(c_text, url=c_url)])
+            
+            # B. How To Download Button (From previous requirements)
+            h_url = group_settings.get('howto_url')
+            if h_url:
+                buttons.append([InlineKeyboardButton("⁉️ How To Download", url=h_url)])
+
+            # C. Back to Group Button
+            g_link = group_settings.get('group_link')
+            if g_link:
+                buttons.append([InlineKeyboardButton("🔙 Back to Group", url=g_link)])
+
+            # ==================================================================
+            
+            # Append Footer
+            final_caption = f"{caption}\n\n{script.CUSTOM_FOOTER}"
 
             try: 
                 await client.send_cached_media(
                     chat_id=message.from_user.id, 
                     file_id=file_data.get('file_id'), 
-                    caption=f"{caption}\n\n{script.CUSTOM_FOOTER}", 
-                    parse_mode=enums.ParseMode.HTML
+                    caption=final_caption, 
+                    parse_mode=enums.ParseMode.HTML,
+                    reply_markup=InlineKeyboardMarkup(buttons) if buttons else None
                 )
-            except Exception as e: await message.reply(f"❌ Error sending file: `{e}`")
+            except Exception as e: 
+                await message.reply(f"❌ Error sending file: `{e}`")
                 
         except Exception as e: await message.reply(f"❌ Error: {e}")
         return

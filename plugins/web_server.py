@@ -19,26 +19,18 @@ async def handle_search_results(request):
         return web.Response(text="❌ Link Expired or Invalid.", status=404)
     
     # 2. Get User/Group ID associated with this search
-    # This was saved in ia_filterdb.py during the search
+    # This is the Group ID where the user originally searched
     user_chat_id = data.get('chat_id')
     
-    # 3. Process Files to ensure Chat ID exists for deep linking
+    # 3. Process Files
     files_list = []
     raw_files = data.get('files', [])
     
     for file in raw_files:
-        # Determine the Chat ID to use in the link
-        # Priority: File's specific Source Chat ID > The Searcher's Chat ID
-        # 'file_chat_id' is retrieved from the DB save structure we made earlier
-        target_chat_id = file.get('file_chat_id')
-        
-        # Fallback: If file source ID is missing, use the user's chat ID
-        # This prevents the "None" error
-        if not target_chat_id:
-            target_chat_id = user_chat_id
-            
-        # Inject this ID into the file dictionary so Jinja can use it
-        file['target_chat_id'] = target_chat_id
+        # ✅ FIX: Force usage of the Group ID (user_chat_id)
+        # We ignore the file's original channel ID.
+        # This ensures the bot checks the SETTINGS of the Group, not the Channel.
+        file['target_chat_id'] = user_chat_id
         
         files_list.append(file)
     
@@ -52,7 +44,8 @@ async def handle_search_results(request):
     }
     
     # 5. Render Template
-    return aiohttp_jinja2.render_template('results.html', request, context)
+    # Ensure this matches your file name in 'templates/' folder (Results.html vs results.html)
+    return aiohttp_jinja2.render_template('Results.html', request, context)
 
 async def web_server():
     web_app = web.Application(client_max_size=30000000)

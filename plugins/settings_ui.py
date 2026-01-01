@@ -1,10 +1,11 @@
 import asyncio
 import datetime
+import time
 import aiohttp
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
-import info
+from info import ADMINS 
 
 # --- HELPER: CHECK SHORTENER ---
 async def check_shortener_link(domain, api):
@@ -95,9 +96,13 @@ async def main_settings_menu(client, query):
          
         # Row 7 (Reset & Other URLs)
         [InlineKeyboardButton("🧨 Reset Settings", callback_data=f"reset_grp_ui#{chat_id}"),
-         InlineKeyboardButton("🔗 Other URLs", callback_data=f"other_urls_ui#{chat_id}")], # ✅ NEW
+         InlineKeyboardButton("🔗 Other URLs", callback_data=f"other_urls_ui#{chat_id}")],
+         
+        # ✅ ROW 8: REFERRAL & REQUEST (NEW)
+        [InlineKeyboardButton("💎 Free Premium (Referral)", callback_data=f"ref_sys_menu#{chat_id}"),
+         InlineKeyboardButton("💡 Request Features", callback_data=f"req_feature#{chat_id}")],
 
-        # Row 8 (Back)
+        # Row 9 (Back)
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
     
@@ -1866,3 +1871,144 @@ async def set_group_link_handler(client, query):
             await asyncio.sleep(1)
             await other_urls_ui(client, query)
     except: pass
+
+# ==============================================================================
+# 🤝 REFERRAL SYSTEM SETTINGS
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^ref_sys_menu#"))
+async def referral_settings_menu(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    
+    is_enabled = group_data.get('referral_enabled', True)
+    target = group_data.get('referral_target', 5)
+    reward_sec = group_data.get('referral_reward_time', 2592000) # Default 30 Days
+    
+    # Calculate Days
+    reward_days = int(reward_sec / 86400)
+    
+    status_icon = "✅ Enabled" if is_enabled else "❌ Disabled"
+    btn_text = "🔴 Disable" if is_enabled else "🟢 Enable"
+    toggle_val = "off" if is_enabled else "on"
+    
+    text = (
+        f"🤝 **Referral System Settings for:** `{chat_id}`\n\n"
+        "This system helps grow your group. When a user refers new members via their unique link, "
+        "they will receive a premium subscription (no shorteners).\n\n"
+        f"**Status:** {status_icon}\n"
+        f"**Reward:** {reward_days} days of premium access for {target} referrals."
+    )
+    
+    buttons = [
+        [InlineKeyboardButton(btn_text, callback_data=f"ref_toggle#{chat_id}#{toggle_val}")],
+        [InlineKeyboardButton("Set Claim Points", callback_data=f"ref_set_points#{chat_id}"),
+         InlineKeyboardButton("Set Access Time", callback_data=f"ref_set_time#{chat_id}")],
+        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
+    ]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^ref_toggle#"))
+async def referral_toggle(client, query):
+    _, chat_id, action = query.data.split("#")
+    await db.update_group_settings(int(chat_id), {'referral_enabled': (action == "on")})
+    await referral_settings_menu(client, query)
+
+# --- SET POINTS MENU ---
+@Client.on_callback_query(filters.regex(r"^ref_set_points#"))
+async def referral_set_points_ui(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    current = group_data.get('referral_target', 5)
+    
+    def chk(val): return " ✅" if val == current else ""
+    
+    text = f"🔢 **Set Referral Target**\nCurrent: {current} referrals needed to claim."
+    
+    buttons = [
+        [InlineKeyboardButton(f"3{chk(3)}", callback_data=f"ref_save_pts#{chat_id}#3"),
+         InlineKeyboardButton(f"5{chk(5)}", callback_data=f"ref_save_pts#{chat_id}#5"),
+         InlineKeyboardButton(f"10{chk(10)}", callback_data=f"ref_save_pts#{chat_id}#10"),
+         InlineKeyboardButton(f"20{chk(20)}", callback_data=f"ref_save_pts#{chat_id}#20")],
+        [InlineKeyboardButton("🔙 Back", callback_data=f"ref_sys_menu#{chat_id}")]
+    ]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^ref_save_pts#"))
+async def save_ref_points(client, query):
+    _, chat_id, val = query.data.split("#")
+    await db.update_group_settings(int(chat_id), {'referral_target': int(val)})
+    await referral_set_points_ui(client, query)
+
+# --- SET TIME MENU ---
+@Client.on_callback_query(filters.regex(r"^ref_set_time#"))
+async def referral_set_time_ui(client, query):
+    chat_id = int(query.data.split("#")[1])
+    group_data = await db.get_group_settings(chat_id)
+    current_sec = group_data.get('referral_reward_time', 2592000)
+    current_days = int(current_sec / 86400)
+    
+    def chk(val): return " ✅" if val == current_days else ""
+    
+    text = f"⏳ **Set Reward Duration**\nCurrent: {current_days} Days of Premium."
+    
+    buttons = [
+        [InlineKeyboardButton(f"1 D{chk(1)}", callback_data=f"ref_save_time#{chat_id}#{1*86400}"),
+         InlineKeyboardButton(f"7 D{chk(7)}", callback_data=f"ref_save_time#{chat_id}#{7*86400}"),
+         InlineKeyboardButton(f"10 D{chk(10)}", callback_data=f"ref_save_time#{chat_id}#{10*86400}")],
+        [InlineKeyboardButton(f"15 D{chk(15)}", callback_data=f"ref_save_time#{chat_id}#{15*86400}"),
+         InlineKeyboardButton(f"20 D{chk(20)}", callback_data=f"ref_save_time#{chat_id}#{20*86400}"),
+         InlineKeyboardButton(f"1 M{chk(30)}", callback_data=f"ref_save_time#{chat_id}#{30*86400}")],
+        [InlineKeyboardButton(f"2 M{chk(60)}", callback_data=f"ref_save_time#{chat_id}#{60*86400}")],
+        [InlineKeyboardButton("🔙 Back", callback_data=f"ref_sys_menu#{chat_id}")]
+    ]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^ref_save_time#"))
+async def save_ref_time(client, query):
+    _, chat_id, val = query.data.split("#")
+    await db.update_group_settings(int(chat_id), {'referral_reward_time': int(val)})
+    await referral_set_time_ui(client, query)
+
+# ==============================================================================
+# 💡 FEATURE REQUEST UI
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^req_feature#"))
+async def request_feature_ui(client, query):
+    chat_id = int(query.data.split("#")[1])
+    
+    text = (
+        "💡 **Request a New Feature**\n\n"
+        "Please describe the feature you'd like to see added to the bot. "
+        "Your message will be sent directly to the bot owner."
+    )
+    
+    buttons = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"set_main#{chat_id}")]]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    
+    try:
+        # Wait for user input
+        msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        
+        # Forward to Admins
+        admin_text = f"💡 **New Feature Request!**\n\n👤 From: {msg.from_user.mention} (`{msg.from_user.id}`)\n📂 Group ID: `{chat_id}`\n\n**Request:**"
+        
+        for admin_id in ADMINS:
+            try:
+                await client.send_message(admin_id, admin_text)
+                if msg.text:
+                    await client.send_message(admin_id, msg.text)
+                elif msg.photo or msg.video or msg.document:
+                    await msg.copy(admin_id, caption=msg.caption or "")
+            except: pass
+            
+        await msg.reply("✅ **Request Sent!** Thank you for your feedback.")
+        await asyncio.sleep(1)
+        # Return to main settings
+        await main_settings_menu(client, query)
+        
+    except Exception as e:
+        pass # Timeout

@@ -21,7 +21,75 @@ class UserChatDB:
         if not user:
             await self.users.insert_one({'id': int(id)})
 
-    # ✅ MODIFIED: Added Defaults for ALL New Features (Including Other URLs)
+    # ==================================================================
+    # 💎 REFERRAL & PREMIUM SYSTEM METHODS (NEW)
+    # ==================================================================
+
+    async def get_user_data(self, user_id):
+        return await self.users.find_one({'id': int(user_id)})
+
+    async def update_referral_stats(self, referrer_id):
+        # Add 1 point to the referrer
+        await self.users.update_one(
+            {'id': int(referrer_id)},
+            {'$inc': {'referral_points': 1}},
+            upsert=True
+        )
+
+    async def get_referral_points(self, user_id):
+        user = await self.users.find_one({'id': int(user_id)})
+        return user.get('referral_points', 0) if user else 0
+
+    async def claim_premium_reward(self, user_id, cost_points, duration_seconds):
+        user = await self.users.find_one({'id': int(user_id)})
+        current_points = user.get('referral_points', 0) if user else 0
+        
+        if current_points < cost_points:
+            return False, 0
+            
+        current_time = time.time()
+        
+        # Check if already premium, extend it. If not, start new.
+        current_expiry = user.get('premium_expiry', 0)
+        if current_expiry > current_time:
+            new_expiry = current_expiry + duration_seconds
+        else:
+            new_expiry = current_time + duration_seconds
+            
+        await self.users.update_one(
+            {'id': int(user_id)},
+            {
+                '$set': {'premium_expiry': new_expiry},
+                '$inc': {'referral_points': -cost_points}
+            }
+        )
+        return True, new_expiry
+
+    async def is_user_premium(self, user_id):
+        user = await self.users.find_one({'id': int(user_id)})
+        if not user: return False
+        
+        expiry = user.get('premium_expiry', 0)
+        if expiry > time.time():
+            return True
+        return False
+        
+    async def get_premium_status(self, user_id):
+        user = await self.users.find_one({'id': int(user_id)})
+        if not user: return False, "No Subscription"
+        
+        expiry = user.get('premium_expiry', 0)
+        if expiry > time.time():
+            remaining = int(expiry - time.time())
+            days = remaining // 86400
+            return True, f"{days} Days remaining"
+        return False, "Expired"
+
+    # ==================================================================
+    # ⚙️ GROUP MANAGEMENT
+    # ==================================================================
+
+    # ✅ MODIFIED: Added Defaults for ALL New Features + Referral Defaults
     async def add_group(self, id, title):
         group = await self.groups.find_one({'id': int(id)})
         
@@ -83,6 +151,11 @@ class UserChatDB:
                 'caption_btn_url': None,
                 'howto_url': None,
                 'group_link': None,
+
+                # ✅ REFERRAL DEFAULTS (NEW)
+                'referral_enabled': True,       # Default: Enabled
+                'referral_target': 5,           # 5 Invites needed
+                'referral_reward_time': 2592000, # 30 Days (in seconds)
 
                 # Time Defaults
                 'time_dynamic': 86400,
@@ -441,7 +514,12 @@ class UserChatDB:
             'caption_btn_text': None,
             'caption_btn_url': None,
             'howto_url': None,
-            'group_link': None
+            'group_link': None,
+
+            # ✅ REFERRAL DEFAULTS (NEW)
+            'referral_enabled': True,       # Default: Enabled
+            'referral_target': 5,           # 5 Invites needed
+            'referral_reward_time': 2592000 # 30 Days (in seconds)
         }
         
         await self.groups.update_one(

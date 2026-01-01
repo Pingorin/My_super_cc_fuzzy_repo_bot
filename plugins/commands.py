@@ -337,22 +337,41 @@ async def start_handler(client, message):
         user_id = message.from_user.id
         
         # 🤝 REFERRAL SYSTEM TRACKING
-        # Check if user exists BEFORE adding them
-        user_exists = await db.get_user_data(user_id)
+        # 1. Check if user exists BEFORE adding them (Old vs New User)
+        old_user = await db.get_user_data(user_id)
         
-        await db.add_user(user_id) # Add to DB
+        # 2. Add User to DB (if not exists)
+        await db.add_user(user_id)
 
+        # 3. Handle Referral Code
         if len(message.command) > 1 and message.command[1].startswith("ref_"):
             try:
                 referrer_id = int(message.command[1].split("_")[1])
-                # Only count if: Not self, and User didn't exist before
-                if referrer_id != user_id and not user_exists:
-                    await db.update_referral_stats(referrer_id)
-                    # Notify Referrer
-                    try:
-                        await client.send_message(referrer_id, f"🎉 **New Referral!**\n{message.from_user.mention} joined via your link.\nYou got +1 Point.")
-                    except: pass
-            except: pass
+                
+                # Check: Not Self Referral
+                if referrer_id != user_id:
+                    
+                    # ✅ CASE 1: NEW USER (Award 10 Points)
+                    if not old_user:
+                        await db.update_referral_stats(referrer_id, points=10)
+                        
+                        # Notify Referrer
+                        try:
+                            await client.send_message(
+                                referrer_id, 
+                                f"🎉 **New Referral!**\n{message.from_user.mention} joined via your link.\n**+10 Points Added!**"
+                            )
+                        except: pass
+                        
+                    # ✅ CASE 2: OLD USER (Already in DB)
+                    else:
+                        # Send hidden/silent message to the user
+                        await message.reply(
+                            "⚠️ **You have already started this bot.**\nReferral points are only for new users.",
+                            quote=True
+                        )
+            except Exception as e: 
+                pass
             
         # 💎 FREE PREMIUM INFO SHORTCUT
         if len(message.command) > 1 and message.command[1] == "free_premium_info":
@@ -671,7 +690,20 @@ async def free_premium_page(client, query):
     
     # Generate Link
     ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
-    share_url = f"https://t.me/share/url?url={ref_link}&text=Join%20this%20awesome%20bot%20for%20movies%20and%20series!"
+    
+    # ✅ GROUP LINK LOGIC in Share Text
+    # Try to fetch a group link to include in share text
+    share_text = "Join this awesome bot for movies and series!"
+    try:
+        # Fetch one random group to get the group link if set
+        async for group in db.groups.find({"group_link": {"$ne": None}}).limit(1):
+            if group.get('group_link'):
+                share_text += f"\nJoin our Group: {group['group_link']}"
+            break
+    except: pass
+    
+    # Create Telegram Share URL
+    share_url = f"https://t.me/share/url?url={ref_link}&text={share_text}"
     
     # Get Config (First available group settings for PM)
     target = 5
@@ -682,17 +714,21 @@ async def free_premium_page(client, query):
     
     text = (
         "💰 **Get Free Premium Access!**\n\n"
-        "Share your unique link below with new users. If they start the bot through your link, you will get 1 referral point.\n\n"
+        "Share your unique link below. \n"
+        "• **New User:** You get +10 Points\n"
+        "• **Old User:** No Points\n\n"
         f"**Reward:** {target} Referrals = {reward_desc} Premium Access\n\n"
         "You can claim your points for direct file access with no shorteners!\n\n"
-        f"`{ref_link}`"
+        f"**Your Link:**\n`{ref_link}`"
     )
     
     buttons = [
-        [InlineKeyboardButton("📤 Click to Share", url=share_url),
-         InlineKeyboardButton("🎁 Claim Points", callback_data="claim_points")],
-        [InlineKeyboardButton("📊 Check Premium Status", callback_data="check_prem_status")],
-        [InlineKeyboardButton("🔙 Back", callback_data="open_prem_menu")]
+        # ✅ Click to Share (with Group Link if available)
+        [InlineKeyboardButton("📤 Click to Share", url=share_url)],
+        [InlineKeyboardButton("🎁 Claim Points", callback_data="claim_points"),
+         InlineKeyboardButton("❌ Close", callback_data="close_data")],
+        [InlineKeyboardButton("📊 Check Premium Status", callback_data="check_prem_status"),
+         InlineKeyboardButton("🔙 Back", callback_data="open_prem_menu")]
     ]
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
 

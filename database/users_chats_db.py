@@ -28,11 +28,14 @@ class UserChatDB:
     async def get_user_data(self, user_id):
         return await self.users.find_one({'id': int(user_id)})
 
-    async def update_referral_stats(self, referrer_id):
-        # Add 1 point to the referrer
+    async def update_referral_stats(self, referrer_id, points=10):
+        """
+        Adds points to the referrer.
+        Default points is 10, but can be customized.
+        """
         await self.users.update_one(
             {'id': int(referrer_id)},
-            {'$inc': {'referral_points': 1}},
+            {'$inc': {'referral_points': points}},
             upsert=True
         )
 

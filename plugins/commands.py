@@ -1,6 +1,7 @@
 import logging
 import time
 import re
+import datetime
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import UserNotParticipant
@@ -81,6 +82,13 @@ async def grant_full_access(user_id, chat_id):
 
 async def check_verification(client, user_id, chat_id, link_id, message_obj):
     if not IS_VERIFY: return True 
+
+    # ==================================================================
+    # 💎 PREMIUM CHECK (BYPASS SHORTENERS)
+    # ==================================================================
+    is_premium = await db.is_user_premium(user_id)
+    if is_premium:
+        return True # User has active premium, skip all verification
 
     # ==================================================================
     # 👑 ADMIN FREE ACCESS CHECK
@@ -326,7 +334,56 @@ async def start_handler(client, message):
         return 
 
     if message.chat.type == enums.ChatType.PRIVATE:
-        await db.add_user(message.from_user.id)
+        user_id = message.from_user.id
+        
+        # 🤝 REFERRAL SYSTEM TRACKING
+        # Check if user exists BEFORE adding them
+        user_exists = await db.get_user_data(user_id)
+        
+        await db.add_user(user_id) # Add to DB
+
+        if len(message.command) > 1 and message.command[1].startswith("ref_"):
+            try:
+                referrer_id = int(message.command[1].split("_")[1])
+                # Only count if: Not self, and User didn't exist before
+                if referrer_id != user_id and not user_exists:
+                    await db.update_referral_stats(referrer_id)
+                    # Notify Referrer
+                    try:
+                        await client.send_message(referrer_id, f"🎉 **New Referral!**\n{message.from_user.mention} joined via your link.\nYou got +1 Point.")
+                    except: pass
+            except: pass
+            
+        # 💎 FREE PREMIUM INFO SHORTCUT
+        if len(message.command) > 1 and message.command[1] == "free_premium_info":
+             # Trigger the Free Premium Page Logic directly as a message
+            bot_username = temp.U_NAME
+            ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
+            share_url = f"https://t.me/share/url?url={ref_link}&text=Join%20this%20awesome%20bot!"
+            
+            # Fetch Settings (Use Defaults or First available group)
+            target = 5
+            reward_desc = "1 Month"
+            async for group in db.groups.find({"referral_enabled": True}).limit(1):
+                target = group.get('referral_target', 5)
+                break
+
+            text = (
+                "💰 **Get Free Premium Access!**\n\n"
+                "Share the link below with a new user. If they start the bot through your link, you will get 1 referral point.\n\n"
+                f"**Reward:** {target} Referrals = {reward_desc} Premium Access\n\n"
+                "You can claim your points for direct file access with no shorteners!\n\n"
+                f"`{ref_link}`"
+            )
+            
+            buttons = [
+                [InlineKeyboardButton("📤 Click to Share", url=share_url)],
+                [InlineKeyboardButton("🎁 Claim Points", callback_data="claim_points"),
+                 InlineKeyboardButton("❌ Close", callback_data="close_data")]
+            ]
+            await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+            return
+
         # Normal FSub Check (if not verification/get flow)
         if len(message.command) > 1 and not (message.command[1].startswith("verify_") or message.command[1].startswith("get_")):
              if not await check_fsub(client, message.from_user.id, message): return
@@ -384,7 +441,7 @@ async def start_handler(client, message):
             # 1. Pre-Verify Slots (1,2,3)
             if not await check_fsub(client, message.from_user.id, message): return 
 
-            # 2. Shortener Verification
+            # 2. Shortener Verification (Includes Premium Check)
             if not await check_verification(client, message.from_user.id, src_chat_id, link_id, message): return 
 
             # ==================================================================
@@ -481,7 +538,6 @@ async def start_handler(client, message):
             raw_caption = search_data.get('caption')
 
             if not raw_caption:
-                # Agar Caption NULL hai, to File Name use karein
                 caption = f"{file_name}"
             else:
                 caption = str(raw_caption)
@@ -496,20 +552,16 @@ async def start_handler(client, message):
                 if not caption:
                     caption = f"{file_name}"
 
-            # --- 2. CAPTION URL LOGIC (Make Name Blue) ---
-            # Group settings fetch karein (Agar upar fetch nahi hua to)
+            # --- 2. CAPTION URL LOGIC ---
             if not group_settings:
                 group_settings = await db.get_group_settings(src_chat_id)
             
             cap_url = group_settings.get('caption_url')
-            
-            # Agar URL set hai, to pure caption/filename ko Link bana do
             if cap_url:
                 final_caption = f"<b><a href='{cap_url}'>{caption}</a></b>"
             else:
                 final_caption = f"<b>{caption}</b>"
 
-            # Footer add karein
             final_caption += f"\n\n{script.CUSTOM_FOOTER}"
 
             # --- 3. CUSTOM BUTTONS LOGIC ---
@@ -519,17 +571,17 @@ async def start_handler(client, message):
             # A) Caption Button (Set)
             cap_btn_text = group_settings.get('caption_btn_text')
             cap_btn_url = group_settings.get('caption_btn_url')
-            
             if cap_btn_text and cap_btn_url:
                 btn_rows.append([InlineKeyboardButton(cap_btn_text, url=cap_btn_url)])
 
             # B) Group Link (Back to Group)
             grp_link = group_settings.get('group_link')
-            
             if grp_link:
                 btn_rows.append([InlineKeyboardButton("Back to Group 🔙", url=grp_link)])
 
-            # Convert to Markup if buttons exist
+            # C) 💎 FREE PREMIUM BUTTON (Below File)
+            btn_rows.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
+
             if btn_rows:
                 reply_markup = InlineKeyboardMarkup(btn_rows)
 
@@ -548,11 +600,13 @@ async def start_handler(client, message):
         except Exception as e: await message.reply(f"❌ Error: {e}")
         return
 
+    # --- PRIVATE START MESSAGE UI ---
     if message.chat.type == enums.ChatType.PRIVATE:
         text = f"Hello {message.from_user.mention} 👋,\nI am a Powerul Auto Filter Bot."
         buttons = [
             [InlineKeyboardButton('⇆ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘs ⇆', url=f'http://t.me/{temp.U_NAME}?startgroup=start')],
-            [InlineKeyboardButton('⚙ ꜰᴇᴀᴛᴜʀᴇs', callback_data='features'), InlineKeyboardButton('💸 ᴘʀᴇᴍɪᴜᴍ', callback_data='buy_premium')],
+            [InlineKeyboardButton('⚙ ꜰᴇᴀᴛᴜʀᴇs', callback_data='features'), 
+             InlineKeyboardButton('💎 Free Premium', callback_data='open_prem_menu')], # ✅ New Button
             [InlineKeyboardButton('🚫 ᴇᴀʀɴ ᴍᴏɴᴇʏ ᴡɪᴛʜ ʙᴏᴛ 🚫', callback_data='earn'), InlineKeyboardButton('🤝 ʀᴇꜰᴇʀʀᴀʟ 🤝', callback_data='refer')]
         ]
         await message.reply_photo(photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -591,3 +645,112 @@ async def stats_handler(client, message):
         await msg.edit(f"📊 **BOT STATISTICS**\n\n👤 **Users:** {users}\n👥 **Groups:** {groups}\n📂 **Files Indexed:** {files}")
     except Exception as e: 
         await message.reply(f"Error: {e}")
+
+# ==============================================================================
+# 💎 PREMIUM & REFERRAL UI CALLBACKS
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^open_prem_menu"))
+async def premium_main_menu(client, query):
+    text = (
+        "💎 **Premium Access**\n\n"
+        "Get premium access to enjoy direct files with no shorteners or ads.\n\n"
+        "You can either purchase it directly or earn it for free by referring new users to our bot."
+    )
+    buttons = [
+        [InlineKeyboardButton("💎 Free Premium", callback_data="free_prem_page")],
+        [InlineKeyboardButton("💸 Buy Premium", callback_data="buy_premium")], # Add buy logic later
+        [InlineKeyboardButton("🔙 Back", callback_data="start_back")] # Need simple start back handler
+    ]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^free_prem_page"))
+async def free_premium_page(client, query):
+    user_id = query.from_user.id
+    bot_username = temp.U_NAME
+    
+    # Generate Link
+    ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
+    share_url = f"https://t.me/share/url?url={ref_link}&text=Join%20this%20awesome%20bot%20for%20movies%20and%20series!"
+    
+    # Get Config (First available group settings for PM)
+    target = 5
+    reward_desc = "1 Month"
+    async for group in db.groups.find({"referral_enabled": True}).limit(1):
+        target = group.get('referral_target', 5)
+        break
+    
+    text = (
+        "💰 **Get Free Premium Access!**\n\n"
+        "Share your unique link below with new users. If they start the bot through your link, you will get 1 referral point.\n\n"
+        f"**Reward:** {target} Referrals = {reward_desc} Premium Access\n\n"
+        "You can claim your points for direct file access with no shorteners!\n\n"
+        f"`{ref_link}`"
+    )
+    
+    buttons = [
+        [InlineKeyboardButton("📤 Click to Share", url=share_url),
+         InlineKeyboardButton("🎁 Claim Points", callback_data="claim_points")],
+        [InlineKeyboardButton("📊 Check Premium Status", callback_data="check_prem_status")],
+        [InlineKeyboardButton("🔙 Back", callback_data="open_prem_menu")]
+    ]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+
+@Client.on_callback_query(filters.regex(r"^claim_points"))
+async def claim_points_handler(client, query):
+    user_id = query.from_user.id
+    
+    # Defaults
+    target = 5
+    reward_time = 2592000 # 30 days
+    
+    # Find active settings
+    async for group in db.groups.find({"referral_enabled": True}).limit(1):
+        target = group.get('referral_target', 5)
+        reward_time = group.get('referral_reward_time', 2592000)
+        break
+
+    points = await db.get_referral_points(user_id)
+    
+    if points >= target:
+        success, expiry = await db.claim_premium_reward(user_id, target, reward_time)
+        if success:
+            exp_date = datetime.datetime.fromtimestamp(expiry).strftime('%Y-%m-%d')
+            await query.answer("🎉 Premium Claimed Successfully!", show_alert=True)
+            await query.message.edit_text(
+                f"🎉 **Congratulations!**\n\n"
+                f"You have claimed **Premium Access**.\n"
+                f"✅ No Shorteners\n"
+                f"✅ Direct Files\n\n"
+                f"📅 **Expiry:** {exp_date}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="free_prem_page")]])
+            )
+        else:
+            await query.answer("❌ Error claiming.", show_alert=True)
+    else:
+        needed = target - points
+        text = (
+            f"🏆 **Your Referral Stats**\n\n"
+            f"You currently have **{points}** referral points.\n"
+            f"You need **{needed}** more referral(s) to claim your premium access."
+        )
+        await query.answer("Not enough points!", show_alert=False)
+        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="free_prem_page")]]))
+
+@Client.on_callback_query(filters.regex(r"^check_prem_status"))
+async def check_status_handler(client, query):
+    user_id = query.from_user.id
+    is_prem, msg = await db.get_premium_status(user_id)
+    
+    status_icon = "✅ Active" if is_prem else "❌ Inactive"
+    
+    text = (
+        f"📊 **Premium Status**\n\n"
+        f"**Status:** {status_icon}\n"
+        f"**Validity:** {msg}"
+    )
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="free_prem_page")]]))
+
+@Client.on_callback_query(filters.regex(r"^close_data"))
+async def close_data(client, query):
+    await query.message.delete()

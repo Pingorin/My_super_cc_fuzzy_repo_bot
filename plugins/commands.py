@@ -2,6 +2,7 @@ import logging
 import time
 import re
 import datetime
+import urllib.parse
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import UserNotParticipant
@@ -378,9 +379,21 @@ async def start_handler(client, message):
              # Trigger the Free Premium Page Logic directly as a message
             bot_username = temp.U_NAME
             ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
-            share_url = f"https://t.me/share/url?url={ref_link}&text=Join%20this%20awesome%20bot!"
             
-            # Fetch Settings (Use Defaults or First available group)
+            # ✅ Share Text with Group Link
+            share_text = "Join this awesome bot for movies and series!"
+            try:
+                async for group in db.groups.find({"group_link": {"$ne": None}}).limit(1):
+                    if group.get('group_link'):
+                        share_text += f"\nJoin our Group: {group['group_link']}"
+                    break
+            except: pass
+            
+            # URL Encode text for safety
+            encoded_text = urllib.parse.quote(share_text)
+            share_url = f"https://t.me/share/url?url={ref_link}&text={encoded_text}"
+            
+            # Fetch Settings
             target = 5
             reward_desc = "1 Month"
             async for group in db.groups.find({"referral_enabled": True}).limit(1):
@@ -389,8 +402,8 @@ async def start_handler(client, message):
 
             text = (
                 "💰 **Get Free Premium Access!**\n\n"
-                "Share the link below with a new user. If they start the bot through your link, you will get 1 referral point.\n\n"
-                f"**Reward:** {target} Referrals = {reward_desc} Premium Access\n\n"
+                "Share the link below with a new user. If they start the bot through your link, you will get **10 referral points**.\n\n"
+                f"**Reward:** {target * 10} Points = {reward_desc} Premium Access\n\n"
                 "You can claim your points for direct file access with no shorteners!\n\n"
                 f"`{ref_link}`"
             )
@@ -702,8 +715,11 @@ async def free_premium_page(client, query):
             break
     except: pass
     
+    # Encode for URL safety
+    encoded_text = urllib.parse.quote(share_text)
+    
     # Create Telegram Share URL
-    share_url = f"https://t.me/share/url?url={ref_link}&text={share_text}"
+    share_url = f"https://t.me/share/url?url={ref_link}&text={encoded_text}"
     
     # Get Config (First available group settings for PM)
     target = 5
@@ -711,12 +727,15 @@ async def free_premium_page(client, query):
     async for group in db.groups.find({"referral_enabled": True}).limit(1):
         target = group.get('referral_target', 5)
         break
+        
+    user_points = await db.get_referral_points(user_id)
     
     text = (
         "💰 **Get Free Premium Access!**\n\n"
         "Share your unique link below. \n"
         "• **New User:** You get +10 Points\n"
         "• **Old User:** No Points\n\n"
+        f"📊 **Your Points:** {user_points}\n"
         f"**Reward:** {target} Referrals = {reward_desc} Premium Access\n\n"
         "You can claim your points for direct file access with no shorteners!\n\n"
         f"**Your Link:**\n`{ref_link}`"
@@ -746,10 +765,17 @@ async def claim_points_handler(client, query):
         reward_time = group.get('referral_reward_time', 2592000)
         break
 
+    # Calculate required points (10 points per referral)
+    required_points = target * 10
+    
+    # Check if already premium
+    if await db.is_user_premium(user_id):
+        return await query.answer("❌ You are already a Premium User!", show_alert=True)
+
     points = await db.get_referral_points(user_id)
     
-    if points >= target:
-        success, expiry = await db.claim_premium_reward(user_id, target, reward_time)
+    if points >= required_points:
+        success, expiry = await db.claim_premium_reward(user_id, required_points, reward_time)
         if success:
             exp_date = datetime.datetime.fromtimestamp(expiry).strftime('%Y-%m-%d')
             await query.answer("🎉 Premium Claimed Successfully!", show_alert=True)
@@ -764,11 +790,11 @@ async def claim_points_handler(client, query):
         else:
             await query.answer("❌ Error claiming.", show_alert=True)
     else:
-        needed = target - points
+        needed = required_points - points
         text = (
             f"🏆 **Your Referral Stats**\n\n"
             f"You currently have **{points}** referral points.\n"
-            f"You need **{needed}** more referral(s) to claim your premium access."
+            f"You need **{needed}** more points to claim premium."
         )
         await query.answer("Not enough points!", show_alert=False)
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="free_prem_page")]]))

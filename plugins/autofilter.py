@@ -143,14 +143,18 @@ async def auto_filter(client, message):
         howto_btn = []
         if howto_url:
             howto_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
+            
+        # ✅ NEW: Free Premium Button
+        free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
         # --- MODE A: BUTTON ---
         if mode == 'button':
             buttons = btn_parser(files, message.chat.id, query, offset, limit)
             
-            # Add How To Button at the end
-            if howto_btn:
-                buttons.append(howto_btn[0])
+            # Add How To Button
+            if howto_btn: buttons.append(howto_btn[0])
+            # Add Free Premium Button
+            buttons.append(free_prem_btn)
 
             msg_text = (
                 f"⚡ **Hey {message.from_user.mention}!**\n"
@@ -170,6 +174,8 @@ async def auto_filter(client, message):
             btn = []
             # Add How To Button FIRST
             if howto_btn: btn.append(howto_btn[0])
+            # Add Free Premium Button
+            btn.append(free_prem_btn)
 
             pagination = get_pagination_row(offset, limit, total_results, query)
             if pagination: btn.append(pagination)
@@ -184,6 +190,8 @@ async def auto_filter(client, message):
             btn = []
             # Add How To Button FIRST
             if howto_btn: btn.append(howto_btn[0])
+            # Add Free Premium Button
+            btn.append(free_prem_btn)
 
             pagination = get_pagination_row(offset, limit, total_results, query)
             if pagination: btn.append(pagination)
@@ -208,6 +216,8 @@ async def auto_filter(client, message):
             
             # Add How To Button
             if howto_btn: btn.append(howto_btn[0])
+            # Add Free Premium Button
+            btn.append(free_prem_btn)
 
             pagination = get_pagination_row(offset, limit, total_results, query)
             if pagination: btn.append(pagination)
@@ -229,6 +239,8 @@ async def auto_filter(client, message):
 
             # Add How To Button
             if howto_btn: btn.append(howto_btn[0])
+            # Add Free Premium Button
+            btn.append(free_prem_btn)
 
             if total_results > 1:
                 short_q = query[:20] 
@@ -296,6 +308,9 @@ async def handle_next_back(client, query):
         howto_btn = []
         if howto_url:
             howto_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
+            
+        # ✅ NEW: Free Premium Button
+        free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
         # 3. Generate New Content
         
@@ -304,6 +319,8 @@ async def handle_next_back(client, query):
             buttons = btn_parser(files, query.message.chat.id, req, offset, limit)
             # Add How To Button
             if howto_btn: buttons.append(howto_btn[0])
+            # Add Free Premium
+            buttons.append(free_prem_btn)
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
             
         # --- TEXT MODE ---
@@ -313,6 +330,8 @@ async def handle_next_back(client, query):
             
             btn = []
             if howto_btn: btn.append(howto_btn[0])
+            btn.append(free_prem_btn) # Add Free Premium
+            
             pagination = get_pagination_row(offset, limit, total_results, req)
             if pagination: btn.append(pagination)
             
@@ -330,6 +349,8 @@ async def handle_next_back(client, query):
             
             btn = []
             if howto_btn: btn.append(howto_btn[0])
+            btn.append(free_prem_btn) # Add Free Premium
+            
             pagination = get_pagination_row(offset, limit, total_results, req)
             if pagination: btn.append(pagination)
             
@@ -350,6 +371,8 @@ async def handle_next_back(client, query):
             btn = [[InlineKeyboardButton("🔎 View Results Online", url=final_site_url)]]
             
             if howto_btn: btn.append(howto_btn[0])
+            btn.append(free_prem_btn) # Add Free Premium
+            
             pagination = get_pagination_row(offset, limit, total_results, req)
             if pagination: btn.append(pagination)
             
@@ -373,7 +396,7 @@ async def card_next_nav(client, query):
         file = files[next_index]
         text = format_card_result(file, next_index, total)
         
-        # ✅ Fetch Settings for How To Btn
+        # ✅ Fetch Settings for Buttons
         group_settings = await db.get_group_settings(query.message.chat.id)
         howto_url = group_settings.get('howto_url')
         
@@ -383,6 +406,8 @@ async def card_next_nav(client, query):
         btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
         
         if howto_url: btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
+        # Add Free Premium
+        btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
 
         nav_row = []
         if next_index > 0: nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{next_index}_{q_text}"))
@@ -405,7 +430,7 @@ async def card_prev_nav(client, query):
         file = files[prev_index]
         text = format_card_result(file, prev_index, total)
         
-        # ✅ Fetch Settings for How To Btn
+        # ✅ Fetch Settings for Buttons
         group_settings = await db.get_group_settings(query.message.chat.id)
         howto_url = group_settings.get('howto_url')
         
@@ -415,6 +440,8 @@ async def card_prev_nav(client, query):
         btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
         
         if howto_url: btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
+        # Add Free Premium
+        btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
         
         nav_row = []
         if prev_index > 0: nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{prev_index}_{q_text}"))

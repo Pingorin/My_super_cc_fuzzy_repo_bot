@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 # ✅ CONSTANTS
 REACTIONS = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🎉", "🤩"]
 DELETE_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg" 
-
 # List of qualities to detect
 QUALITIES = ["480p", "720p", "1080p", "2160p", "4k", "CAM", "DVDRip", "HDRip", "HINDI", "ENGLISH"]
 
@@ -101,7 +100,6 @@ async def auto_filter(client, message):
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
         # ✅ QUALITY BUTTON LOGIC (Initial "Select Qualities")
-        # Only show if qualities exist in the results
         qual_menu_btn = []
         if has_qualities(files):
             short_q = query[:20]
@@ -128,9 +126,7 @@ async def auto_filter(client, message):
             text = format_text_results(page_files, query, message.chat.id)
             
             btn = []
-            # ✅ Add "Select Qualities"
             if qual_menu_btn: btn.append(qual_menu_btn)
-            
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
             
@@ -231,8 +227,8 @@ async def open_quality_menu(client, query):
                 row = []
     if row: buttons.append(row)
     
-    # Add Back Button
-    buttons.append([InlineKeyboardButton("🔙 Back to Results", callback_data=f"next_0_{req_query}")])
+    # ✅ Add "Back" Button (Returns to Unfiltered Results)
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"next_0_{req_query}")])
     
     await query.message.edit_text(
         f"📊 **Select Quality**\nResults for: `{req_query}`\n\nChoose a quality to filter:",
@@ -265,8 +261,11 @@ async def apply_quality_filter(client, query):
          if "next_" in buttons[-1][0].callback_data or "pages" in buttons[-1][0].callback_data:
              buttons.pop()
     
-    # 5. Insert "Quality ✅" Button at Top
-    # Clicking this re-opens the menu to change selection
+    # 5. Insert Buttons at TOP
+    # ✅ Row 1: "All Qualities" (Reset)
+    buttons.insert(0, [InlineKeyboardButton("🗂 All Qualities", callback_data=f"next_0_{req}")])
+    
+    # ✅ Row 0: "720p ✅" (Change Selection)
     buttons.insert(0, [InlineKeyboardButton(f"{qual} ✅", callback_data=f"open_qual_menu#{req}")])
 
     # 6. Add Custom Pagination
@@ -277,8 +276,9 @@ async def apply_quality_filter(client, query):
         nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"qualnext_{limit}_{req}_{qual}"))
     if nav: buttons.append(nav)
 
-    # 7. Add Back Button
-    buttons.append([InlineKeyboardButton("🔙 Back to All Results", callback_data=f"next_0_{req}")])
+    # 7. Add Back Button (To initial state)
+    # Note: "All Qualities" effectively does this, but keeping standard Back for consistency if needed
+    # buttons.append([InlineKeyboardButton("🔙 Back to All Results", callback_data=f"next_0_{req}")])
 
     await query.message.edit_text(
         f"⚡ **Filtered Results:** `{req}`\n💎 **Quality:** {qual}\n📂 **Found:** {len(filtered)}",
@@ -305,7 +305,8 @@ async def quality_pagination_handler(client, query):
          if "next_" in buttons[-1][0].callback_data or "pages" in buttons[-1][0].callback_data:
              buttons.pop()
              
-    # Insert Active Quality Button
+    # ✅ Insert Header Buttons (Keep them visible on all pages)
+    buttons.insert(0, [InlineKeyboardButton("🗂 All Qualities", callback_data=f"next_0_{req}")])
     buttons.insert(0, [InlineKeyboardButton(f"{qual} ✅", callback_data=f"open_qual_menu#{req}")])
              
     # Custom Pagination
@@ -321,8 +322,6 @@ async def quality_pagination_handler(client, query):
         nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"qualnext_{offset + limit}_{req}_{qual}"))
         
     if nav: buttons.append(nav)
-    
-    buttons.append([InlineKeyboardButton("🔙 Back to All Results", callback_data=f"next_0_{req}")])
     
     await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -386,7 +385,7 @@ async def handle_next_back(client, query):
         logger.error(f"Pagination Error: {e}")
         await query.answer("⚠️ Error switching page.", show_alert=True)
 
-# ... (Rest of handlers: card_next_, card_prev_, pages - keep them same) ...
+# ... (Card Handlers remain same) ...
 @Client.on_callback_query(filters.regex(r"^card_next_"))
 async def card_next_nav(client, query):
     try:

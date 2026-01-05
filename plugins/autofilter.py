@@ -8,7 +8,8 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import PORT, SITE_URL
-from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row
+# ✅ Added get_qualities to imports
+from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, get_qualities
 
 logger = logging.getLogger(__name__)
 
@@ -147,14 +148,24 @@ async def auto_filter(client, message):
         # ✅ NEW: Free Premium Button
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
+        # ==================================================================
+        # 🌟 NEW: Quality Filter Buttons
+        # ==================================================================
+        # Initialize with "None" filter
+        qual_btn = [InlineKeyboardButton("Select Qualities 🔽", callback_data=f"qual_menu#{query}#None")]
+
         # --- MODE A: BUTTON ---
         if mode == 'button':
             buttons = btn_parser(files, message.chat.id, query, offset, limit)
             
-            # Add How To Button
+            # Add Extra Buttons
             if howto_btn: buttons.append(howto_btn[0])
-            # Add Free Premium Button
+            buttons.append(qual_btn) # ✅ Add Quality Button
             buttons.append(free_prem_btn)
+
+            # Pagination (Note: We pass query + #None for default filter)
+            page_btn = get_pagination_row(offset, limit, total_results, f"{query}#None")
+            if page_btn: buttons.append(page_btn)
 
             msg_text = (
                 f"⚡ **Hey {message.from_user.mention}!**\n"
@@ -172,12 +183,11 @@ async def auto_filter(client, message):
             text = format_text_results(page_files, query, message.chat.id)
             
             btn = []
-            # Add How To Button FIRST
             if howto_btn: btn.append(howto_btn[0])
-            # Add Free Premium Button
+            btn.append(qual_btn) # ✅ Add Quality Button
             btn.append(free_prem_btn)
 
-            pagination = get_pagination_row(offset, limit, total_results, query)
+            pagination = get_pagination_row(offset, limit, total_results, f"{query}#None")
             if pagination: btn.append(pagination)
             
             sent_msg = await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
@@ -188,12 +198,11 @@ async def auto_filter(client, message):
             text = format_detailed_results(page_files, query, message.chat.id, time_taken)
             
             btn = []
-            # Add How To Button FIRST
             if howto_btn: btn.append(howto_btn[0])
-            # Add Free Premium Button
+            btn.append(qual_btn) # ✅ Add Quality Button
             btn.append(free_prem_btn)
 
-            pagination = get_pagination_row(offset, limit, total_results, query)
+            pagination = get_pagination_row(offset, limit, total_results, f"{query}#None")
             if pagination: btn.append(pagination)
             
             sent_msg = await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
@@ -214,12 +223,12 @@ async def auto_filter(client, message):
             
             btn = [[InlineKeyboardButton("🔎 View Results Online", url=final_site_url)]]
             
-            # Add How To Button
             if howto_btn: btn.append(howto_btn[0])
-            # Add Free Premium Button
-            btn.append(free_prem_btn)
+            btn.append(qual_btn) # ✅ Add Quality Button
+            btn.append(free_prem_btn) # Add Free Premium
 
-            pagination = get_pagination_row(offset, limit, total_results, query)
+            # Pagination usually not needed for Site button, but kept for consistency if results > 0
+            pagination = get_pagination_row(offset, limit, total_results, f"{query}#None")
             if pagination: btn.append(pagination)
             
             sent_msg = await message.reply_text(
@@ -237,13 +246,14 @@ async def auto_filter(client, message):
             chat_id = message.chat.id
             btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
 
-            # Add How To Button
             if howto_btn: btn.append(howto_btn[0])
-            # Add Free Premium Button
+            btn.append(qual_btn) # ✅ Add Quality Button
             btn.append(free_prem_btn)
 
             if total_results > 1:
                 short_q = query[:20] 
+                # Note: Card mode handles pagination internally differently, usually not needing filter hash 
+                # but we keep standard prev/next
                 btn.append([
                     InlineKeyboardButton(f"1/{total_results}", callback_data="pages"),
                     InlineKeyboardButton("Next ➡️", callback_data=f"card_next_0_{short_q}")
@@ -277,107 +287,226 @@ async def auto_filter(client, message):
         logger.error(f"Search Error: {e}")
 
 # ==============================================================================
-# ⏭️ PAGINATION CALLBACK HANDLER (Next/Back Logic)
+# 🌟 QUALITY SELECTION HANDLERS
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^qual_menu#"))
+async def quality_menu_handler(client, query):
+    # Data format: qual_menu#{query}#{current_filter}
+    _, req_query, current_filter = query.data.split("#")
+    
+    # 1. Fetch ALL files again to count qualities
+    files = await Media.get_search_results(req_query)
+    if not files: return await query.answer("Expired.", show_alert=True)
+    
+    # 2. Extract Qualities
+    qual_data = get_qualities(files)
+    
+    if not qual_data:
+        return await query.answer("No specific qualities detected.", show_alert=True)
+    
+    buttons = []
+    temp_row = []
+    
+    # 3. Create Quality Buttons
+    for qual, count in qual_data.items():
+        # Text: "720p (6)"
+        btn_txt = f"{qual.upper()} ({count})"
+        # Data: qual_select#{query}#{quality}
+        temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"qual_select#{req_query}#{qual}"))
+        
+        if len(temp_row) == 3: # 3 buttons per row
+            buttons.append(temp_row)
+            temp_row = []
+            
+    if temp_row: buttons.append(temp_row)
+    
+    # Back Button (Returns to 'None' filter)
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"qual_select#{req_query}#None")])
+    
+    await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+
+
+@Client.on_callback_query(filters.regex(r"^qual_select#"))
+async def quality_selection_handler(client, query):
+    # Data format: qual_select#{query}#{selected_quality}
+    _, req_query, selected_qual = query.data.split("#")
+    
+    # 1. Fetch Results
+    files = await Media.get_search_results(req_query)
+    if not files: return await query.answer("Expired.", show_alert=True)
+
+    # 2. FILTER LOGIC
+    filtered_files = []
+    if selected_qual == "None":
+        filtered_files = files # Show All
+    else:
+        # Filter list based on quality string in file name
+        key = selected_qual.lower()
+        if key == "4k":
+             filtered_files = [f for f in files if "4k" in f['file_name'].lower() or "2160p" in f['file_name'].lower()]
+        else:
+             filtered_files = [f for f in files if key in f['file_name'].lower()]
+             
+    if not filtered_files:
+        return await query.answer("No files found for this quality.", show_alert=True)
+
+    # 3. Re-Generate Response (Like auto_filter but with filtered list)
+    total_results = len(filtered_files)
+    limit = 10 
+    offset = 0
+    
+    # Re-fetch Settings for Consistency
+    group_settings = await db.get_group_settings(query.message.chat.id)
+    mode = group_settings.get('result_mode', 'hybrid')
+    limit = group_settings.get('result_page_limit', 10)
+    howto_url = group_settings.get('howto_url')
+    
+    if mode == 'hybrid':
+        if len(filtered_files) <= limit: mode = 'button'
+        else: mode = 'text'
+
+    # 4. Define Buttons
+    extra_btn = []
+    if howto_url: extra_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
+
+    # 🌟 DYNAMIC QUALITY BUTTON UPDATE
+    if selected_qual == "None":
+        # Show standard "Select Qualities"
+        extra_btn.append([InlineKeyboardButton("Select Qualities 🔽", callback_data=f"qual_menu#{req_query}#None")])
+    else:
+        # Show "720p ✅" and "All Qualities"
+        extra_btn.append([
+            InlineKeyboardButton(f"{selected_qual.upper()} ✅", callback_data=f"qual_menu#{req_query}#{selected_qual}"),
+            InlineKeyboardButton("All Qualities 🔄", callback_data=f"qual_select#{req_query}#None")
+        ])
+    
+    extra_btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
+    
+    # Pagination (Pass the selected_qual in the callback!)
+    page_btn = get_pagination_row(offset, limit, total_results, f"{req_query}#{selected_qual}")
+
+    final_markup = []
+    text = ""
+
+    if mode == 'button':
+        final_markup = btn_parser(filtered_files, query.message.chat.id, req_query, offset, limit)
+        text = f"⚡ Results for `{req_query}`"
+        if selected_qual != "None": text += f"\n🎯 **Filter:** {selected_qual.upper()}"
+
+    elif mode in ['text', 'detailed']:
+        page_files = filtered_files[offset : offset + limit]
+        if mode == 'text': text = format_text_results(page_files, req_query, query.message.chat.id)
+        else: text = format_detailed_results(page_files, req_query, query.message.chat.id)
+        
+    elif mode == 'site':
+        search_id = await Media.save_search_results(req_query, filtered_files, query.message.chat.id)
+        final_site_url = f"{SITE_URL}/results/{search_id}"
+        text = f"⚡ Results for: `{req_query}`"
+        if selected_qual != "None": text += f"\n🎯 **Filter:** {selected_qual.upper()}"
+        final_markup = [[InlineKeyboardButton("🔎 View Results Online", url=final_site_url)]]
+
+    # Assemble
+    if mode == 'button':
+        final_markup.extend(extra_btn)
+        if page_btn: final_markup.append(page_btn)
+        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(final_markup))
+    else:
+        buttons = []
+        if mode == 'site': buttons.extend(final_markup)
+        buttons.extend(extra_btn)
+        if page_btn: buttons.append(page_btn)
+        
+        await query.message.edit_text(
+            text, 
+            disable_web_page_preview=True, 
+            reply_markup=InlineKeyboardMarkup(buttons) if buttons else None
+        )
+
+# ==============================================================================
+# ⏭️ UPDATED PAGINATION HANDLER (Supports Filters)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^next_"))
 async def handle_next_back(client, query):
     try:
-        # Callback Data Format: next_{offset}_{req}
-        _, offset, req = query.data.split("_", 2) 
-        offset = int(offset)
+        # Old Format: next_{offset}_{req}
+        # New Format: next_{offset}_{req}#{filter}
         
-        # 1. Fetch Files Again (Stateless)
-        files = await Media.get_search_results(req)
-        if not files:
-            return await query.answer("❌ Search expired or no files found.", show_alert=True)
+        raw_data = query.data.split("_", 2)
+        offset = int(raw_data[1])
+        remainder = raw_data[2]
+        
+        # Parse Query and Filter
+        if "#" in remainder:
+            req_query, current_filter = remainder.split("#", 1)
+        else:
+            req_query = remainder
+            current_filter = "None"
             
-        total_results = len(files)
+        # 1. Fetch Files
+        files = await Media.get_search_results(req_query)
+        if not files: return await query.answer("Expired.", show_alert=True)
         
-        # 2. Get Settings Again
+        # 2. Apply Filter (Same logic as above)
+        filtered_files = []
+        if current_filter == "None":
+            filtered_files = files
+        else:
+            key = current_filter.lower()
+            if key == "4k":
+                 filtered_files = [f for f in files if "4k" in f['file_name'].lower() or "2160p" in f['file_name'].lower()]
+            else:
+                 filtered_files = [f for f in files if key in f['file_name'].lower()]
+                 
+        total_results = len(filtered_files)
+        
+        # 3. Get Settings
         group_settings = await db.get_group_settings(query.message.chat.id)
-        mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
-        limit = group_settings.get('result_page_limit', 10) if group_settings else 10
-
-        # Adjust Mode for Hybrid
-        if mode == 'hybrid':
-            mode = 'button' if len(files) <= limit else 'text'
-
-        # ✅ NEW: Get How To Download URL (For Pagination)
+        mode = group_settings.get('result_mode', 'hybrid')
+        limit = group_settings.get('result_page_limit', 10)
         howto_url = group_settings.get('howto_url')
-        howto_btn = []
-        if howto_url:
-            howto_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
-            
-        # ✅ NEW: Free Premium Button
-        free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
-
-        # 3. Generate New Content
         
-        # --- BUTTON MODE ---
+        if mode == 'hybrid':
+            mode = 'button' if len(filtered_files) <= limit else 'text'
+
+        # 4. Buttons (With Filter State)
+        extra_btn = []
+        if howto_url: extra_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
+        
+        # Quality Button State
+        if current_filter == "None":
+            extra_btn.append([InlineKeyboardButton("Select Qualities 🔽", callback_data=f"qual_menu#{req_query}#None")])
+        else:
+            extra_btn.append([
+                InlineKeyboardButton(f"{current_filter.upper()} ✅", callback_data=f"qual_menu#{req_query}#{current_filter}"),
+                InlineKeyboardButton("All Qualities 🔄", callback_data=f"qual_select#{req_query}#None")
+            ])
+            
+        extra_btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
+        
+        # Generate Output
         if mode == 'button':
-            buttons = btn_parser(files, query.message.chat.id, req, offset, limit)
-            # Add How To Button
-            if howto_btn: buttons.append(howto_btn[0])
-            # Add Free Premium
-            buttons.append(free_prem_btn)
+            buttons = btn_parser(filtered_files, query.message.chat.id, req_query, offset, limit)
+            buttons.extend(extra_btn)
+            # Pass Filter to Pagination
+            page_btn = get_pagination_row(offset, limit, total_results, f"{req_query}#{current_filter}")
+            if page_btn: buttons.append(page_btn)
+            
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
             
-        # --- TEXT MODE ---
-        elif mode == 'text':
-            page_files = files[offset : offset + limit]
-            text = format_text_results(page_files, req, query.message.chat.id)
+        elif mode in ['text', 'detailed']:
+            page_files = filtered_files[offset : offset + limit]
+            if mode == 'text': text = format_text_results(page_files, req_query, query.message.chat.id)
+            else: text = format_detailed_results(page_files, req_query, query.message.chat.id)
             
-            btn = []
-            if howto_btn: btn.append(howto_btn[0])
-            btn.append(free_prem_btn) # Add Free Premium
+            buttons = []
+            buttons.extend(extra_btn)
+            page_btn = get_pagination_row(offset, limit, total_results, f"{req_query}#{current_filter}")
+            if page_btn: buttons.append(page_btn)
             
-            pagination = get_pagination_row(offset, limit, total_results, req)
-            if pagination: btn.append(pagination)
+            await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(buttons))
             
-            await query.message.edit_text(
-                text, 
-                disable_web_page_preview=True, 
-                reply_markup=InlineKeyboardMarkup(btn) if btn else None
-            )
-
-        # --- DETAILED MODE ---
-        elif mode == 'detailed':
-            page_files = files[offset : offset + limit]
-            # Time taken passed as 0 or empty for edits
-            text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
-            
-            btn = []
-            if howto_btn: btn.append(howto_btn[0])
-            btn.append(free_prem_btn) # Add Free Premium
-            
-            pagination = get_pagination_row(offset, limit, total_results, req)
-            if pagination: btn.append(pagination)
-            
-            await query.message.edit_text(
-                text, 
-                disable_web_page_preview=True, 
-                reply_markup=InlineKeyboardMarkup(btn) if btn else None
-            )
-
-        # --- SITE MODE ---
-        elif mode == 'site':
-            search_id = await Media.save_search_results(req, files, query.message.chat.id)
-            
-            page_no = int(offset / limit) + 1
-            base_url = SITE_URL.rstrip('/') if (SITE_URL and SITE_URL.startswith("http")) else "http://127.0.0.1:8080"
-            final_site_url = f"{base_url}/results/{search_id}?page={page_no}"
-            
-            btn = [[InlineKeyboardButton("🔎 View Results Online", url=final_site_url)]]
-            
-            if howto_btn: btn.append(howto_btn[0])
-            btn.append(free_prem_btn) # Add Free Premium
-            
-            pagination = get_pagination_row(offset, limit, total_results, req)
-            if pagination: btn.append(pagination)
-            
-            await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
-
     except Exception as e:
         logger.error(f"Pagination Error: {e}")
         await query.answer("⚠️ Error switching page.", show_alert=True)

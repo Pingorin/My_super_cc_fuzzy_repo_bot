@@ -56,7 +56,6 @@ def format_text_results(files, query, chat_id):
         link_id = file['link_id']
         
         # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id) for the link
-        # This ensures the bot checks THIS group's settings, not the file's source channel
         f_chat_id = chat_id
         
         # Link directs to the bot with the specific Group ID
@@ -148,7 +147,7 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. PAGINATION HELPER (NEW)
+# ✅ 4. PAGINATION HELPER
 def get_pagination_row(current_offset, limit, total_count, query):
     """
     Generates the navigation row: [ ⬅️ Back ] [ 1/5 ] [ Next ➡️ ]
@@ -175,7 +174,7 @@ def get_pagination_row(current_offset, limit, total_count, query):
 
     return buttons
 
-# ✅ 5. BUTTON PARSER (Updated for Pagination)
+# ✅ 5. BUTTON PARSER
 def btn_parser(files, chat_id, query, offset=0, limit=10):
     """
     Generates buttons for Inline Result Mode with Pagination.
@@ -301,3 +300,31 @@ async def check_fsub_4_status(bot, user_id, grp_id=None):
     if not id_4: return "MEMBER", None 
     status = await _get_fsub_status(bot, user_id, id_4)
     return status, id_4
+
+# ✅ 8. QUALITY EXTRACTOR HELPER (NEW)
+def get_qualities(files):
+    """
+    Scans a list of files and counts qualities.
+    Returns a dict like: {'1080p': 5, '720p': 3}
+    """
+    qualities = {"4k": 0, "1080p": 0, "720p": 0, "480p": 0, "360p": 0, "hd": 0}
+    
+    for file in files:
+        name = file.get('file_name', '').lower()
+        
+        # Priority Checking (Higher quality first to avoid overlap)
+        if "2160p" in name or "4k" in name: 
+            qualities["4k"] += 1
+        elif "1080p" in name: 
+            qualities["1080p"] += 1
+        elif "720p" in name: 
+            qualities["720p"] += 1
+        elif "480p" in name: 
+            qualities["480p"] += 1
+        elif "360p" in name: 
+            qualities["360p"] += 1
+        elif "hd" in name: 
+            qualities["hd"] += 1
+            
+    # Return only qualities that have counts > 0
+    return {k: v for k, v in qualities.items() if v > 0}

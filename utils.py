@@ -281,7 +281,7 @@ def get_languages(files):
                 found[lang] += 1
     return {k: v for k, v in found.items() if v > 0}
 
-# ✅ 10. YEAR EXTRACTOR HELPER (NEW)
+# ✅ 10. YEAR EXTRACTOR HELPER
 def get_years(files):
     """
     Scans files and counts years (e.g., 2023, 2024, 1999).
@@ -302,3 +302,31 @@ def get_years(files):
     
     # Sort years descending (newest first)
     return dict(sorted(years.items(), key=lambda item: item[0], reverse=True))
+
+# ✅ 11. SIZE EXTRACTOR HELPER (NEW)
+def get_size_ranges(files):
+    """
+    Checks which size categories contain files.
+    """
+    # Categories: <500MB, 500MB-1GB, 1GB-2GB, >2GB
+    ranges = {
+        "<500MB": False,
+        "500MB-1GB": False,
+        "1GB-2GB": False,
+        ">2GB": False
+    }
+    
+    for file in files:
+        size = file.get('file_size', 0)
+        
+        if size < 524288000: # 500 MB in bytes
+            ranges["<500MB"] = True
+        elif 524288000 <= size < 1073741824: # 500MB - 1GB
+            ranges["500MB-1GB"] = True
+        elif 1073741824 <= size < 2147483648: # 1GB - 2GB
+            ranges["1GB-2GB"] = True
+        elif size >= 2147483648: # > 2GB
+            ranges[">2GB"] = True
+            
+    # Return only categories that verify True
+    return [k for k, v in ranges.items() if v]

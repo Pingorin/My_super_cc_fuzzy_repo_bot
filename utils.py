@@ -301,7 +301,7 @@ async def check_fsub_4_status(bot, user_id, grp_id=None):
     status = await _get_fsub_status(bot, user_id, id_4)
     return status, id_4
 
-# ✅ 8. QUALITY EXTRACTOR HELPER (NEW)
+# ✅ 8. QUALITY EXTRACTOR HELPER
 def get_qualities(files):
     """
     Scans a list of files and counts qualities.
@@ -328,3 +328,34 @@ def get_qualities(files):
             
     # Return only qualities that have counts > 0
     return {k: v for k, v in qualities.items() if v > 0}
+
+# ✅ 9. LANGUAGE EXTRACTOR HELPER
+def get_languages(files):
+    """
+    Scans files and counts languages.
+    """
+    # Define detection map: Key is the Label, Value is the regex check
+    lang_map = {
+        "Hindi": r"\b(hindi|hin|hind)\b",
+        "English": r"\b(english|eng)\b",
+        "Tamil": r"\b(tamil|tam)\b",
+        "Telugu": r"\b(telugu|tel)\b",
+        "Malayalam": r"\b(malayalam|mal)\b",
+        "Kannada": r"\b(kannada|kan)\b",
+        "Bengali": r"\b(bengali|ben)\b",
+        "Punjabi": r"\b(punjabi|pun)\b",
+        "Urdu": r"\b(urdu)\b",
+        "Dual": r"\b(dual)\b",
+        "Multi": r"\b(multi)\b"
+    }
+    
+    found = {k: 0 for k in lang_map.keys()}
+    
+    for file in files:
+        name = file.get('file_name', '').lower()
+        for lang, regex in lang_map.items():
+            if re.search(regex, name):
+                found[lang] += 1
+                
+    # Return only languages that have counts > 0
+    return {k: v for k, v in found.items() if v > 0}

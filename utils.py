@@ -45,7 +45,7 @@ except Exception as e:
     logger.warning(f"Telegraph library not found or error: {e}")
     telegraph_client = None
 
-# ✅ 3. QUALITY EXTRACTION HELPER (NEW)
+# ✅ 3. QUALITY EXTRACTION HELPER
 def extract_qualities(files):
     """
     Scans files and returns a dictionary of qualities found with their counts.
@@ -65,8 +65,7 @@ def extract_qualities(files):
             
             qualities[qual] = qualities.get(qual, 0) + 1
         else:
-            # Files with no specific quality in name can be grouped as 'other' if needed
-            # For now, we only count explicit qualities to keep buttons clean
+            # Files with no specific quality in name
             pass
             
     return qualities
@@ -159,11 +158,11 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 5. PAGINATION HELPER (UPDATED for Qualities)
-def get_pagination_row(current_offset, limit, total_count, query, active_quality=None):
+# ✅ 5. PAGINATION HELPER (Updated to use search_id)
+def get_pagination_row(current_offset, limit, total_count, search_id, active_quality=None):
     """
     Generates the navigation row: [ ⬅️ Back ] [ 1/5 ] [ Next ➡️ ]
-    Passes the 'active_quality' to the callback data.
+    Uses 'search_id' in callback data to prevent 'Expire' issues with long queries.
     """
     buttons = []
     
@@ -178,21 +177,30 @@ def get_pagination_row(current_offset, limit, total_count, query, active_quality
 
     # 1. Back Button
     if current_offset >= limit:
-        buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"next_{current_offset - limit}_{query}_{q_param}"))
+        buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"next_{current_offset - limit}_{search_id}_{q_param}"))
 
     # 2. Page Counter (Static)
     buttons.append(InlineKeyboardButton(f"📑 {current_page}/{total_pages}", callback_data="pages"))
 
     # 3. Next Button
     if current_offset + limit < total_count:
-        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"next_{current_offset + limit}_{query}_{q_param}"))
+        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"next_{current_offset + limit}_{search_id}_{q_param}"))
 
     return buttons
 
-# ✅ 6. BUTTON PARSER (UPDATED for Quality Filtering)
-def btn_parser(files, chat_id, query, offset=0, limit=10, active_quality=None):
+# ✅ 6. BUTTON PARSER (Updated to use search_id for callbacks)
+def btn_parser(files, chat_id, search_id, query=None, offset=0, limit=10, active_quality=None):
     """
     Generates buttons for Inline Result Mode with Pagination AND Quality Filters.
+    
+    Args:
+        files: List of file dictionaries
+        chat_id: Group ID
+        search_id: Unique ID for the search (used in callbacks)
+        query: Original text query (used ONLY for text highlighting, optional)
+        offset: Pagination offset
+        limit: Files per page
+        active_quality: '720p', '1080p', etc.
     """
     
     # --- 1. FILTERING LOGIC ---
@@ -214,7 +222,7 @@ def btn_parser(files, chat_id, query, offset=0, limit=10, active_quality=None):
         filtered_files = files
 
     # --- 2. PAGINATION SLICING ---
-    # Slice the FILTERED list, not the original list
+    # Slice the FILTERED list
     current_files = filtered_files[offset : offset + limit]
     
     buttons = []
@@ -226,6 +234,7 @@ def btn_parser(files, chat_id, query, offset=0, limit=10, active_quality=None):
         caption = file.get('caption')
 
         display_name = f_name
+        # Visual Highlight Logic (Only if query is provided)
         if query and caption:
             q = query.lower()
             n = f_name.lower()
@@ -242,9 +251,8 @@ def btn_parser(files, chat_id, query, offset=0, limit=10, active_quality=None):
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     # --- 3. PAGINATION ROW ---
-    safe_query = query[:20] if query else "blank"
-    
-    pagination = get_pagination_row(offset, limit, len(filtered_files), safe_query, active_quality)
+    # Pass search_id to pagination to keep callbacks short
+    pagination = get_pagination_row(offset, limit, len(filtered_files), search_id, active_quality)
     if pagination:
         buttons.append(pagination)
     
@@ -254,14 +262,14 @@ def btn_parser(files, chat_id, query, offset=0, limit=10, active_quality=None):
         # State: Quality Selected -> Show Checkmark & Reset
         buttons.append([
             InlineKeyboardButton(f"{active_quality.upper()} ✅", callback_data="pages"), # Static button
-            InlineKeyboardButton("All Qualities", callback_data=f"qual_reset_{safe_query}")
+            InlineKeyboardButton("All Qualities", callback_data=f"qual_reset_{search_id}")
         ])
     else:
         # State: No Selection -> Show "Select Qualities" IF valid qualities exist
         qual_counts = extract_qualities(files) # Check full file list for qualities
         if len(qual_counts) > 0:
             buttons.append([
-                InlineKeyboardButton("✨ Select Qualities", callback_data=f"qual_menu_{safe_query}")
+                InlineKeyboardButton("✨ Select Qualities", callback_data=f"qual_menu_{search_id}")
             ])
 
     return buttons

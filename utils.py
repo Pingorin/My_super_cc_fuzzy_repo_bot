@@ -45,7 +45,33 @@ except Exception as e:
     logger.warning(f"Telegraph library not found or error: {e}")
     telegraph_client = None
 
-# ✅ 3. RESULT MODE FORMATTERS
+# ✅ 3. QUALITY EXTRACTION HELPER (NEW)
+def extract_qualities(files):
+    """
+    Scans files and returns a dictionary of qualities found with their counts.
+    e.g., {'1080p': 5, '720p': 3}
+    """
+    qualities = {}
+    # Regex to find common qualities
+    pattern = re.compile(r"\b(4k|2160p|1080p|720p|480p|360p|hd|cam|hdcam|dvdrip|bluray)\b", re.IGNORECASE)
+    
+    for file in files:
+        name = file.get('file_name', '').lower()
+        match = pattern.search(name)
+        if match:
+            qual = match.group(1).lower()
+            # Normalize names (e.g., 2160p -> 4k)
+            if qual == '2160p': qual = '4k'
+            
+            qualities[qual] = qualities.get(qual, 0) + 1
+        else:
+            # Files with no specific quality in name can be grouped as 'other' if needed
+            # For now, we only count explicit qualities to keep buttons clean
+            pass
+            
+    return qualities
+
+# ✅ 4. RESULT MODE FORMATTERS
 
 def format_text_results(files, query, chat_id):
     """Generates the List layout for Text Mode."""
@@ -55,14 +81,9 @@ def format_text_results(files, query, chat_id):
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
         
-        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id) for the link
-        # This ensures the bot checks THIS group's settings, not the file's source channel
         f_chat_id = chat_id
-        
-        # Link directs to the bot with the specific Group ID
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         
-        # HTML Link formatting for cleaner look
         text += f"{i}. 📂 <a href='{link}'>{f_name}</a> [{f_size}]\n\n"
         
     return text
@@ -80,17 +101,13 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
-
-        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
         f_chat_id = chat_id
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         
-        # Auto-Detect Quality
         q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
         quality = q_match.group(0) if q_match else "N/A"
         
-        # Auto-Detect Language
         l_matches = re.findall(r"\b(Hindi|Eng|English|Tam|Tamil|Tel|Telugu|Mal|Malayalam|Kan|Kannada|Ben|Bengali|Pun|Punjabi|Mar|Marathi)\b", f_name, re.IGNORECASE)
         if l_matches:
             lang = ", ".join(sorted(set([l.capitalize() for l in l_matches])))
@@ -123,7 +140,6 @@ def format_card_result(file, current_index, total_count):
     return text
 
 async def post_to_telegraph(files, query, chat_id):
-    """Generates a Telegraph page for Site Mode."""
     if not telegraph_client: return None
     
     html_content = f"<h3>Search Results for: {query}</h3><br>"
@@ -131,71 +147,85 @@ async def post_to_telegraph(files, query, chat_id):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
-        
-        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
         f_chat_id = chat_id
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         html_content += f"<p>📂 <a href='{link}'>{f_name}</a> [{f_size}]</p><hr>"
     
     try:
-        response = telegraph_client.create_page(
-            title=f"Results: {query}", 
-            html_content=html_content
-        )
+        response = telegraph_client.create_page(title=f"Results: {query}", html_content=html_content)
         return response['url']
     except Exception as e:
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. PAGINATION HELPER (NEW)
-def get_pagination_row(current_offset, limit, total_count, query):
+# ✅ 5. PAGINATION HELPER (UPDATED for Qualities)
+def get_pagination_row(current_offset, limit, total_count, query, active_quality=None):
     """
     Generates the navigation row: [ ⬅️ Back ] [ 1/5 ] [ Next ➡️ ]
+    Passes the 'active_quality' to the callback data.
     """
     buttons = []
     
-    # Calculate Page Numbers
     current_page = int(current_offset / limit) + 1
     total_pages = math.ceil(total_count / limit)
 
     if total_pages == 1:
         return []
 
+    # Prepare Quality Parameter for Callback
+    q_param = active_quality if active_quality else "all"
+
     # 1. Back Button
     if current_offset >= limit:
-        buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"next_{current_offset - limit}_{query}"))
+        buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"next_{current_offset - limit}_{query}_{q_param}"))
 
     # 2. Page Counter (Static)
     buttons.append(InlineKeyboardButton(f"📑 {current_page}/{total_pages}", callback_data="pages"))
 
     # 3. Next Button
     if current_offset + limit < total_count:
-        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"next_{current_offset + limit}_{query}"))
+        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"next_{current_offset + limit}_{query}_{q_param}"))
 
     return buttons
 
-# ✅ 5. BUTTON PARSER (Updated for Pagination)
-def btn_parser(files, chat_id, query, offset=0, limit=10):
+# ✅ 6. BUTTON PARSER (UPDATED for Quality Filtering)
+def btn_parser(files, chat_id, query, offset=0, limit=10, active_quality=None):
     """
-    Generates buttons for Inline Result Mode with Pagination.
+    Generates buttons for Inline Result Mode with Pagination AND Quality Filters.
     """
-    # Slice the files based on offset and limit
-    current_files = files[offset : offset + limit]
+    
+    # --- 1. FILTERING LOGIC ---
+    filtered_files = []
+    
+    if active_quality and active_quality != "all":
+        # Create Pattern based on selection
+        if active_quality == '4k':
+            pattern = re.compile(r"\b(4k|2160p)\b", re.IGNORECASE)
+        else:
+            pattern = re.compile(rf"\b{re.escape(active_quality)}\b", re.IGNORECASE)
+            
+        for file in files:
+            fname = file.get('file_name', '').lower()
+            if pattern.search(fname):
+                filtered_files.append(file)
+    else:
+        # No filter active, show all
+        filtered_files = files
+
+    # --- 2. PAGINATION SLICING ---
+    # Slice the FILTERED list, not the original list
+    current_files = filtered_files[offset : offset + limit]
     
     buttons = []
     for file in current_files:
         f_name = file.get('file_name', 'Unknown File')
         f_size = get_size(file.get('file_size', 0))
         link_id = file.get('link_id')
-        
-        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
         f_chat_id = chat_id
-        
         caption = file.get('caption')
 
         display_name = f_name
-        # Simple caption logic to highlight query
         if query and caption:
             q = query.lower()
             n = f_name.lower()
@@ -211,17 +241,32 @@ def btn_parser(files, chat_id, query, offset=0, limit=10):
             url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
-    # --- ADD PAGINATION ROW ---
-    # Max length for callback data is 64 bytes. Truncate query if too long.
+    # --- 3. PAGINATION ROW ---
     safe_query = query[:20] if query else "blank"
     
-    pagination = get_pagination_row(offset, limit, len(files), safe_query)
+    pagination = get_pagination_row(offset, limit, len(filtered_files), safe_query, active_quality)
     if pagination:
         buttons.append(pagination)
-            
+    
+    # --- 4. QUALITY FILTER BUTTONS ---
+    
+    if active_quality and active_quality != "all":
+        # State: Quality Selected -> Show Checkmark & Reset
+        buttons.append([
+            InlineKeyboardButton(f"{active_quality.upper()} ✅", callback_data="pages"), # Static button
+            InlineKeyboardButton("All Qualities", callback_data=f"qual_reset_{safe_query}")
+        ])
+    else:
+        # State: No Selection -> Show "Select Qualities" IF valid qualities exist
+        qual_counts = extract_qualities(files) # Check full file list for qualities
+        if len(qual_counts) > 0:
+            buttons.append([
+                InlineKeyboardButton("✨ Select Qualities", callback_data=f"qual_menu_{safe_query}")
+            ])
+
     return buttons
 
-# ✅ 6. SHORTLINK GENERATOR
+# ✅ 7. SHORTLINK GENERATOR
 async def get_shortlink(site, api, link):
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}
@@ -239,7 +284,7 @@ async def get_shortlink(site, api, link):
         logger.error(f"Shortlink Exception ({site}): {e}")
         return None 
 
-# ✅ 7. FSUB STATUS HELPERS
+# ✅ 8. FSUB STATUS HELPERS
 async def _get_fsub_status(bot, user_id, channel_id):
     try:
         member = await bot.get_chat_member(channel_id, user_id)

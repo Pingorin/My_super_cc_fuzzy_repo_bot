@@ -8,7 +8,6 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import PORT, SITE_URL
-# ✅ Added get_years
 from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, get_qualities, get_languages, get_years
 
 logger = logging.getLogger(__name__)
@@ -213,7 +212,7 @@ async def language_menu_handler(client, query):
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{curr_year}")])
     await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
 
-# --- YEAR MENU (NEW) ---
+# --- YEAR MENU (✅ UPDATED: COUNT REMOVED) ---
 @Client.on_callback_query(filters.regex(r"^year_menu#"))
 async def year_menu_handler(client, query):
     parts = query.data.split("#")
@@ -230,7 +229,8 @@ async def year_menu_handler(client, query):
     buttons = []
     temp_row = []
     for year, count in year_data.items():
-        btn_txt = f"{year} ({count})"
+        # ✅ REMOVED COUNT FROM TEXT
+        btn_txt = f"{year}" 
         temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{year}"))
         if len(temp_row) == 3:
             buttons.append(temp_row)

@@ -287,20 +287,14 @@ def get_years(files):
     Scans files and counts years (e.g., 2023, 2024, 1999).
     """
     years = {}
-    # Regex for years 1900-2099
     regex = r"\b(19|20)\d{2}\b"
-    
     for file in files:
         name = file.get('file_name', '')
         match = re.search(regex, name)
         if match:
             year = match.group(0)
-            if year in years:
-                years[year] += 1
-            else:
-                years[year] = 1
-    
-    # Sort years descending (newest first)
+            if year in years: years[year] += 1
+            else: years[year] = 1
     return dict(sorted(years.items(), key=lambda item: item[0], reverse=True))
 
 # ✅ 11. SIZE EXTRACTOR HELPER
@@ -308,7 +302,6 @@ def get_size_ranges(files):
     """
     Checks which size categories contain files.
     """
-    # Categories: <500MB, 500MB-1GB, 1GB-2GB, >2GB
     ranges = {
         "<500MB": False,
         "500MB-1GB": False,
@@ -318,20 +311,14 @@ def get_size_ranges(files):
     
     for file in files:
         size = file.get('file_size', 0)
-        
-        if size < 524288000: # 500 MB in bytes
-            ranges["<500MB"] = True
-        elif 524288000 <= size < 1073741824: # 500MB - 1GB
-            ranges["500MB-1GB"] = True
-        elif 1073741824 <= size < 2147483648: # 1GB - 2GB
-            ranges["1GB-2GB"] = True
-        elif size >= 2147483648: # > 2GB
-            ranges[">2GB"] = True
+        if size < 524288000: ranges["<500MB"] = True
+        elif 524288000 <= size < 1073741824: ranges["500MB-1GB"] = True
+        elif 1073741824 <= size < 2147483648: ranges["1GB-2GB"] = True
+        elif size >= 2147483648: ranges[">2GB"] = True
             
-    # Return only categories that verify True
     return [k for k, v in ranges.items() if v]
 
-# ✅ 12. MEDIA TYPE FILTER HELPER (NEW)
+# ✅ 12. MEDIA TYPE FILTER (New)
 def filter_by_type(files, media_type):
     """
     Filters files based on type (Videos vs All).

@@ -10,25 +10,20 @@ logger = logging.getLogger(__name__)
 
 class MediaDB:
     def __init__(self, uri, database_name):
-        # ✅ Connection: Using DATABASE_URI (Exclusively for Files)
         self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         
         self.data_col = self.db.files_data   
         self.search_col = self.db.files_search 
         self.counters = self.db.counters
-        
-        # ✅ Collection for Site Mode Cache (Temporary Results)
         self.search_cache = self.db.search_cache 
 
     async def ensure_indexes(self):
-        # Regular indexes for fallback search
         await self.search_col.create_index("file_name")
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
         await self.data_col.create_index("file_unique_id", unique=True)
-        
-        # ✅ TTL Index for Site Mode (Auto-delete cache after 1 hour)
+        # TTL Index: Cache expires after 1 hour (3600s)
         await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
 
     async def get_next_sequence_value(self, sequence_name, increment=1):
@@ -40,7 +35,6 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
-    # --- 🧹 TEXT CLEANER HELPER (Optimized) ---
     @staticmethod
     def clean_text(text):
         if not text: return ""
@@ -48,6 +42,18 @@ class MediaDB:
         text = re.sub(r"@\w+", "", text)
         text = re.sub(r"[-_.]", " ", text)
         return re.sub(r"\s+", " ", text).strip()
+
+    # ✅ Helper for Size Formatting
+    @staticmethod
+    def get_readable_size(size):
+        if not size: return "0 B"
+        power = 2**10
+        n = 0
+        power_labels = {0 : '', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
+        while size > power:
+            size /= power
+            n += 1
+        return f"{size:.2f} {power_labels[n]}B"
 
     async def save_batch(self, items):
         if not items: return 0, 0 
@@ -89,6 +95,13 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
 
+            # ✅ DETERMINE FILE TYPE (Video vs Document)
+            file_type = "document" # Default
+            if hasattr(media, "mime_type") and "video" in media.mime_type:
+                file_type = "video"
+            elif hasattr(media, "width") and media.width: # Videos usually have width/height attributes
+                file_type = "video"
+
             data_docs.append({
                 '_id': current_id,
                 'msg_id': message.id,
@@ -102,7 +115,8 @@ class MediaDB:
                 'file_size': media.file_size, 
                 'caption': caption,
                 'link_id': current_id,
-                'chat_id': message.chat.id # ✅ Added chat_id here for Web Links
+                'chat_id': message.chat.id,
+                'file_type': file_type # ✅ Saving Type
             })
             current_id += 1
 
@@ -140,51 +154,27 @@ class MediaDB:
 
     async def get_search_results(self, query):
         try:
-            words = query.split()
-            
-            if len(words) <= 1:
-                search_stage = {
-                    "$search": {
-                        "index": "default",
-                        "text": {
-                            "query": query,
-                            "path": ["file_name", "caption"],
-                            "fuzzy": {"maxEdits": 2, "prefixLength": 0, "maxExpansions": 50}
-                        }
+            # ATLAS SEARCH (Requires 'default' index on MongoDB Atlas)
+            search_stage = {
+                "$search": {
+                    "index": "default",
+                    "text": {
+                        "query": query,
+                        "path": ["file_name", "caption"],
+                        "fuzzy": {"maxEdits": 1}
                     }
                 }
-            else:
-                must_clauses = []
-                for word in words:
-                    must_clauses.append({
-                        "text": {
-                            "query": word,
-                            "path": ["file_name", "caption"],
-                            "fuzzy": {"maxEdits": 1}
-                        }
-                    })
-                
-                search_stage = {
-                    "$search": {
-                        "index": "default",
-                        "compound": {
-                            "must": must_clauses
-                        }
-                    }
-                }
-
-            pipeline = [search_stage, {"$limit": 50}] # Increased limit for better Site Mode results
+            }
+            pipeline = [search_stage, {"$limit": 50}]
             cursor = self.search_col.aggregate(pipeline)
             files = await cursor.to_list(length=50)
             return files
-            
-        except Exception as e:
-            # Fallback to Regex
+        except Exception:
+            # FALLBACK REGEX SEARCH (For standard MongoDB / LocalHost)
             safe_query = re.escape(query)
             regex = re.compile(safe_query, re.IGNORECASE)
-            
             cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})
-            cursor.sort('$natural', -1)
+            cursor.sort('$natural', -1) # Sort by insertion order
             return await cursor.to_list(length=50)
 
     async def total_files_count(self):
@@ -198,39 +188,34 @@ class MediaDB:
             return 0
 
     # ==================================================================
-    # 🌍 SITE MODE METHODS (Save & Retrieve Cache)
+    # 🌍 SITE MODE METHODS (Optimized)
     # ==================================================================
 
     async def save_search_results(self, query, files, chat_id):
-        """
-        Saves search results to MongoDB with a short UUID for Web View.
-        Added `chat_id` param to fix 'None' type error in Web Server.
-        """
-        unique_id = str(uuid.uuid4())[:8] # Short 8-char ID
+        unique_id = str(uuid.uuid4())[:8]
         
-        # Simplify data to save space
         simplified_files = []
         for file in files:
+            # Format size here so HTML looks good
+            readable_size = self.get_readable_size(file['file_size'])
+            
             simplified_files.append({
                 "file_name": file['file_name'],
-                "file_size": file['file_size'],
+                "file_size": readable_size, 
                 "link_id": file['link_id'],
-                # Try to get specific chat_id from file dict
-                "file_chat_id": file.get('chat_id') 
+                "file_chat_id": file.get('chat_id', chat_id) 
             })
 
         await self.search_cache.insert_one({
             "_id": unique_id,
             "query": query,
-            "chat_id": chat_id, # ✅ Saves User ID for fallback link generation
+            "chat_id": chat_id,
             "files": simplified_files,
             "created_at": datetime.datetime.utcnow()
         })
         return unique_id
 
     async def get_cached_results(self, unique_id):
-        """Retrieves cached results for the Web Server."""
         return await self.search_cache.find_one({"_id": unique_id})
 
-# Initialize with DATABASE_URI
 Media = MediaDB(DATABASE_URI, DATABASE_NAME)

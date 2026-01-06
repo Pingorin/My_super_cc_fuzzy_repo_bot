@@ -8,7 +8,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import PORT, SITE_URL
-# ✅ Added filter_by_type
+# ✅ Added filter_by_type to imports
 from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, get_qualities, get_languages, get_years, get_size_ranges, filter_by_type
 
 logger = logging.getLogger(__name__)
@@ -87,6 +87,7 @@ async def auto_filter(client, message):
         
         # 2. Filter Row 1 (Videos / Type) 🌟 [NEW ROW]
         # Data: menu#{query}#{Qual}#{Lang}#{Year}#{Size}#{Type}
+        # Initial Type is "None" (All Media)
         row1 = [
             InlineKeyboardButton("Videos 🔽", callback_data=f"type_menu#{query}#None#None#None#None#None")
         ]
@@ -163,7 +164,7 @@ async def auto_filter(client, message):
 # 🌟 FILTER MENU HANDLERS
 # ==============================================================================
 
-# --- VIDEOS / TYPE MENU (NEW) ---
+# --- VIDEOS / MEDIA TYPE MENU (NEW) ---
 @Client.on_callback_query(filters.regex(r"^type_menu#"))
 async def type_menu_handler(client, query):
     # Data: type_menu#{query}#{Qual}#{Lang}#{Year}#{Size}#{Type}
@@ -181,6 +182,7 @@ async def type_menu_handler(client, query):
 # --- QUALITY MENU ---
 @Client.on_callback_query(filters.regex(r"^qual_menu#"))
 async def quality_menu_handler(client, query):
+    # Data: qual_menu#{query}#{Qual}#{Lang}#{Year}#{Size}#{Type}
     parts = query.data.split("#")
     req_query, curr_qual, curr_lang, curr_year, curr_size, curr_type = parts[1], parts[2], parts[3], parts[4], parts[5], parts[6]
     
@@ -276,12 +278,14 @@ async def size_menu_handler(client, query):
     if curr_year != "None": files = filter_by_year(files, curr_year)
     if curr_type != "None": files = filter_by_type(files, curr_type)
 
+    # Get available ranges (List of strings)
     size_ranges = get_size_ranges(files)
     if not size_ranges: return await query.answer("No files found.", show_alert=True)
     
     buttons = []
     temp_row = []
     for size_cat in size_ranges:
+        # No count shown on size buttons
         temp_row.append(InlineKeyboardButton(size_cat, callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{curr_year}#{size_cat}#{curr_type}"))
         if len(temp_row) == 2:
             buttons.append(temp_row)
@@ -358,7 +362,7 @@ async def filter_selection_handler(client, query):
     if sel_year != "None": reset_row_2.append(InlineKeyboardButton("All Years 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#None#{sel_size}#{sel_type}"))
     if sel_size != "None": reset_row_2.append(InlineKeyboardButton("All Sizes 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#None#{sel_type}"))
     if reset_row_2: extra_btn.append(reset_row_2)
-
+    
     if sel_type != "None":
          extra_btn.append([InlineKeyboardButton("All Media Types 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None")])
     
@@ -381,12 +385,12 @@ async def filter_selection_handler(client, query):
         if page_btn: final_markup.append(page_btn)
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(final_markup))
         
-    elif mode in ['text', 'detailed', 'site']:
+    elif mode in ['text', 'detailed']:
         page_files = files[offset : offset + limit]
         if mode == 'text': text = format_text_results(page_files, req_query, query.message.chat.id)
         elif mode == 'detailed': text = format_detailed_results(page_files, req_query, query.message.chat.id, 0)
         elif mode == 'site':
-            search_id = await Media.save_search_results(req_query, files, query.message.chat.id)
+            search_id = await Media.save_search_results(query, files, query.message.chat.id)
             text = f"⚡ Results for `{req_query}`\n📂 Found: {total_results}"
             final_markup = [[InlineKeyboardButton("🔎 View Results Online", url=f"{SITE_URL}/results/{search_id}")]]
 
@@ -396,6 +400,41 @@ async def filter_selection_handler(client, query):
         if page_btn: buttons.append(page_btn)
         
         await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(buttons))
+
+# ==============================================================================
+# 🧩 FILTER LOGIC HELPERS
+# ==============================================================================
+def filter_by_quality(files, quality):
+    key = quality.lower()
+    if key == "4k": return [f for f in files if "4k" in f['file_name'].lower() or "2160p" in f['file_name'].lower()]
+    return [f for f in files if key in f['file_name'].lower()]
+
+def filter_by_lang(files, language):
+    lang_map = {
+        "Hindi": ["hindi", "hin", "hind"], "English": ["english", "eng"], "Tamil": ["tamil", "tam"],
+        "Telugu": ["telugu", "tel"], "Malayalam": ["malayalam", "mal"], "Kannada": ["kannada", "kan"],
+        "Bengali": ["bengali", "ben"], "Punjabi": ["punjabi", "pun"], "Urdu": ["urdu"],
+        "Dual": ["dual"], "Multi": ["multi"]
+    }
+    keywords = lang_map.get(language, [language.lower()])
+    filtered = []
+    for f in files:
+        name = f['file_name'].lower()
+        if any(k in name for k in keywords): filtered.append(f)
+    return filtered
+
+def filter_by_year(files, year):
+    return [f for f in files if str(year) in f['file_name']]
+
+def filter_by_size(files, size_cat):
+    filtered = []
+    for f in files:
+        size = f.get('file_size', 0)
+        if size_cat == "<500MB" and size < 524288000: filtered.append(f)
+        elif size_cat == "500MB-1GB" and 524288000 <= size < 1073741824: filtered.append(f)
+        elif size_cat == "1GB-2GB" and 1073741824 <= size < 2147483648: filtered.append(f)
+        elif size_cat == ">2GB" and size >= 2147483648: filtered.append(f)
+    return filtered
 
 # ==============================================================================
 # ⏭️ PAGINATION HANDLER
@@ -408,7 +447,6 @@ async def handle_next_back(client, query):
         offset = int(raw_data[1])
         remainder = raw_data[2]
         
-        # New Format: next_{offset}_{req}#{qual}#{lang}#{year}#{size}#{type}
         if "#" in remainder:
             parts = remainder.split("#")
             req_query = parts[0]
@@ -472,7 +510,7 @@ async def handle_next_back(client, query):
         if sel_year != "None": reset_row_2.append(InlineKeyboardButton("All Years 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#None#{sel_size}#{sel_type}"))
         if sel_size != "None": reset_row_2.append(InlineKeyboardButton("All Sizes 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#None#{sel_type}"))
         if reset_row_2: extra_btn.append(reset_row_2)
-
+        
         if sel_type != "None":
              extra_btn.append([InlineKeyboardButton("All Media Types 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None")])
         

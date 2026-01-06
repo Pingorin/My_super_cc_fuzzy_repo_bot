@@ -287,21 +287,28 @@ def get_years(files):
     Scans files and counts years (e.g., 2023, 2024, 1999).
     """
     years = {}
+    # Regex for years 1900-2099
     regex = r"\b(19|20)\d{2}\b"
+    
     for file in files:
         name = file.get('file_name', '')
         match = re.search(regex, name)
         if match:
             year = match.group(0)
-            if year in years: years[year] += 1
-            else: years[year] = 1
+            if year in years:
+                years[year] += 1
+            else:
+                years[year] = 1
+    
+    # Sort years descending (newest first)
     return dict(sorted(years.items(), key=lambda item: item[0], reverse=True))
 
-# ✅ 11. SIZE EXTRACTOR HELPER
+# ✅ 11. SIZE EXTRACTOR HELPER (NEW)
 def get_size_ranges(files):
     """
     Checks which size categories contain files.
     """
+    # Categories: <500MB, 500MB-1GB, 1GB-2GB, >2GB
     ranges = {
         "<500MB": False,
         "500MB-1GB": False,
@@ -311,25 +318,35 @@ def get_size_ranges(files):
     
     for file in files:
         size = file.get('file_size', 0)
-        if size < 524288000: ranges["<500MB"] = True
-        elif 524288000 <= size < 1073741824: ranges["500MB-1GB"] = True
-        elif 1073741824 <= size < 2147483648: ranges["1GB-2GB"] = True
-        elif size >= 2147483648: ranges[">2GB"] = True
+        
+        if size < 524288000: # 500 MB in bytes
+            ranges["<500MB"] = True
+        elif 524288000 <= size < 1073741824: # 500MB - 1GB
+            ranges["500MB-1GB"] = True
+        elif 1073741824 <= size < 2147483648: # 1GB - 2GB
+            ranges["1GB-2GB"] = True
+        elif size >= 2147483648: # > 2GB
+            ranges[">2GB"] = True
             
+    # Return only categories that verify True
     return [k for k, v in ranges.items() if v]
 
-# ✅ 12. MEDIA TYPE FILTER (UPDATED)
-def filter_by_type(files, media_type):
+# ✅ 12. TYPE EXTRACTOR HELPER (NEW)
+def filter_by_type(files, type_arg):
     """
-    Filters files based on type (Videos vs Docs).
+    Filters files based on Videos or Documents.
     """
-    if media_type == "Videos":
-        video_exts = [".mkv", ".mp4", ".avi", ".webm", ".mov", ".flv", ".m4v"]
-        return [f for f in files if any(f['file_name'].lower().endswith(ext) for ext in video_exts)]
+    video_extensions = ('.mkv', '.mp4', '.avi', '.webm', '.mov', '.flv', '.m4v')
     
-    elif media_type == "Docs":
-        # Common document, archive, and executable extensions
-        doc_exts = [".zip", ".rar", ".7z", ".pdf", ".epub", ".apk", ".exe", ".iso", ".txt", ".rtf", ".mobi"]
-        return [f for f in files if any(f['file_name'].lower().endswith(ext) for ext in doc_exts)]
+    filtered = []
+    for f in files:
+        name = f.get('file_name', '').lower()
         
-    return files
+        if type_arg == "Videos":
+            if name.endswith(video_extensions):
+                filtered.append(f)
+        elif type_arg == "Docs":
+            if not name.endswith(video_extensions):
+                filtered.append(f)
+                
+    return filtered

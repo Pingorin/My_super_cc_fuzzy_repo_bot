@@ -318,12 +318,18 @@ def get_size_ranges(files):
             
     return [k for k, v in ranges.items() if v]
 
-# ✅ 12. MEDIA TYPE FILTER (New)
+# ✅ 12. MEDIA TYPE FILTER (UPDATED)
 def filter_by_type(files, media_type):
     """
-    Filters files based on type (Videos vs All).
+    Filters files based on type (Videos vs Docs).
     """
     if media_type == "Videos":
         video_exts = [".mkv", ".mp4", ".avi", ".webm", ".mov", ".flv", ".m4v"]
         return [f for f in files if any(f['file_name'].lower().endswith(ext) for ext in video_exts)]
+    
+    elif media_type == "Docs":
+        # Common document, archive, and executable extensions
+        doc_exts = [".zip", ".rar", ".7z", ".pdf", ".epub", ".apk", ".exe", ".iso", ".txt", ".rtf", ".mobi"]
+        return [f for f in files if any(f['file_name'].lower().endswith(ext) for ext in doc_exts)]
+        
     return files

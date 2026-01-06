@@ -95,12 +95,14 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
 
-            # ✅ DETERMINE FILE TYPE (Video vs Document)
+            # ✅ STRICT TYPE DETECTION
+            # Checks the Telegram Message Type directly
             file_type = "document" # Default
-            if hasattr(media, "mime_type") and "video" in media.mime_type:
+            
+            if getattr(message, 'video', None):
                 file_type = "video"
-            elif hasattr(media, "width") and media.width: # Videos usually have width/height attributes
-                file_type = "video"
+            elif getattr(message, 'document', None):
+                file_type = "document"
 
             data_docs.append({
                 '_id': current_id,
@@ -116,7 +118,7 @@ class MediaDB:
                 'caption': caption,
                 'link_id': current_id,
                 'chat_id': message.chat.id,
-                'file_type': file_type # ✅ Saving Type
+                'file_type': file_type # ✅ Saving Correct Type
             })
             current_id += 1
 

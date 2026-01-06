@@ -330,23 +330,3 @@ def get_size_ranges(files):
             
     # Return only categories that verify True
     return [k for k, v in ranges.items() if v]
-
-# ✅ 12. TYPE EXTRACTOR HELPER (NEW)
-def filter_by_type(files, type_arg):
-    """
-    Filters files based on Videos or Documents.
-    """
-    video_extensions = ('.mkv', '.mp4', '.avi', '.webm', '.mov', '.flv', '.m4v')
-    
-    filtered = []
-    for f in files:
-        name = f.get('file_name', '').lower()
-        
-        if type_arg == "Videos":
-            if name.endswith(video_extensions):
-                filtered.append(f)
-        elif type_arg == "Docs":
-            if not name.endswith(video_extensions):
-                filtered.append(f)
-                
-    return filtered

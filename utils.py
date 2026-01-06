@@ -303,7 +303,7 @@ def get_years(files):
     # Sort years descending (newest first)
     return dict(sorted(years.items(), key=lambda item: item[0], reverse=True))
 
-# ✅ 11. SIZE EXTRACTOR HELPER (NEW)
+# ✅ 11. SIZE EXTRACTOR HELPER
 def get_size_ranges(files):
     """
     Checks which size categories contain files.
@@ -330,3 +330,13 @@ def get_size_ranges(files):
             
     # Return only categories that verify True
     return [k for k, v in ranges.items() if v]
+
+# ✅ 12. MEDIA TYPE FILTER HELPER (NEW)
+def filter_by_type(files, media_type):
+    """
+    Filters files based on type (Videos vs All).
+    """
+    if media_type == "Videos":
+        video_exts = [".mkv", ".mp4", ".avi", ".webm", ".mov", ".flv", ".m4v"]
+        return [f for f in files if any(f['file_name'].lower().endswith(ext) for ext in video_exts)]
+    return files

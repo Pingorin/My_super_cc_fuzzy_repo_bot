@@ -23,7 +23,6 @@ class MediaDB:
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
         await self.data_col.create_index("file_unique_id", unique=True)
-        # TTL Index: Cache expires after 1 hour (3600s)
         await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
 
     async def get_next_sequence_value(self, sequence_name, increment=1):
@@ -43,7 +42,6 @@ class MediaDB:
         text = re.sub(r"[-_.]", " ", text)
         return re.sub(r"\s+", " ", text).strip()
 
-    # ✅ Helper for Size Formatting
     @staticmethod
     def get_readable_size(size):
         if not size: return "0 B"
@@ -95,10 +93,7 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
 
-            # ✅ STRICT TYPE DETECTION
-            # Checks the Telegram Message Type directly
-            file_type = "document" # Default
-            
+            file_type = "document" 
             if getattr(message, 'video', None):
                 file_type = "video"
             elif getattr(message, 'document', None):
@@ -118,7 +113,7 @@ class MediaDB:
                 'caption': caption,
                 'link_id': current_id,
                 'chat_id': message.chat.id,
-                'file_type': file_type # ✅ Saving Correct Type
+                'file_type': file_type 
             })
             current_id += 1
 
@@ -154,9 +149,29 @@ class MediaDB:
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    async def get_search_results(self, query):
+    # ✅ UPDATED SEARCH METHOD WITH SORTING
+    async def get_search_results(self, query, sort_mode="relevance"):
+        """
+        Fetches search results with sorting.
+        sort_mode: 'relevance', 'newest', 'oldest', 'size_asc', 'size_desc'
+        """
+        
+        # Determine Sorting Order
+        sort_criteria = []
+        if sort_mode == "newest":
+            sort_criteria = [('link_id', -1)] # Descending ID
+        elif sort_mode == "oldest":
+            sort_criteria = [('link_id', 1)]  # Ascending ID
+        elif sort_mode == "size_desc":
+            sort_criteria = [('file_size', -1)]
+        elif sort_mode == "size_asc":
+            sort_criteria = [('file_size', 1)]
+        else:
+            # Relevance (Default) - Default to natural/newest
+            sort_criteria = [('link_id', -1)] 
+
         try:
-            # ATLAS SEARCH (Requires 'default' index on MongoDB Atlas)
+            # ATLAS SEARCH
             search_stage = {
                 "$search": {
                     "index": "default",
@@ -167,16 +182,29 @@ class MediaDB:
                     }
                 }
             }
-            pipeline = [search_stage, {"$limit": 50}]
+            
+            pipeline = [search_stage]
+            
+            # Apply Sort Stage for Atlas
+            if sort_mode != "relevance":
+                pipeline.append({"$sort": dict(sort_criteria)})
+            
+            pipeline.append({"$limit": 50})
+            
             cursor = self.search_col.aggregate(pipeline)
             files = await cursor.to_list(length=50)
             return files
+            
         except Exception:
-            # FALLBACK REGEX SEARCH (For standard MongoDB / LocalHost)
+            # FALLBACK REGEX SEARCH
             safe_query = re.escape(query)
             regex = re.compile(safe_query, re.IGNORECASE)
+            
             cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})
-            cursor.sort('$natural', -1) # Sort by insertion order
+            
+            if sort_criteria:
+                cursor.sort(sort_criteria)
+            
             return await cursor.to_list(length=50)
 
     async def total_files_count(self):
@@ -189,18 +217,11 @@ class MediaDB:
         except:
             return 0
 
-    # ==================================================================
-    # 🌍 SITE MODE METHODS (Optimized)
-    # ==================================================================
-
     async def save_search_results(self, query, files, chat_id):
         unique_id = str(uuid.uuid4())[:8]
-        
         simplified_files = []
         for file in files:
-            # Format size here so HTML looks good
             readable_size = self.get_readable_size(file['file_size'])
-            
             simplified_files.append({
                 "file_name": file['file_name'],
                 "file_size": readable_size, 

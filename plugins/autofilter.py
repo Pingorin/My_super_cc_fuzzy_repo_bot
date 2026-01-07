@@ -65,6 +65,14 @@ def filter_by_size(files, size_cat):
         elif size_cat == ">2GB" and size >= 2147483648: filtered.append(f)
     return filtered
 
+# ✅ HELPER: Wrong Result Button Text
+def get_wrong_btn_text(attempt):
+    if attempt == 0: return "Wrong Result? Click Here ❌"
+    if attempt == 1: return "Still Wrong? Click Here 🤷‍♂️"
+    if attempt == 2: return "Try Different Search 🔍"
+    if attempt == 3: return "Last Try 🤞"
+    return None # Hide button after last try
+
 # ✅ HELPER: Auto-Delete Logic
 async def auto_delete_task(bot_message, user_message, delay, show_thanks, query="files"):
     if delay <= 0: return 
@@ -107,12 +115,11 @@ async def auto_filter(client, message):
         auto_react = group_settings.get('auto_reaction', False)
         auto_del_time = group_settings.get('auto_delete_time', 300)
         user_del = group_settings.get('auto_delete_user_msg', False)
-        del_thanks = group_settings.get('delete_thanks_msg', True)
+        del_thanks = group_settings.get('delete_thanks_msg', True)        
         howto_url = group_settings.get('howto_url')
 
         await db.update_daily_stats(message.chat.id, 'req')
 
-        # ✅ DEFAULT SORT: relevance
         files = await Media.get_search_results(query, sort_mode="relevance")
         if not files: return
             
@@ -130,31 +137,38 @@ async def auto_filter(client, message):
         if howto_url:
             extra_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
         
-        # ROW 1: Media Type
-        # Data format: menu#{query}#{Qual}#{Lang}#{Year}#{Size}#{Type}#{Sort}
+        # Format: menu#{query}#{Qual}#{Lang}#{Year}#{Size}#{Type}#{Sort}#{Attempt}
+        # Initial Attempt is 0
         
+        # ROW 1: Media Type
         media_row = [
-            InlineKeyboardButton("Videos", callback_data=f"filter_sel#{query}#None#None#None#None#Video#relevance"),
-            InlineKeyboardButton("Docs", callback_data=f"filter_sel#{query}#None#None#None#None#Document#relevance")
+            InlineKeyboardButton("Videos", callback_data=f"filter_sel#{query}#None#None#None#None#Video#relevance#0"),
+            InlineKeyboardButton("Docs", callback_data=f"filter_sel#{query}#None#None#None#None#Document#relevance#0")
         ]
         extra_btn.append(media_row)
 
         # ROW 2: Quality | Language
         row2 = [
-            InlineKeyboardButton("Select Qualities 🔽", callback_data=f"qual_menu#{query}#None#None#None#None#None#relevance"),
-            InlineKeyboardButton("Select Language 🔽", callback_data=f"lang_menu#{query}#None#None#None#None#None#relevance")
+            InlineKeyboardButton("Select Qualities 🔽", callback_data=f"qual_menu#{query}#None#None#None#None#None#relevance#0"),
+            InlineKeyboardButton("Select Language 🔽", callback_data=f"lang_menu#{query}#None#None#None#None#None#relevance#0")
         ]
         extra_btn.append(row2)
 
         # ROW 3: Year | Size
         row3 = [
-            InlineKeyboardButton("Select Year 🔽", callback_data=f"year_menu#{query}#None#None#None#None#None#relevance"),
-            InlineKeyboardButton("Select Size 🔽", callback_data=f"size_menu#{query}#None#None#None#None#None#relevance")
+            InlineKeyboardButton("Select Year 🔽", callback_data=f"year_menu#{query}#None#None#None#None#None#relevance#0"),
+            InlineKeyboardButton("Select Size 🔽", callback_data=f"size_menu#{query}#None#None#None#None#None#relevance#0")
         ]
         extra_btn.append(row3)
 
-        # ✅ ROW 4: Sort By Files
-        extra_btn.append([InlineKeyboardButton("Sort By Files 🔽", callback_data=f"sort_menu#{query}#None#None#None#None#None#relevance")])
+        # ROW 4: Sort
+        extra_btn.append([InlineKeyboardButton("Sort By Files 🔽", callback_data=f"sort_menu#{query}#None#None#None#None#None#relevance#0")])
+
+        # ✅ ROW 5: Wrong Result (Attempt 0)
+        # Clicking this increments attempt to 1
+        wrong_txt = get_wrong_btn_text(0)
+        if wrong_txt:
+            extra_btn.append([InlineKeyboardButton(wrong_txt, callback_data=f"filter_sel#{query}#None#None#None#None#None#relevance#1")])
 
         # Free Premium
         extra_btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
@@ -165,8 +179,8 @@ async def auto_filter(client, message):
         if mode == 'hybrid':
             mode = 'button' if len(files) <= limit else 'text'
 
-        # Pass filters: query#Qual#Lang#Year#Size#Type#Sort
-        page_btn = get_pagination_row(offset, limit, total_results, f"{query}#None#None#None#None#None#relevance")
+        # Pagination
+        page_btn = get_pagination_row(offset, limit, total_results, f"{query}#None#None#None#None#None#relevance#0")
 
         final_markup = []
         text = ""
@@ -202,18 +216,18 @@ async def auto_filter(client, message):
             )
 
         if sent_msg and auto_del_time > 0:
-            asyncio.create_task(auto_delete_task(sent_msg, message, auto_del_time, group_settings.get('delete_thanks_msg', True), query))
+            asyncio.create_task(auto_delete_task(sent_msg, message, auto_del_time, del_thanks, query))
 
     except Exception as e:
         logger.error(f"Search Error: {e}")
 
 # ==============================================================================
-# 🎯 MASTER SELECTION HANDLER (UPDATED FOR SORT)
+# 🎯 MASTER SELECTION HANDLER (UPDATED)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^filter_sel#"))
 async def filter_selection_handler(client, query):
-    # Data: filter_sel#{query}#{qual}#{lang}#{year}#{size}#{type}#{sort}
+    # Data: filter_sel#{query}#{qual}#{lang}#{year}#{size}#{type}#{sort}#{attempt}
     parts = query.data.split("#")
     req_query = parts[1]
     sel_qual = parts[2]
@@ -221,9 +235,13 @@ async def filter_selection_handler(client, query):
     sel_year = parts[4]
     sel_size = parts[5]
     sel_type = parts[6]
-    sel_sort = parts[7] if len(parts) > 7 else "relevance" # ✅ New Parameter
+    sel_sort = parts[7]
+    # ✅ Read Attempt Count (New Param)
+    sel_attempt = int(parts[8]) if len(parts) > 8 else 0
     
-    # 1. Fetch & Filter (PASS SORT MODE)
+    # 1. Fetch & Filter
+    # If attempt > 0, we could technically change the search logic here if desired.
+    # For now, we fetch the same results but update the button text.
     files = await Media.get_search_results(req_query, sort_mode=sel_sort)
     
     if sel_qual != "None": files = filter_by_quality(files, sel_qual)
@@ -232,7 +250,11 @@ async def filter_selection_handler(client, query):
     if sel_size != "None": files = filter_by_size(files, sel_size)
     if sel_type != "None": files = filter_by_type(files, sel_type)
              
-    if not files: return await query.answer("No files found for this combination.", show_alert=True)
+    if not files: 
+        # If user clicked "Wrong Result" but it led to 0 files (unlikely with same query), reset attempt
+        if sel_attempt > 0:
+             return await query.answer("Reloading...", show_alert=False)
+        return await query.answer("No files found for this combination.", show_alert=True)
 
     # 2. Build Response
     total_results = len(files)
@@ -249,59 +271,64 @@ async def filter_selection_handler(client, query):
     extra_btn = []
     if howto_url: extra_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
 
-    # ROW 1: Media Type
+    # ROW 1: Media Type (Resets Attempt to 0)
     media_row = []
     if sel_type == "None":
-        media_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}"))
-        media_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}"))
+        media_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}#0"))
+        media_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}#0"))
     elif sel_type == "Video":
-        media_row.append(InlineKeyboardButton("Videos ✅", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}"))
-        media_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}"))
+        media_row.append(InlineKeyboardButton("Videos ✅", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}#0"))
+        media_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}#0"))
     elif sel_type == "Document":
-        media_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}"))
-        media_row.append(InlineKeyboardButton("Docs ✅", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}"))
+        media_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}#0"))
+        media_row.append(InlineKeyboardButton("Docs ✅", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}#0"))
     extra_btn.append(media_row)
 
-    # ROW 2: Quality & Language
+    # ROW 2: Quality & Language (Resets Attempt to 0)
     row2 = []
     q_txt = "Select Qualities 🔽" if sel_qual == "None" else f"{sel_qual.upper()} ✅"
-    row2.append(InlineKeyboardButton(q_txt, callback_data=f"qual_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
+    row2.append(InlineKeyboardButton(q_txt, callback_data=f"qual_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#0"))
     l_txt = "Select Language 🔽" if sel_lang == "None" else f"{sel_lang} ✅"
-    row2.append(InlineKeyboardButton(l_txt, callback_data=f"lang_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
+    row2.append(InlineKeyboardButton(l_txt, callback_data=f"lang_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#0"))
     extra_btn.append(row2)
 
-    # ROW 3: Year & Size
+    # ROW 3: Year & Size (Resets Attempt to 0)
     row3 = []
     y_txt = "Select Year 🔽" if sel_year == "None" else f"{sel_year} ✅"
-    row3.append(InlineKeyboardButton(y_txt, callback_data=f"year_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
+    row3.append(InlineKeyboardButton(y_txt, callback_data=f"year_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#0"))
     s_txt = "Select Size 🔽" if sel_size == "None" else f"{sel_size} ✅"
-    row3.append(InlineKeyboardButton(s_txt, callback_data=f"size_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
+    row3.append(InlineKeyboardButton(s_txt, callback_data=f"size_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#0"))
     extra_btn.append(row3)
 
-    # ✅ ROW 4: SORT BY FILES
-    # If standard sort (relevance), just show text. If custom sort, show tick
+    # ROW 4: Sort
     sort_label = "Sort By Files 🔽"
-    if sel_sort != "relevance":
-        sort_label = f"Sort: {sel_sort.replace('_', ' ').title()} 🔽"
-    extra_btn.append([InlineKeyboardButton(sort_label, callback_data=f"sort_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")])
+    if sel_sort != "relevance": sort_label = "Sort By Files (Active) 🔽"
+    extra_btn.append([InlineKeyboardButton(sort_label, callback_data=f"sort_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#0")])
+
+    # ✅ ROW 5: Wrong Result Button
+    wrong_txt = get_wrong_btn_text(sel_attempt)
+    if wrong_txt:
+        # Pass next attempt (current + 1)
+        next_attempt = sel_attempt + 1
+        extra_btn.append([InlineKeyboardButton(wrong_txt, callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#{next_attempt}")])
 
     # RESET BUTTONS
     reset_row = []
-    if sel_qual != "None": reset_row.append(InlineKeyboardButton("All Qualities 🔄", callback_data=f"filter_sel#{req_query}#None#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
-    if sel_lang != "None": reset_row.append(InlineKeyboardButton("All Languages 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#None#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
+    if sel_qual != "None": reset_row.append(InlineKeyboardButton("All Qualities 🔄", callback_data=f"filter_sel#{req_query}#None#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#0"))
+    if sel_lang != "None": reset_row.append(InlineKeyboardButton("All Languages 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#None#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#0"))
     if reset_row: extra_btn.append(reset_row)
     
     reset_row_2 = []
-    if sel_year != "None": reset_row_2.append(InlineKeyboardButton("All Years 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#None#{sel_size}#{sel_type}#{sel_sort}"))
-    if sel_size != "None": reset_row_2.append(InlineKeyboardButton("All Sizes 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#None#{sel_type}#{sel_sort}"))
+    if sel_year != "None": reset_row_2.append(InlineKeyboardButton("All Years 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#None#{sel_size}#{sel_type}#{sel_sort}#0"))
+    if sel_size != "None": reset_row_2.append(InlineKeyboardButton("All Sizes 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#None#{sel_type}#{sel_sort}#0"))
     if reset_row_2: extra_btn.append(reset_row_2)
     
     if sel_type != "None":
-        extra_btn.append([InlineKeyboardButton("All Media Types 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}")])
+        extra_btn.append([InlineKeyboardButton("All Media Types 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}#0")])
 
     extra_btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
     
-    page_btn = get_pagination_row(offset, limit, total_results, f"{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")
+    page_btn = get_pagination_row(offset, limit, total_results, f"{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#{sel_attempt}")
 
     # 4. Generate Output
     final_markup = []
@@ -341,29 +368,29 @@ async def filter_selection_handler(client, query):
 
 @Client.on_callback_query(filters.regex(r"^sort_menu#"))
 async def sort_menu_handler(client, query):
-    # Data: sort_menu#{query}#{qual}#{lang}#{year}#{size}#{type}#{sort}
+    # Data: sort_menu#{query}#{qual}#{lang}#{year}#{size}#{type}#{sort}#{attempt}
     parts = query.data.split("#")
     req_query, curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
+    curr_attempt = parts[8] if len(parts) > 8 else "0"
     
-    # Helper to check tick
     def tick(val): return " ✅" if curr_sort == val else ""
     
-    # Base Data string for all buttons (Preserve other filters)
+    # Base Data string (Resets attempt to 0 on sort change)
     base = f"{req_query}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}"
     
     buttons = [
-        [InlineKeyboardButton(f"Relevance{tick('relevance')}", callback_data=f"filter_sel#{base}#relevance")],
-        [InlineKeyboardButton(f"Newest First{tick('newest')}", callback_data=f"filter_sel#{base}#newest")],
-        [InlineKeyboardButton(f"Oldest First{tick('oldest')}", callback_data=f"filter_sel#{base}#oldest")],
-        [InlineKeyboardButton(f"Size (High-Low){tick('size_desc')}", callback_data=f"filter_sel#{base}#size_desc")],
-        [InlineKeyboardButton(f"Size (Low-High){tick('size_asc')}", callback_data=f"filter_sel#{base}#size_asc")],
-        [InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{base}#{curr_sort}")]
+        [InlineKeyboardButton(f"Relevance{tick('relevance')}", callback_data=f"filter_sel#{base}#relevance#0")],
+        [InlineKeyboardButton(f"Newest First{tick('newest')}", callback_data=f"filter_sel#{base}#newest#0")],
+        [InlineKeyboardButton(f"Oldest First{tick('oldest')}", callback_data=f"filter_sel#{base}#oldest#0")],
+        [InlineKeyboardButton(f"Size (High-Low){tick('size_desc')}", callback_data=f"filter_sel#{base}#size_desc#0")],
+        [InlineKeyboardButton(f"Size (Low-High){tick('size_asc')}", callback_data=f"filter_sel#{base}#size_asc#0")],
+        [InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{base}#{curr_sort}#{curr_attempt}")]
     ]
     
     await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🧩 OTHER FILTER MENUS (UPDATED FOR SORT PARAM)
+# 🧩 OTHER FILTER MENUS (UPDATED FOR SORT & ATTEMPT)
 # ==============================================================================
 
 # --- QUALITY MENU ---
@@ -371,6 +398,7 @@ async def sort_menu_handler(client, query):
 async def quality_menu_handler(client, query):
     parts = query.data.split("#")
     req_query, curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
+    curr_attempt = parts[8] if len(parts) > 8 else "0"
     
     files = await Media.get_search_results(req_query, sort_mode=curr_sort)
     if curr_lang != "None": files = filter_by_lang(files, curr_lang)
@@ -385,13 +413,14 @@ async def quality_menu_handler(client, query):
     temp_row = []
     for qual, count in qual_data.items():
         btn_txt = f"{qual.upper()} ({count})"
-        temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_sel#{req_query}#{qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}"))
+        # Clicking a filter resets attempt to 0
+        temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_sel#{req_query}#{qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}#0"))
         if len(temp_row) == 3:
             buttons.append(temp_row)
             temp_row = []
     if temp_row: buttons.append(temp_row)
     
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}")])
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}#{curr_attempt}")])
     await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
 
 # --- LANGUAGE MENU ---
@@ -399,6 +428,7 @@ async def quality_menu_handler(client, query):
 async def language_menu_handler(client, query):
     parts = query.data.split("#")
     req_query, curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
+    curr_attempt = parts[8] if len(parts) > 8 else "0"
     
     files = await Media.get_search_results(req_query, sort_mode=curr_sort)
     if curr_qual != "None": files = filter_by_quality(files, curr_qual)
@@ -413,13 +443,13 @@ async def language_menu_handler(client, query):
     temp_row = []
     for lang, count in lang_data.items():
         btn_txt = f"{lang} ({count})"
-        temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_sel#{req_query}#{curr_qual}#{lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}"))
+        temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_sel#{req_query}#{curr_qual}#{lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}#0"))
         if len(temp_row) == 3:
             buttons.append(temp_row)
             temp_row = []
     if temp_row: buttons.append(temp_row)
     
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}")])
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}#{curr_attempt}")])
     await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
 
 # --- YEAR MENU ---
@@ -427,6 +457,7 @@ async def language_menu_handler(client, query):
 async def year_menu_handler(client, query):
     parts = query.data.split("#")
     req_query, curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
+    curr_attempt = parts[8] if len(parts) > 8 else "0"
     
     files = await Media.get_search_results(req_query, sort_mode=curr_sort)
     if curr_qual != "None": files = filter_by_quality(files, curr_qual)
@@ -441,13 +472,13 @@ async def year_menu_handler(client, query):
     temp_row = []
     for year, count in year_data.items():
         btn_txt = f"{year}"
-        temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{year}#{curr_size}#{curr_type}#{curr_sort}"))
+        temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{year}#{curr_size}#{curr_type}#{curr_sort}#0"))
         if len(temp_row) == 3:
             buttons.append(temp_row)
             temp_row = []
     if temp_row: buttons.append(temp_row)
     
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}")])
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}#{curr_attempt}")])
     await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
 
 # --- SIZE MENU ---
@@ -455,6 +486,7 @@ async def year_menu_handler(client, query):
 async def size_menu_handler(client, query):
     parts = query.data.split("#")
     req_query, curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
+    curr_attempt = parts[8] if len(parts) > 8 else "0"
     
     files = await Media.get_search_results(req_query, sort_mode=curr_sort)
     if curr_qual != "None": files = filter_by_quality(files, curr_qual)
@@ -468,13 +500,13 @@ async def size_menu_handler(client, query):
     buttons = []
     temp_row = []
     for size_cat in size_ranges:
-        temp_row.append(InlineKeyboardButton(size_cat, callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{curr_year}#{size_cat}#{curr_type}#{curr_sort}"))
+        temp_row.append(InlineKeyboardButton(size_cat, callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{curr_year}#{size_cat}#{curr_type}#{curr_sort}#0"))
         if len(temp_row) == 2:
             buttons.append(temp_row)
             temp_row = []
     if temp_row: buttons.append(temp_row)
     
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}")])
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{req_query}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}#{curr_attempt}")])
     await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
@@ -488,7 +520,7 @@ async def handle_next_back(client, query):
         offset = int(raw_data[1])
         remainder = raw_data[2]
         
-        # Format: query#qual#lang#year#size#type#sort
+        # Format: query#qual#lang#year#size#type#sort#attempt
         if "#" in remainder:
             parts = remainder.split("#")
             req_query = parts[0]
@@ -498,6 +530,7 @@ async def handle_next_back(client, query):
             sel_size = parts[4] if len(parts) > 4 else "None"
             sel_type = parts[5] if len(parts) > 5 else "None"
             sel_sort = parts[6] if len(parts) > 6 else "relevance"
+            sel_attempt = int(parts[7]) if len(parts) > 7 else 0
         else:
             req_query = remainder
             sel_qual = "None"
@@ -506,6 +539,7 @@ async def handle_next_back(client, query):
             sel_size = "None"
             sel_type = "None"
             sel_sort = "relevance"
+            sel_attempt = 0
             
         files = await Media.get_search_results(req_query, sort_mode=sel_sort)
         if sel_qual != "None": files = filter_by_quality(files, sel_qual)
@@ -529,51 +563,58 @@ async def handle_next_back(client, query):
         # ROW 1: Media Type
         media_row = []
         if sel_type == "None":
-            media_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}"))
-            media_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}"))
+            media_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}#0"))
+            media_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}#0"))
         elif sel_type == "Video":
-            media_row.append(InlineKeyboardButton("Videos ✅", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}"))
-            media_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}"))
+            media_row.append(InlineKeyboardButton("Videos ✅", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}#0"))
+            media_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}#0"))
         elif sel_type == "Document":
-            media_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}"))
-            media_row.append(InlineKeyboardButton("Docs ✅", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}"))
+            media_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}#0"))
+            media_row.append(InlineKeyboardButton("Docs ✅", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}#0"))
         extra_btn.append(media_row)
 
         row2 = []
         q_txt = "Select Qualities 🔽" if sel_qual == "None" else f"{sel_qual.upper()} ✅"
-        row2.append(InlineKeyboardButton(q_txt, callback_data=f"qual_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
+        row2.append(InlineKeyboardButton(q_txt, callback_data=f"qual_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#{sel_attempt}"))
         l_txt = "Select Language 🔽" if sel_lang == "None" else f"{sel_lang} ✅"
-        row2.append(InlineKeyboardButton(l_txt, callback_data=f"lang_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
+        row2.append(InlineKeyboardButton(l_txt, callback_data=f"lang_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#{sel_attempt}"))
         extra_btn.append(row2)
 
         row3 = []
         y_txt = "Select Year 🔽" if sel_year == "None" else f"{sel_year} ✅"
-        row3.append(InlineKeyboardButton(y_txt, callback_data=f"year_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
+        row3.append(InlineKeyboardButton(y_txt, callback_data=f"year_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#{sel_attempt}"))
         s_txt = "Select Size 🔽" if sel_size == "None" else f"{sel_size} ✅"
-        row3.append(InlineKeyboardButton(s_txt, callback_data=f"size_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
+        row3.append(InlineKeyboardButton(s_txt, callback_data=f"size_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#{sel_attempt}"))
         extra_btn.append(row3)
 
-        # ✅ SORT BY FILES
+        # ROW 4: Sort
         sort_label = "Sort By Files 🔽"
         if sel_sort != "relevance": sort_label = "Sort By Files (Active) 🔽"
-        extra_btn.append([InlineKeyboardButton(sort_label, callback_data=f"sort_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")])
+        extra_btn.append([InlineKeyboardButton(sort_label, callback_data=f"sort_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#{sel_attempt}")])
 
+        # ✅ ROW 5: Wrong Result
+        wrong_txt = get_wrong_btn_text(sel_attempt)
+        if wrong_txt:
+            next_attempt = sel_attempt + 1
+            extra_btn.append([InlineKeyboardButton(wrong_txt, callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#{next_attempt}")])
+
+        # RESET BUTTONS
         reset_row = []
-        if sel_qual != "None": reset_row.append(InlineKeyboardButton("All Qualities 🔄", callback_data=f"filter_sel#{req_query}#None#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
-        if sel_lang != "None": reset_row.append(InlineKeyboardButton("All Languages 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#None#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
+        if sel_qual != "None": reset_row.append(InlineKeyboardButton("All Qualities 🔄", callback_data=f"filter_sel#{req_query}#None#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#0"))
+        if sel_lang != "None": reset_row.append(InlineKeyboardButton("All Languages 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#None#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#0"))
         if reset_row: extra_btn.append(reset_row)
         
         reset_row_2 = []
-        if sel_year != "None": reset_row_2.append(InlineKeyboardButton("All Years 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#None#{sel_size}#{sel_type}#{sel_sort}"))
-        if sel_size != "None": reset_row_2.append(InlineKeyboardButton("All Sizes 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#None#{sel_type}#{sel_sort}"))
+        if sel_year != "None": reset_row_2.append(InlineKeyboardButton("All Years 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#None#{sel_size}#{sel_type}#{sel_sort}#0"))
+        if sel_size != "None": reset_row_2.append(InlineKeyboardButton("All Sizes 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#None#{sel_type}#{sel_sort}#0"))
         if reset_row_2: extra_btn.append(reset_row_2)
         
         if sel_type != "None":
-            extra_btn.append([InlineKeyboardButton("All Media Types 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}")])
+            extra_btn.append([InlineKeyboardButton("All Media Types 🔄", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}#0")])
 
         extra_btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
         
-        page_btn = get_pagination_row(offset, limit, total_results, f"{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")
+        page_btn = get_pagination_row(offset, limit, total_results, f"{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}#{sel_attempt}")
         
         if mode == 'button':
             buttons = btn_parser(files, query.message.chat.id, req_query, offset, limit)

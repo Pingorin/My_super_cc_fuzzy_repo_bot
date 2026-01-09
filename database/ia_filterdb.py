@@ -23,6 +23,7 @@ class MediaDB:
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
         await self.data_col.create_index("file_unique_id", unique=True)
+        # Verify Search Cache has TTL (Expiry) - Cleans up old query cache automatically
         await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
 
     async def get_next_sequence_value(self, sequence_name, increment=1):
@@ -52,6 +53,35 @@ class MediaDB:
             size /= power
             n += 1
         return f"{size:.2f} {power_labels[n]}B"
+
+    # ✅ 1. NEW: REGISTER QUERY (Fixes Button Limit Error)
+    async def register_search_query(self, query):
+        """
+        Saves a long query to the database and returns a short 8-char ID.
+        This prevents 'BUTTON_DATA_INVALID' errors in Telegram.
+        """
+        unique_id = str(uuid.uuid4())[:8]
+        try:
+            await self.search_cache.insert_one({
+                "_id": unique_id,
+                "query": query,
+                "type": "query_cache", # Distinguishes from full result cache
+                "created_at": datetime.datetime.utcnow()
+            })
+            return unique_id
+        except Exception as e:
+            logger.error(f"Error registering query: {e}")
+            return "error"
+
+    # ✅ 2. NEW: GET QUERY
+    async def get_search_query(self, unique_id):
+        """Retrieves the original query using the short ID."""
+        try:
+            doc = await self.search_cache.find_one({"_id": unique_id})
+            if doc:
+                return doc.get("query")
+        except: pass
+        return None
 
     async def save_batch(self, items):
         if not items: return 0, 0 
@@ -149,7 +179,7 @@ class MediaDB:
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    # ✅ NEW LEVEL 1 SEARCH METHOD (Loose Regex Search)
+    # ✅ 3. REGEX SEARCH (For Level 1 Wrong Result Fallback)
     async def get_regex_search_results(self, query):
         """
         Level 1 Loose Search: Matches ANY word in the query (OR logic).

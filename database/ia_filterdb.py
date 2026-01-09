@@ -149,6 +149,31 @@ class MediaDB:
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
+    # ✅ NEW LEVEL 1 SEARCH METHOD (Loose Regex Search)
+    async def get_regex_search_results(self, query):
+        """
+        Level 1 Loose Search: Matches ANY word in the query (OR logic).
+        Example: "Spider Man" -> Regex: "Spider|Man"
+        """
+        # Split words, filter out single letters or empty strings to avoid noise
+        words = [w for w in query.split(" ") if len(w) > 1] 
+        if not words: return []
+        
+        # Construct Regex: word1|word2|word3
+        regex_pattern = "|".join(map(re.escape, words))
+        
+        try:
+            # We search specifically in file_name using regex
+            # Case insensitive search ($options: "i")
+            cursor = self.search_col.find({
+                "file_name": {"$regex": regex_pattern, "$options": "i"}
+            }).limit(20) # Limit to 20 for loose search to maintain performance
+            
+            return await cursor.to_list(length=20)
+        except Exception as e:
+            print(f"Regex Search Error: {e}")
+            return []
+
     # ✅ UPDATED SEARCH METHOD WITH SORTING
     async def get_search_results(self, query, sort_mode="relevance"):
         """

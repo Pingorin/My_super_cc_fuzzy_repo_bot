@@ -141,6 +141,9 @@ async def auto_filter(client, message):
         # 🌟 BUTTON GENERATION LOGIC
         # ==================================================================
         
+        # ✅ FIX: Register Query to DB to avoid 64-byte limit error
+        search_key = await Media.register_search_query(query)
+
         extra_btn = []
         
         if howto_url:
@@ -170,8 +173,8 @@ async def auto_filter(client, message):
         # ✅ ROW 4: Sort By Files
         extra_btn.append([InlineKeyboardButton("Sort By Files 🔽", callback_data=f"sort_menu#{query}#None#None#None#None#None#relevance")])
 
-        # ✅ NEW BUTTON: LEVEL 1 WRONG RESULT
-        extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{query}")])
+        # ✅ NEW SAFE BUTTON: LEVEL 1 WRONG RESULT (Using ID)
+        extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{search_key}")])
 
         # Free Premium
         extra_btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
@@ -225,28 +228,35 @@ async def auto_filter(client, message):
         logger.error(f"Search Error: {e}")
 
 # ==============================================================================
-# 🔥 RECHECK HANDLER (LEVEL 1, 2, 3)
+# 🔥 SAFE RECHECK HANDLER (LEVEL 1, 2, 3)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^recheck_"))
 async def recheck_handler(client, query):
-    # Data format: recheck_{level}#{query}
+    # Data format: recheck_{level}#{key}
     data = query.data.split("#")
     level_tag = data[0] # recheck_1, recheck_2, recheck_3
-    original_query = data[1]
+    search_key = data[1]
+    
+    # ✅ RETRIEVE ORIGINAL QUERY FROM DB
+    original_query = await Media.get_search_query(search_key)
+    
+    if not original_query:
+        return await query.answer("⚠️ Session expired. Please search again.", show_alert=True)
     
     chat_id = query.message.chat.id
+    
+    # 
     
     # --- LEVEL 1: LOOSE SEARCH (REGEX) ---
     if level_tag == "recheck_1":
         # Loose search using Regex (Word1|Word2)
         files = await Media.get_regex_search_results(original_query)
         
-        # Button for Next Level
-        next_btn = [InlineKeyboardButton("😕 Still Wrong? Click Here", callback_data=f"recheck_2#{original_query}")]
+        # Button for Next Level (Pass same Key)
+        next_btn = [InlineKeyboardButton("😕 Still Wrong? Click Here", callback_data=f"recheck_2#{search_key}")]
         
         if not files:
-            # If Level 1 fails, go directly to Level 2 UI or Error
             text = f"⚠️ **Level 1 Search:** No loose matches found for `{original_query}`."
             await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([next_btn]))
             return
@@ -263,15 +273,14 @@ async def recheck_handler(client, query):
         # Clean Logic
         new_query = clean_and_truncate(original_query)
         
-        # If query didn't change (single word), might as well skip to Level 3
+        # If query didn't change (single word), skip to Level 3
         if new_query == original_query.lower():
-             # Trigger Level 3 manually
              return await show_level_3(query, original_query)
 
         files = await Media.get_search_results(new_query)
         
-        # Button for Next Level
-        next_btn = [InlineKeyboardButton("⚠️ Last Try", callback_data=f"recheck_3#{original_query}")]
+        # Button for Next Level (Pass same Key)
+        next_btn = [InlineKeyboardButton("⚠️ Last Try", callback_data=f"recheck_3#{search_key}")]
         
         if not files:
             text = f"⚠️ **Level 2 Search:** Truncated query `{new_query}` yielded no results."
@@ -393,7 +402,9 @@ async def filter_selection_handler(client, query):
     extra_btn.append([InlineKeyboardButton(sort_label, callback_data=f"sort_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")])
 
     # ✅ NEW BUTTON: WRONG RESULT (Ensure it persists in filtering)
-    extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{req_query}")])
+    # Register query again to get a fresh key for this specific view
+    search_key = await Media.register_search_query(req_query)
+    extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{search_key}")])
 
     # RESET BUTTONS
     reset_row = []
@@ -666,8 +677,10 @@ async def handle_next_back(client, query):
         if sel_sort != "relevance": sort_label = "Sort By Files (Active) 🔽"
         extra_btn.append([InlineKeyboardButton(sort_label, callback_data=f"sort_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")])
 
-        # ✅ NEW BUTTON: LEVEL 1 WRONG RESULT
-        extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{req_query}")])
+        # ✅ NEW BUTTON: LEVEL 1 WRONG RESULT (Using ID)
+        # Register query again to be safe in pagination view
+        search_key = await Media.register_search_query(req_query)
+        extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{search_key}")])
 
         reset_row = []
         if sel_qual != "None": reset_row.append(InlineKeyboardButton("All Qualities 🔄", callback_data=f"filter_sel#{req_query}#None#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))

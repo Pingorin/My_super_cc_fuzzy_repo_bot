@@ -1,13 +1,13 @@
 import logging
-import time
 import re
 import random 
 import asyncio 
+import urllib.parse
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-from info import PORT, SITE_URL, ADMINS
+from info import PORT, SITE_URL, LOG_CHANNEL, ADMINS
 from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, get_qualities, get_languages, get_years, get_size_ranges
 
 logger = logging.getLogger(__name__)
@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 # ✅ CONSTANTS
 REACTIONS = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🎉", "🤩"]
 DELETE_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg"
+STOP_WORDS = ['the', 'a', 'an', 'of', 'and', 'in', 'is', 'to', 'movie', 'series', 'full', 'hd', 'download', 'hindi', 'dubbed', 'eng', 'tam', 'tel']
 
 # ==============================================================================
 # 🧩 FILTER LOGIC HELPERS
@@ -64,6 +65,21 @@ def filter_by_size(files, size_cat):
         elif size_cat == "1GB-2GB" and 1073741824 <= size < 2147483648: filtered.append(f)
         elif size_cat == ">2GB" and size >= 2147483648: filtered.append(f)
     return filtered
+
+# ✅ LEVEL 2 HELPER: Clean & Truncate
+def clean_and_truncate(query):
+    words = query.lower().split()
+    # 1. Remove Stop Words
+    cleaned = [w for w in words if w not in STOP_WORDS]
+    
+    # If cleaning removed everything, revert to original split
+    if not cleaned: cleaned = words
+
+    # 2. Truncate (Remove last word if more than 1 word remains)
+    if len(cleaned) > 1:
+        cleaned.pop() 
+    
+    return " ".join(cleaned)
 
 # ✅ HELPER: Auto-Delete Logic
 async def auto_delete_task(bot_message, user_message, delay, show_thanks, query="files"):
@@ -131,30 +147,31 @@ async def auto_filter(client, message):
             extra_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
         
         # ROW 1: Media Type
-        # Data format: menu#{query}#{Qual}#{Lang}#{Year}#{Size}#{Type}#{Sort}
-        
         media_row = [
-            InlineKeyboardButton("Videos 🎥", callback_data=f"filter_sel#{query}#None#None#None#None#Video#relevance"),
-            InlineKeyboardButton("Docs 🗂", callback_data=f"filter_sel#{query}#None#None#None#None#Document#relevance")
+            InlineKeyboardButton("Videos", callback_data=f"filter_sel#{query}#None#None#None#None#Video#relevance"),
+            InlineKeyboardButton("Docs", callback_data=f"filter_sel#{query}#None#None#None#None#Document#relevance")
         ]
         extra_btn.append(media_row)
 
         # ROW 2: Quality | Language
         row2 = [
-            InlineKeyboardButton("Select Qualities ✨", callback_data=f"qual_menu#{query}#None#None#None#None#None#relevance"),
-            InlineKeyboardButton("Select Language 🌐", callback_data=f"lang_menu#{query}#None#None#None#None#None#relevance")
+            InlineKeyboardButton("Select Qualities 🔽", callback_data=f"qual_menu#{query}#None#None#None#None#None#relevance"),
+            InlineKeyboardButton("Select Language 🔽", callback_data=f"lang_menu#{query}#None#None#None#None#None#relevance")
         ]
         extra_btn.append(row2)
 
         # ROW 3: Year | Size
         row3 = [
-            InlineKeyboardButton("Select Year 🗓", callback_data=f"year_menu#{query}#None#None#None#None#None#relevance"),
-            InlineKeyboardButton("Select Size 💾", callback_data=f"size_menu#{query}#None#None#None#None#None#relevance")
+            InlineKeyboardButton("Select Year 🔽", callback_data=f"year_menu#{query}#None#None#None#None#None#relevance"),
+            InlineKeyboardButton("Select Size 🔽", callback_data=f"size_menu#{query}#None#None#None#None#None#relevance")
         ]
         extra_btn.append(row3)
 
         # ✅ ROW 4: Sort By Files
-        extra_btn.append([InlineKeyboardButton("Sort By Files ↕️", callback_data=f"sort_menu#{query}#None#None#None#None#None#relevance")])
+        extra_btn.append([InlineKeyboardButton("Sort By Files 🔽", callback_data=f"sort_menu#{query}#None#None#None#None#None#relevance")])
+
+        # ✅ NEW BUTTON: LEVEL 1 WRONG RESULT
+        extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{query}")])
 
         # Free Premium
         extra_btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
@@ -208,6 +225,96 @@ async def auto_filter(client, message):
         logger.error(f"Search Error: {e}")
 
 # ==============================================================================
+# 🔥 RECHECK HANDLER (LEVEL 1, 2, 3)
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^recheck_"))
+async def recheck_handler(client, query):
+    # Data format: recheck_{level}#{query}
+    data = query.data.split("#")
+    level_tag = data[0] # recheck_1, recheck_2, recheck_3
+    original_query = data[1]
+    
+    chat_id = query.message.chat.id
+    
+    # --- LEVEL 1: LOOSE SEARCH (REGEX) ---
+    if level_tag == "recheck_1":
+        # Loose search using Regex (Word1|Word2)
+        files = await Media.get_regex_search_results(original_query)
+        
+        # Button for Next Level
+        next_btn = [InlineKeyboardButton("😕 Still Wrong? Click Here", callback_data=f"recheck_2#{original_query}")]
+        
+        if not files:
+            # If Level 1 fails, go directly to Level 2 UI or Error
+            text = f"⚠️ **Level 1 Search:** No loose matches found for `{original_query}`."
+            await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([next_btn]))
+            return
+
+        # Show Results with Level 2 Button
+        text = f"⚡ **Level 1 (Loose Search):** `{original_query}`\nfound {len(files)} matches."
+        buttons = btn_parser(files, chat_id, original_query, offset=0, limit=10)
+        buttons.append(next_btn)
+        
+        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+    # --- LEVEL 2: TRUNCATE SEARCH ---
+    elif level_tag == "recheck_2":
+        # Clean Logic
+        new_query = clean_and_truncate(original_query)
+        
+        # If query didn't change (single word), might as well skip to Level 3
+        if new_query == original_query.lower():
+             # Trigger Level 3 manually
+             return await show_level_3(query, original_query)
+
+        files = await Media.get_search_results(new_query)
+        
+        # Button for Next Level
+        next_btn = [InlineKeyboardButton("⚠️ Last Try", callback_data=f"recheck_3#{original_query}")]
+        
+        if not files:
+            text = f"⚠️ **Level 2 Search:** Truncated query `{new_query}` yielded no results."
+            await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([next_btn]))
+            return
+
+        # Show Results with Level 3 Button
+        text = f"⚡ **Level 2 (Smart Truncate):** `{new_query}`\nfound {len(files)} matches."
+        buttons = btn_parser(files, chat_id, new_query, offset=0, limit=10)
+        buttons.append(next_btn)
+        
+        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+    # --- LEVEL 3: GOOGLE / REQUEST ---
+    elif level_tag == "recheck_3":
+        await show_level_3(query, original_query)
+
+async def show_level_3(query, search_query):
+    # Fetch Group Link for "Request" button
+    grp_link = "https://t.me/" # Default
+    try:
+        settings = await db.get_group_settings(query.message.chat.id)
+        if settings and settings.get('group_link'):
+            grp_link = settings.get('group_link')
+    except: pass
+    
+    google_url = f"https://www.google.com/search?q={urllib.parse.quote(search_query)}"
+    
+    text = (
+        f"😕 **We couldn't find the file.**\n\n"
+        f"Query: `{search_query}`\n\n"
+        "It might be a spelling mistake or the file hasn't been added yet."
+    )
+    
+    buttons = [
+        [InlineKeyboardButton("🔍 Google Spell Check", url=google_url)],
+        [InlineKeyboardButton("🙋‍♂️ Request File", url=grp_link)],
+        [InlineKeyboardButton("❌ Close", callback_data="close_data")]
+    ]
+    
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+# ==============================================================================
 # 🎯 MASTER SELECTION HANDLER (UPDATED FOR SORT)
 # ==============================================================================
 
@@ -258,32 +365,35 @@ async def filter_selection_handler(client, query):
         media_row.append(InlineKeyboardButton("Videos ✅", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}"))
         media_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}"))
     elif sel_type == "Document":
-        media_row.append(InlineKeyboardButton("Videos ", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}"))
+        media_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}"))
         media_row.append(InlineKeyboardButton("Docs ✅", callback_data=f"filter_sel#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}"))
     extra_btn.append(media_row)
 
     # ROW 2: Quality & Language
     row2 = []
-    q_txt = "Select Qualities ✨" if sel_qual == "None" else f"{sel_qual.upper()} ✅"
+    q_txt = "Select Qualities 🔽" if sel_qual == "None" else f"{sel_qual.upper()} ✅"
     row2.append(InlineKeyboardButton(q_txt, callback_data=f"qual_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
-    l_txt = "Select Language 🌐" if sel_lang == "None" else f"{sel_lang} ✅"
+    l_txt = "Select Language 🔽" if sel_lang == "None" else f"{sel_lang} ✅"
     row2.append(InlineKeyboardButton(l_txt, callback_data=f"lang_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
     extra_btn.append(row2)
 
     # ROW 3: Year & Size
     row3 = []
-    y_txt = "Select Year 🗓" if sel_year == "None" else f"{sel_year} ✅"
+    y_txt = "Select Year 🔽" if sel_year == "None" else f"{sel_year} ✅"
     row3.append(InlineKeyboardButton(y_txt, callback_data=f"year_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
-    s_txt = "Select Size 💾" if sel_size == "None" else f"{sel_size} ✅"
+    s_txt = "Select Size 🔽" if sel_size == "None" else f"{sel_size} ✅"
     row3.append(InlineKeyboardButton(s_txt, callback_data=f"size_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
     extra_btn.append(row3)
 
     # ✅ ROW 4: SORT BY FILES
     # If standard sort (relevance), just show text. If custom sort, show tick
-    sort_label = "Sort By Files ↕️"
+    sort_label = "Sort By Files 🔽"
     if sel_sort != "relevance":
         sort_label = f"Sort: {sel_sort.replace('_', ' ').title()} 🔽"
     extra_btn.append([InlineKeyboardButton(sort_label, callback_data=f"sort_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")])
+
+    # ✅ NEW BUTTON: WRONG RESULT (Ensure it persists in filtering)
+    extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{req_query}")])
 
     # RESET BUTTONS
     reset_row = []
@@ -362,9 +472,7 @@ async def sort_menu_handler(client, query):
     
     await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
 
-# ==============================================================================
-# 🧩 OTHER FILTER MENUS (UPDATED FOR SORT PARAM)
-# ==============================================================================
+# ... [Keep your existing QUALITY/LANG/YEAR/SIZE Handlers] ...
 
 # --- QUALITY MENU ---
 @Client.on_callback_query(filters.regex(r"^qual_menu#"))
@@ -478,7 +586,7 @@ async def size_menu_handler(client, query):
     await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# ⏭️ PAGINATION HANDLER
+# ⏭️ PAGINATION HANDLER (UPDATED TO PRESERVE RECHECK BTN)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^next_"))
@@ -540,23 +648,26 @@ async def handle_next_back(client, query):
         extra_btn.append(media_row)
 
         row2 = []
-        q_txt = "Select Qualities ✨" if sel_qual == "None" else f"{sel_qual.upper()} ✅"
+        q_txt = "Select Qualities 🔽" if sel_qual == "None" else f"{sel_qual.upper()} ✅"
         row2.append(InlineKeyboardButton(q_txt, callback_data=f"qual_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
-        l_txt = "Select Language 🌐" if sel_lang == "None" else f"{sel_lang} ✅"
+        l_txt = "Select Language 🔽" if sel_lang == "None" else f"{sel_lang} ✅"
         row2.append(InlineKeyboardButton(l_txt, callback_data=f"lang_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
         extra_btn.append(row2)
 
         row3 = []
-        y_txt = "Select Year 🗓" if sel_year == "None" else f"{sel_year} ✅"
+        y_txt = "Select Year 🔽" if sel_year == "None" else f"{sel_year} ✅"
         row3.append(InlineKeyboardButton(y_txt, callback_data=f"year_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
-        s_txt = "Select Size 💾" if sel_size == "None" else f"{sel_size} ✅"
+        s_txt = "Select Size 🔽" if sel_size == "None" else f"{sel_size} ✅"
         row3.append(InlineKeyboardButton(s_txt, callback_data=f"size_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
         extra_btn.append(row3)
 
         # ✅ SORT BY FILES
-        sort_label = "Sort By Files ↕️"
+        sort_label = "Sort By Files 🔽"
         if sel_sort != "relevance": sort_label = "Sort By Files (Active) 🔽"
         extra_btn.append([InlineKeyboardButton(sort_label, callback_data=f"sort_menu#{req_query}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")])
+
+        # ✅ NEW BUTTON: LEVEL 1 WRONG RESULT
+        extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{req_query}")])
 
         reset_row = []
         if sel_qual != "None": reset_row.append(InlineKeyboardButton("All Qualities 🔄", callback_data=f"filter_sel#{req_query}#None#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))

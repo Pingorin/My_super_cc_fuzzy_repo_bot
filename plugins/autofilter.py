@@ -159,7 +159,7 @@ async def auto_filter(client, message):
         # ROW 4: Sort
         extra_btn.append([InlineKeyboardButton("Sort By Files 🔽", callback_data=f"sort_menu#{search_key}#None#None#None#None#None#relevance")])
 
-        # Wrong Result
+        # ✅ WRONG RESULT BUTTON (LEVEL 1)
         extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{search_key}")])
 
         extra_btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
@@ -212,7 +212,7 @@ async def auto_filter(client, message):
         logger.error(f"Search Error: {e}")
 
 # ==============================================================================
-# 🔥 SAFE RECHECK HANDLER (LEVEL 1, 2, 3) - UPDATED FOR MODES
+# 🔥 SAFE RECHECK HANDLER (LEVEL 1, 2, 3) - UPDATED WITH PROGRESSIVE BUTTONS
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^recheck_"))
@@ -222,12 +222,16 @@ async def recheck_handler(client, query):
     search_key = data[1]
     chat_id = query.message.chat.id
     
-    # ✅ 1. Get Group Settings
+    # ✅ 1. Show "Getting Results" Loading State
+    try:
+        await query.message.edit_text("🔄 **Getting Results... Please Wait** ⏳")
+    except: pass # Ignore if message not modified
+
+    # ✅ 2. Get Settings & Query
     group_settings = await db.get_group_settings(chat_id)
     mode = group_settings.get('result_mode', 'hybrid')
     limit = group_settings.get('result_page_limit', 10)
     
-    # ✅ 2. Get Query
     original_query = await Media.get_search_query(search_key)
     if not original_query: return await query.answer("⚠️ Session expired.", show_alert=True)
     
@@ -238,22 +242,26 @@ async def recheck_handler(client, query):
     header_text = ""
 
     if level_tag == "recheck_1":
+        # Level 1: Regex Search
         files = await Media.get_regex_search_results(original_query)
         display_query = original_query
+        # Button changes to Level 2
         next_btn = [InlineKeyboardButton("😕 Still Wrong? Click Here", callback_data=f"recheck_2#{search_key}")]
         header_text = f"⚡ **Level 1 (Loose Search):** `{display_query}`\nfound {len(files)} matches."
         
         if not files:
-            text = f"⚠️ **Level 1 Search:** No matches for `{original_query}`."
+            text = f"⚠️ **Level 1 Search:** No loose matches found for `{original_query}`."
             await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([next_btn]))
             return
 
     elif level_tag == "recheck_2":
+        # Level 2: Truncate
         new_query = clean_and_truncate(original_query)
         if new_query == original_query.lower(): return await show_level_3(query, original_query)
 
         files = await Media.get_search_results(new_query)
         display_query = new_query
+        # Button changes to Level 3
         next_btn = [InlineKeyboardButton("⚠️ Last Try", callback_data=f"recheck_3#{search_key}")]
         header_text = f"⚡ **Level 2 (Smart Truncate):** `{display_query}`\nfound {len(files)} matches."
         
@@ -266,8 +274,6 @@ async def recheck_handler(client, query):
         return await show_level_3(query, original_query)
 
     # --- DISPLAY LOGIC (RESPECTING MODES) ---
-    
-    # Hybrid Check
     if mode == 'hybrid':
         mode = 'button' if len(files) <= limit else 'text'
 
@@ -277,17 +283,12 @@ async def recheck_handler(client, query):
         await query.message.edit_text(header_text, reply_markup=InlineKeyboardMarkup(buttons))
         
     elif mode in ['text', 'detailed', 'site']:
-        page_files = files[:10] # Show top 10 for recheck
+        page_files = files[:10]
         
         if mode == 'text': 
             text = format_text_results(page_files, display_query, chat_id)
-        elif mode == 'detailed': 
-            text = format_detailed_results(page_files, display_query, chat_id, 0)
-        elif mode == 'site':
-            # For recheck, we might just show text/detailed or generate a new link
-            # To be safe and fast, let's use detailed view for recheck in site mode, 
-            # or generate a new site link (which might be overkill). 
-            # Let's fallback to Detailed Text for immediate feedback.
+        else: 
+            # Default to detailed for better context in rechecks
             text = format_detailed_results(page_files, display_query, chat_id, 0)
 
         buttons = []
@@ -316,7 +317,7 @@ async def show_level_3(query, search_query):
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🎯 MASTER SELECTION HANDLER
+# 🎯 MASTER SELECTION HANDLER (UPDATED FOR KEYS)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^filter_sel#"))
@@ -413,19 +414,12 @@ async def filter_selection_handler(client, query):
     
     page_btn = get_pagination_row(offset, limit, total_results, f"{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")
 
-    text = f"⚡ Results for `{req_query}`"
-    if sel_type != "None": text += f"\n📂 **Type:** {sel_type}"
-    if sel_qual != "None": text += f"\n📀 **Quality:** {sel_qual.upper()}"
-    if sel_lang != "None": text += f"\n🗣️ **Language:** {sel_lang}"
-    if sel_year != "None": text += f"\n📅 **Year:** {sel_year}"
-    if sel_size != "None": text += f"\n💾 **Size:** {sel_size}"
-    if sel_sort != "relevance": text += f"\n📶 **Sort:** {sel_sort.replace('_', ' ').title()}"
-
     if mode == 'button':
+        # Btn Parser uses original query for text highlighting
         final_markup = btn_parser(files, query.message.chat.id, req_query, offset, limit)
         final_markup.extend(extra_btn)
         if page_btn: final_markup.append(page_btn)
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(final_markup))
+        await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(final_markup))
         
     elif mode in ['text', 'detailed', 'site']:
         page_files = files[offset : offset + limit]
@@ -475,8 +469,11 @@ async def get_menu_files(parts):
     curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
     
     files = await Media.get_search_results(req_query, sort_mode=curr_sort)
-    # Don't apply filters for the menu we are viewing, apply for others
-    # This logic is handled inside individual handlers below
+    if curr_qual != "None": files = filter_by_quality(files, curr_qual)
+    if curr_lang != "None": files = filter_by_lang(files, curr_lang)
+    if curr_year != "None": files = filter_by_year(files, curr_year)
+    if curr_size != "None": files = filter_by_size(files, curr_size)
+    if curr_type != "None": files = filter_by_type(files, curr_type)
     
     return files, req_query, search_key
 
@@ -625,7 +622,7 @@ async def size_menu_handler(client, query):
     await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# ⏭️ PAGINATION HANDLER
+# ⏭️ PAGINATION HANDLER (UPDATED FOR KEYS)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^next_"))
@@ -635,19 +632,23 @@ async def handle_next_back(client, query):
         offset = int(raw_data[1])
         remainder = raw_data[2]
         
-        parts = remainder.split("#")
-        search_key = parts[0]
-        
-        req_query = await Media.get_search_query(search_key)
-        if not req_query: return await query.answer("⚠️ Expired.", show_alert=True)
-        
-        sel_qual = parts[1]
-        sel_lang = parts[2]
-        sel_year = parts[3]
-        sel_size = parts[4]
-        sel_type = parts[5]
-        sel_sort = parts[6]
-        
+        # Format: query#qual#lang#year#size#type#sort
+        if "#" in remainder:
+            parts = remainder.split("#")
+            search_key = parts[0]
+            
+            req_query = await Media.get_search_query(search_key)
+            if not req_query: return await query.answer("⚠️ Expired.", show_alert=True)
+            
+            sel_qual = parts[1]
+            sel_lang = parts[2]
+            sel_year = parts[3]
+            sel_size = parts[4]
+            sel_type = parts[5]
+            sel_sort = parts[6]
+        else:
+            return 
+            
         files = await Media.get_search_results(req_query, sort_mode=sel_sort)
         if sel_qual != "None": files = filter_by_quality(files, sel_qual)
         if sel_lang != "None": files = filter_by_lang(files, sel_lang)
@@ -661,17 +662,20 @@ async def handle_next_back(client, query):
         limit = group_settings.get('result_page_limit', 10)
         howto_url = group_settings.get('howto_url')
         
-        if mode == 'hybrid': mode = 'button' if len(files) <= limit else 'text'
+        if mode == 'hybrid':
+            mode = 'button' if len(files) <= limit else 'text'
 
         extra_btn = []
         if howto_url: extra_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
         
+        # ROW 1: Media Type
         media_row = [
             InlineKeyboardButton("Videos", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}"),
             InlineKeyboardButton("Docs", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}")
         ]
         extra_btn.append(media_row)
 
+        # Labels for Row 2 & 3
         q_label = f"{sel_qual.upper()} ✅" if sel_qual != "None" else "Select Qualities 🔽"
         l_label = f"{sel_lang} ✅" if sel_lang != "None" else "Select Language 🔽"
         y_label = f"{sel_year} ✅" if sel_year != "None" else "Select Year 🔽"
@@ -689,12 +693,15 @@ async def handle_next_back(client, query):
         ]
         extra_btn.append(row3)
 
+        # ROW 4
         sort_label = "Sort By Files 🔽"
         if sel_sort != "relevance": sort_label = f"Sort: {sel_sort.replace('_', ' ').title()} 🔽"
         extra_btn.append([InlineKeyboardButton(sort_label, callback_data=f"sort_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")])
 
+        # Wrong Result
         extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{search_key}")])
 
+        # Reset Buttons
         reset_row = []
         if sel_qual != "None": reset_row.append(InlineKeyboardButton("All Qualities 🔄", callback_data=f"filter_sel#{search_key}#None#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
         if sel_lang != "None": reset_row.append(InlineKeyboardButton("All Languages 🔄", callback_data=f"filter_sel#{search_key}#{sel_qual}#None#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))

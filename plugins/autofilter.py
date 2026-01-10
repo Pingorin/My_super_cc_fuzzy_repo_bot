@@ -129,61 +129,72 @@ async def auto_filter(client, message):
             try: await message.react(random.choice(REACTIONS))
             except: pass 
 
-        # ✅ CRITICAL FIX: Register Query Once & Use Key Everywhere
+        # ✅ REGISTER QUERY TO DB (Safe Key)
         search_key = await Media.register_search_query(query)
 
+        # -------------------------------------------------------------
+        # 🏗️ BUILD UNIVERSAL BUTTONS (Used in ALL Modes)
+        # -------------------------------------------------------------
         extra_btn = []
-        if howto_url: extra_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
         
-        # ROW 1: Media Type (Using search_key)
+        if howto_url:
+            extra_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
+        
+        # ROW 1: Media Type
         media_row = [
             InlineKeyboardButton("Videos", callback_data=f"filter_sel#{search_key}#None#None#None#None#Video#relevance"),
             InlineKeyboardButton("Docs", callback_data=f"filter_sel#{search_key}#None#None#None#None#Document#relevance")
         ]
         extra_btn.append(media_row)
 
-        # ROW 2: Quality | Language (Using search_key)
+        # ROW 2: Quality | Language
         row2 = [
             InlineKeyboardButton("Select Qualities 🔽", callback_data=f"qual_menu#{search_key}#None#None#None#None#None#relevance"),
             InlineKeyboardButton("Select Language 🔽", callback_data=f"lang_menu#{search_key}#None#None#None#None#None#relevance")
         ]
         extra_btn.append(row2)
 
-        # ROW 3: Year | Size (Using search_key)
+        # ROW 3: Year | Size
         row3 = [
             InlineKeyboardButton("Select Year 🔽", callback_data=f"year_menu#{search_key}#None#None#None#None#None#relevance"),
             InlineKeyboardButton("Select Size 🔽", callback_data=f"size_menu#{search_key}#None#None#None#None#None#relevance")
         ]
         extra_btn.append(row3)
 
-        # ROW 4: Sort (Using search_key)
+        # ROW 4: Sort
         extra_btn.append([InlineKeyboardButton("Sort By Files 🔽", callback_data=f"sort_menu#{search_key}#None#None#None#None#None#relevance")])
 
-        # Wrong Result (Using search_key)
+        # ✅ WRONG RESULT BUTTON (ADDED FOR ALL MODES)
         extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{search_key}")])
 
+        # Free Premium
         extra_btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
 
+        # -------------------------------------------------------------
+        # 🎮 MODE HANDLING
+        # -------------------------------------------------------------
         offset = 0
         total_results = len(files)
         
         if mode == 'hybrid':
             mode = 'button' if len(files) <= limit else 'text'
 
-        # Pagination (Using search_key)
+        # Pagination Button
         page_btn = get_pagination_row(offset, limit, total_results, f"{search_key}#None#None#None#None#None#relevance")
 
         final_markup = []
         text = ""
         sent_msg = None
 
+        # --- CASE 1: BUTTON MODE ---
         if mode == 'button':
             final_markup = btn_parser(files, message.chat.id, query, offset, limit)
             text = f"⚡ Results for `{query}`"
-            final_markup.extend(extra_btn)
+            final_markup.extend(extra_btn) # ✅ Add Extra Buttons
             if page_btn: final_markup.append(page_btn)
             sent_msg = await message.reply_text(text, reply_markup=InlineKeyboardMarkup(final_markup))
         
+        # --- CASE 2: TEXT / DETAILED / SITE MODE ---
         elif mode in ['text', 'detailed', 'site']:
             page_files = files[offset : offset + limit]
             
@@ -196,8 +207,10 @@ async def auto_filter(client, message):
                 final_markup = [[InlineKeyboardButton("🔎 View Results Online", url=final_site_url)]]
 
             buttons = []
-            if mode == 'site': buttons.extend(final_markup)
-            buttons.extend(extra_btn)
+            if mode == 'site': buttons.extend(final_markup) # Add View Online first
+            
+            buttons.extend(extra_btn) # ✅ Add Extra Buttons (Filters + Wrong Result)
+            
             if page_btn: buttons.append(page_btn)
             
             sent_msg = await message.reply_text(
@@ -289,13 +302,9 @@ async def show_level_3(query, search_query):
 
 @Client.on_callback_query(filters.regex(r"^filter_sel#"))
 async def filter_selection_handler(client, query):
-    # Data: filter_sel#{KEY}#{qual}#{lang}#{year}#{size}#{type}#{sort}
     parts = query.data.split("#")
-    
-    # ✅ EXTRACT KEY
     search_key = parts[1]
     
-    # ✅ LOOKUP ORIGINAL QUERY
     req_query = await Media.get_search_query(search_key)
     if not req_query: return await query.answer("⚠️ Search expired. Please type again.", show_alert=True)
     
@@ -325,46 +334,39 @@ async def filter_selection_handler(client, query):
     
     if mode == 'hybrid': mode = 'button' if len(files) <= limit else 'text'
 
+    # REBUILD BUTTONS
     extra_btn = []
     if howto_url: extra_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
 
-    # ROW 1: Media Type
-    media_row = []
-    if sel_type == "None":
-        media_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}"))
-        media_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}"))
-    elif sel_type == "Video":
-        media_row.append(InlineKeyboardButton("Videos ✅", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}"))
-        media_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}"))
-    elif sel_type == "Document":
-        media_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}"))
-        media_row.append(InlineKeyboardButton("Docs ✅", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}"))
+    # ROW 1
+    media_row = [
+        InlineKeyboardButton("Videos", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}"),
+        InlineKeyboardButton("Docs", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}")
+    ]
     extra_btn.append(media_row)
 
     # ROW 2 & 3
-    row2 = []
-    q_txt = "Select Qualities 🔽" if sel_qual == "None" else f"{sel_qual.upper()} ✅"
-    row2.append(InlineKeyboardButton(q_txt, callback_data=f"qual_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
-    l_txt = "Select Language 🔽" if sel_lang == "None" else f"{sel_lang} ✅"
-    row2.append(InlineKeyboardButton(l_txt, callback_data=f"lang_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
+    row2 = [
+        InlineKeyboardButton("Select Qualities 🔽", callback_data=f"qual_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"),
+        InlineKeyboardButton("Select Language 🔽", callback_data=f"lang_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")
+    ]
     extra_btn.append(row2)
 
-    row3 = []
-    y_txt = "Select Year 🔽" if sel_year == "None" else f"{sel_year} ✅"
-    row3.append(InlineKeyboardButton(y_txt, callback_data=f"year_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
-    s_txt = "Select Size 🔽" if sel_size == "None" else f"{sel_size} ✅"
-    row3.append(InlineKeyboardButton(s_txt, callback_data=f"size_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
+    row3 = [
+        InlineKeyboardButton("Select Year 🔽", callback_data=f"year_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"),
+        InlineKeyboardButton("Select Size 🔽", callback_data=f"size_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")
+    ]
     extra_btn.append(row3)
 
-    # ROW 4: Sort
+    # ROW 4
     sort_label = "Sort By Files 🔽"
     if sel_sort != "relevance": sort_label = f"Sort: {sel_sort.replace('_', ' ').title()} 🔽"
     extra_btn.append([InlineKeyboardButton(sort_label, callback_data=f"sort_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")])
 
-    # Wrong Result
+    # ✅ WRONG RESULT (Persist in Filters)
     extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{search_key}")])
 
-    # Reset Buttons (All use search_key)
+    # Reset Buttons
     reset_row = []
     if sel_qual != "None": reset_row.append(InlineKeyboardButton("All Qualities 🔄", callback_data=f"filter_sel#{search_key}#None#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
     if sel_lang != "None": reset_row.append(InlineKeyboardButton("All Languages 🔄", callback_data=f"filter_sel#{search_key}#{sel_qual}#None#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
@@ -382,7 +384,6 @@ async def filter_selection_handler(client, query):
     
     page_btn = get_pagination_row(offset, limit, total_results, f"{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")
 
-    # Output Generation
     text = f"⚡ Results for `{req_query}`"
     if sel_type != "None": text += f"\n📂 **Type:** {sel_type}"
     if sel_qual != "None": text += f"\n📀 **Quality:** {sel_qual.upper()}"
@@ -392,7 +393,6 @@ async def filter_selection_handler(client, query):
     if sel_sort != "relevance": text += f"\n📶 **Sort:** {sel_sort.replace('_', ' ').title()}"
 
     if mode == 'button':
-        # Btn Parser uses original query for text highlighting
         final_markup = btn_parser(files, query.message.chat.id, req_query, offset, limit)
         final_markup.extend(extra_btn)
         if page_btn: final_markup.append(page_btn)
@@ -409,13 +409,13 @@ async def filter_selection_handler(client, query):
 
         buttons = []
         if mode == 'site': buttons.extend(final_markup)
-        buttons.extend(extra_btn)
+        buttons.extend(extra_btn) # Add universal buttons
         if page_btn: buttons.append(page_btn)
         
         await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# ✅ MENUS: SORT, QUAL, LANG, YEAR, SIZE
+# ✅ SORT BY FILES MENU
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^sort_menu#"))
@@ -582,7 +582,8 @@ async def handle_next_back(client, query):
         limit = group_settings.get('result_page_limit', 10)
         howto_url = group_settings.get('howto_url')
         
-        if mode == 'hybrid': mode = 'button' if len(files) <= limit else 'text'
+        if mode == 'hybrid':
+            mode = 'button' if len(files) <= limit else 'text'
 
         extra_btn = []
         if howto_url: extra_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])

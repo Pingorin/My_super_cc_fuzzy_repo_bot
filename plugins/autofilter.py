@@ -129,16 +129,11 @@ async def auto_filter(client, message):
             try: await message.react(random.choice(REACTIONS))
             except: pass 
 
-        # ✅ REGISTER QUERY TO DB (Safe Key)
+        # ✅ REGISTER QUERY TO DB
         search_key = await Media.register_search_query(query)
 
-        # -------------------------------------------------------------
-        # 🏗️ BUILD UNIVERSAL BUTTONS (Used in ALL Modes)
-        # -------------------------------------------------------------
         extra_btn = []
-        
-        if howto_url:
-            extra_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
+        if howto_url: extra_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
         
         # ROW 1: Media Type
         media_row = [
@@ -164,37 +159,30 @@ async def auto_filter(client, message):
         # ROW 4: Sort
         extra_btn.append([InlineKeyboardButton("Sort By Files 🔽", callback_data=f"sort_menu#{search_key}#None#None#None#None#None#relevance")])
 
-        # ✅ WRONG RESULT BUTTON (ADDED FOR ALL MODES)
+        # Wrong Result
         extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{search_key}")])
 
-        # Free Premium
         extra_btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
 
-        # -------------------------------------------------------------
-        # 🎮 MODE HANDLING
-        # -------------------------------------------------------------
         offset = 0
         total_results = len(files)
         
         if mode == 'hybrid':
             mode = 'button' if len(files) <= limit else 'text'
 
-        # Pagination Button
         page_btn = get_pagination_row(offset, limit, total_results, f"{search_key}#None#None#None#None#None#relevance")
 
         final_markup = []
         text = ""
         sent_msg = None
 
-        # --- CASE 1: BUTTON MODE ---
         if mode == 'button':
             final_markup = btn_parser(files, message.chat.id, query, offset, limit)
             text = f"⚡ Results for `{query}`"
-            final_markup.extend(extra_btn) # ✅ Add Extra Buttons
+            final_markup.extend(extra_btn)
             if page_btn: final_markup.append(page_btn)
             sent_msg = await message.reply_text(text, reply_markup=InlineKeyboardMarkup(final_markup))
         
-        # --- CASE 2: TEXT / DETAILED / SITE MODE ---
         elif mode in ['text', 'detailed', 'site']:
             page_files = files[offset : offset + limit]
             
@@ -207,10 +195,8 @@ async def auto_filter(client, message):
                 final_markup = [[InlineKeyboardButton("🔎 View Results Online", url=final_site_url)]]
 
             buttons = []
-            if mode == 'site': buttons.extend(final_markup) # Add View Online first
-            
-            buttons.extend(extra_btn) # ✅ Add Extra Buttons (Filters + Wrong Result)
-            
+            if mode == 'site': buttons.extend(final_markup)
+            buttons.extend(extra_btn)
             if page_btn: buttons.append(page_btn)
             
             sent_msg = await message.reply_text(
@@ -226,7 +212,7 @@ async def auto_filter(client, message):
         logger.error(f"Search Error: {e}")
 
 # ==============================================================================
-# 🔥 SAFE RECHECK HANDLER (LEVEL 1, 2, 3)
+# 🔥 RECHECK HANDLER
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^recheck_"))
@@ -236,9 +222,7 @@ async def recheck_handler(client, query):
     search_key = data[1]
     
     original_query = await Media.get_search_query(search_key)
-    
-    if not original_query:
-        return await query.answer("⚠️ Session expired. Please search again.", show_alert=True)
+    if not original_query: return await query.answer("⚠️ Session expired.", show_alert=True)
     
     chat_id = query.message.chat.id
     
@@ -297,7 +281,7 @@ async def show_level_3(query, search_query):
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 🎯 MASTER SELECTION HANDLER (UPDATED FOR KEYS)
+# 🎯 FILTER SELECTION HANDLER
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^filter_sel#"))
@@ -334,36 +318,46 @@ async def filter_selection_handler(client, query):
     
     if mode == 'hybrid': mode = 'button' if len(files) <= limit else 'text'
 
-    # REBUILD BUTTONS
     extra_btn = []
     if howto_url: extra_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
 
-    # ROW 1
-    media_row = [
-        InlineKeyboardButton("Videos", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}"),
-        InlineKeyboardButton("Docs", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}")
-    ]
+    # ROW 1: Media Type
+    media_row = []
+    if sel_type == "None":
+        media_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}"))
+        media_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}"))
+    elif sel_type == "Video":
+        media_row.append(InlineKeyboardButton("Videos ✅", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}"))
+        media_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Document#{sel_sort}"))
+    elif sel_type == "Document":
+        media_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#Video#{sel_sort}"))
+        media_row.append(InlineKeyboardButton("Docs ✅", callback_data=f"filter_sel#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#None#{sel_sort}"))
     extra_btn.append(media_row)
 
-    # ROW 2 & 3
+    # ROW 2 & 3 - Update labels based on selection
+    q_label = f"{sel_qual.upper()} ✅" if sel_qual != "None" else "Select Qualities 🔽"
+    l_label = f"{sel_lang} ✅" if sel_lang != "None" else "Select Language 🔽"
+    y_label = f"{sel_year} ✅" if sel_year != "None" else "Select Year 🔽"
+    s_label = f"{sel_size} ✅" if sel_size != "None" else "Select Size 🔽"
+
     row2 = [
-        InlineKeyboardButton("Select Qualities 🔽", callback_data=f"qual_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"),
-        InlineKeyboardButton("Select Language 🔽", callback_data=f"lang_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")
+        InlineKeyboardButton(q_label, callback_data=f"qual_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"),
+        InlineKeyboardButton(l_label, callback_data=f"lang_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")
     ]
     extra_btn.append(row2)
 
     row3 = [
-        InlineKeyboardButton("Select Year 🔽", callback_data=f"year_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"),
-        InlineKeyboardButton("Select Size 🔽", callback_data=f"size_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")
+        InlineKeyboardButton(y_label, callback_data=f"year_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"),
+        InlineKeyboardButton(s_label, callback_data=f"size_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")
     ]
     extra_btn.append(row3)
 
-    # ROW 4
+    # ROW 4: Sort
     sort_label = "Sort By Files 🔽"
     if sel_sort != "relevance": sort_label = f"Sort: {sel_sort.replace('_', ' ').title()} 🔽"
     extra_btn.append([InlineKeyboardButton(sort_label, callback_data=f"sort_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")])
 
-    # ✅ WRONG RESULT (Persist in Filters)
+    # Wrong Result
     extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{search_key}")])
 
     # Reset Buttons
@@ -409,13 +403,170 @@ async def filter_selection_handler(client, query):
 
         buttons = []
         if mode == 'site': buttons.extend(final_markup)
-        buttons.extend(extra_btn) # Add universal buttons
+        buttons.extend(extra_btn)
         if page_btn: buttons.append(page_btn)
         
         await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# ✅ SORT BY FILES MENU
+# ✅ MENUS: QUALITY, LANG, YEAR, SIZE (Show All Options)
+# ==============================================================================
+
+# --- QUALITY MENU ---
+@Client.on_callback_query(filters.regex(r"^qual_menu#"))
+async def quality_menu_handler(client, query):
+    parts = query.data.split("#")
+    search_key = parts[1]
+    
+    req_query = await Media.get_search_query(search_key)
+    if not req_query: return await query.answer("Expired.", show_alert=True)
+    
+    # Extract current state
+    curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
+    
+    # Fetch ALL files matching other criteria (IGNORE current quality)
+    files = await Media.get_search_results(req_query, sort_mode=curr_sort)
+    # Apply ALL filters EXCEPT Quality
+    if curr_lang != "None": files = filter_by_lang(files, curr_lang)
+    if curr_year != "None": files = filter_by_year(files, curr_year)
+    if curr_size != "None": files = filter_by_size(files, curr_size)
+    if curr_type != "None": files = filter_by_type(files, curr_type)
+    
+    if not files: return await query.answer("No files found.", show_alert=True)
+    
+    qual_data = get_qualities(files)
+    
+    buttons = []
+    temp_row = []
+    for qual, count in qual_data.items():
+        # Check if this quality is currently selected
+        is_selected = (qual.lower() == curr_qual.lower())
+        
+        # Logic: If selected, clicking it toggles OFF ('None'). Else switches to it.
+        next_qual = "None" if is_selected else qual
+        btn_txt = f"{qual.upper()} ({count}) ✅" if is_selected else f"{qual.upper()} ({count})"
+        
+        temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_sel#{search_key}#{next_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}"))
+        if len(temp_row) == 3:
+            buttons.append(temp_row); temp_row = []
+    if temp_row: buttons.append(temp_row)
+    
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{search_key}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}")])
+    await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+
+# --- LANGUAGE MENU ---
+@Client.on_callback_query(filters.regex(r"^lang_menu#"))
+async def language_menu_handler(client, query):
+    parts = query.data.split("#")
+    search_key = parts[1]
+    
+    req_query = await Media.get_search_query(search_key)
+    if not req_query: return await query.answer("Expired.", show_alert=True)
+    
+    curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
+    
+    # Fetch ALL files (IGNORE current language)
+    files = await Media.get_search_results(req_query, sort_mode=curr_sort)
+    if curr_qual != "None": files = filter_by_quality(files, curr_qual)
+    if curr_year != "None": files = filter_by_year(files, curr_year)
+    if curr_size != "None": files = filter_by_size(files, curr_size)
+    if curr_type != "None": files = filter_by_type(files, curr_type)
+    
+    if not files: return await query.answer("No files found.", show_alert=True)
+    
+    lang_data = get_languages(files)
+    
+    buttons = []
+    temp_row = []
+    for lang, count in lang_data.items():
+        is_selected = (lang.lower() == curr_lang.lower())
+        next_lang = "None" if is_selected else lang
+        btn_txt = f"{lang} ({count}) ✅" if is_selected else f"{lang} ({count})"
+        
+        temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_sel#{search_key}#{curr_qual}#{next_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}"))
+        if len(temp_row) == 3:
+            buttons.append(temp_row); temp_row = []
+    if temp_row: buttons.append(temp_row)
+    
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{search_key}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}")])
+    await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+
+# --- YEAR MENU ---
+@Client.on_callback_query(filters.regex(r"^year_menu#"))
+async def year_menu_handler(client, query):
+    parts = query.data.split("#")
+    search_key = parts[1]
+    
+    req_query = await Media.get_search_query(search_key)
+    if not req_query: return await query.answer("Expired.", show_alert=True)
+    
+    curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
+    
+    # Fetch ALL files (IGNORE current year)
+    files = await Media.get_search_results(req_query, sort_mode=curr_sort)
+    if curr_qual != "None": files = filter_by_quality(files, curr_qual)
+    if curr_lang != "None": files = filter_by_lang(files, curr_lang)
+    if curr_size != "None": files = filter_by_size(files, curr_size)
+    if curr_type != "None": files = filter_by_type(files, curr_type)
+    
+    if not files: return await query.answer("No files found.", show_alert=True)
+    
+    year_data = get_years(files)
+    
+    buttons = []
+    temp_row = []
+    for year, count in year_data.items():
+        is_selected = (str(year) == str(curr_year))
+        next_year = "None" if is_selected else year
+        btn_txt = f"{year} ✅" if is_selected else f"{year}" # Usually don't show count for years to save space, but can add ({count})
+        
+        temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_sel#{search_key}#{curr_qual}#{curr_lang}#{next_year}#{curr_size}#{curr_type}#{curr_sort}"))
+        if len(temp_row) == 3:
+            buttons.append(temp_row); temp_row = []
+    if temp_row: buttons.append(temp_row)
+    
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{search_key}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}")])
+    await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+
+# --- SIZE MENU ---
+@Client.on_callback_query(filters.regex(r"^size_menu#"))
+async def size_menu_handler(client, query):
+    parts = query.data.split("#")
+    search_key = parts[1]
+    
+    req_query = await Media.get_search_query(search_key)
+    if not req_query: return await query.answer("Expired.", show_alert=True)
+    
+    curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
+    
+    # Fetch ALL files (IGNORE current size)
+    files = await Media.get_search_results(req_query, sort_mode=curr_sort)
+    if curr_qual != "None": files = filter_by_quality(files, curr_qual)
+    if curr_lang != "None": files = filter_by_lang(files, curr_lang)
+    if curr_year != "None": files = filter_by_year(files, curr_year)
+    if curr_type != "None": files = filter_by_type(files, curr_type)
+    
+    if not files: return await query.answer("No files found.", show_alert=True)
+    
+    size_ranges = get_size_ranges(files)
+    
+    buttons = []
+    temp_row = []
+    for size_cat in size_ranges:
+        is_selected = (size_cat == curr_size)
+        next_size = "None" if is_selected else size_cat
+        btn_txt = f"{size_cat} ✅" if is_selected else f"{size_cat}"
+        
+        temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_sel#{search_key}#{curr_qual}#{curr_lang}#{curr_year}#{next_size}#{curr_type}#{curr_sort}"))
+        if len(temp_row) == 2:
+            buttons.append(temp_row); temp_row = []
+    if temp_row: buttons.append(temp_row)
+    
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{search_key}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}")])
+    await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+
+# ==============================================================================
+# ✅ SORT MENU
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^sort_menu#"))
@@ -435,110 +586,6 @@ async def sort_menu_handler(client, query):
         [InlineKeyboardButton(f"Size (Low-High){tick('size_asc')}", callback_data=f"filter_sel#{base}#size_asc")],
         [InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{base}#{curr_sort}")]
     ]
-    await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
-
-# Helper to fetch files for menus
-async def get_menu_files(parts):
-    search_key = parts[1]
-    req_query = await Media.get_search_query(search_key)
-    if not req_query: return None, None, None
-    
-    curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
-    
-    files = await Media.get_search_results(req_query, sort_mode=curr_sort)
-    if curr_qual != "None": files = filter_by_quality(files, curr_qual)
-    if curr_lang != "None": files = filter_by_lang(files, curr_lang)
-    if curr_year != "None": files = filter_by_year(files, curr_year)
-    if curr_size != "None": files = filter_by_size(files, curr_size)
-    if curr_type != "None": files = filter_by_type(files, curr_type)
-    
-    return files, req_query, search_key
-
-# --- QUALITY MENU ---
-@Client.on_callback_query(filters.regex(r"^qual_menu#"))
-async def quality_menu_handler(client, query):
-    parts = query.data.split("#")
-    files, _, search_key = await get_menu_files(parts)
-    if not files: return await query.answer("Expired or Empty.", show_alert=True)
-    
-    curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
-    qual_data = get_qualities(files)
-    
-    buttons = []
-    temp_row = []
-    for qual, count in qual_data.items():
-        btn_txt = f"{qual.upper()} ({count})"
-        temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_sel#{search_key}#{qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}"))
-        if len(temp_row) == 3:
-            buttons.append(temp_row); temp_row = []
-    if temp_row: buttons.append(temp_row)
-    
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{search_key}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}")])
-    await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
-
-# --- LANGUAGE MENU ---
-@Client.on_callback_query(filters.regex(r"^lang_menu#"))
-async def language_menu_handler(client, query):
-    parts = query.data.split("#")
-    files, _, search_key = await get_menu_files(parts)
-    if not files: return await query.answer("Expired or Empty.", show_alert=True)
-    
-    curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
-    lang_data = get_languages(files)
-    
-    buttons = []
-    temp_row = []
-    for lang, count in lang_data.items():
-        btn_txt = f"{lang} ({count})"
-        temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_sel#{search_key}#{curr_qual}#{lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}"))
-        if len(temp_row) == 3:
-            buttons.append(temp_row); temp_row = []
-    if temp_row: buttons.append(temp_row)
-    
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{search_key}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}")])
-    await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
-
-# --- YEAR MENU ---
-@Client.on_callback_query(filters.regex(r"^year_menu#"))
-async def year_menu_handler(client, query):
-    parts = query.data.split("#")
-    files, _, search_key = await get_menu_files(parts)
-    if not files: return await query.answer("Expired or Empty.", show_alert=True)
-    
-    curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
-    year_data = get_years(files)
-    
-    buttons = []
-    temp_row = []
-    for year, count in year_data.items():
-        btn_txt = f"{year}"
-        temp_row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_sel#{search_key}#{curr_qual}#{curr_lang}#{year}#{curr_size}#{curr_type}#{curr_sort}"))
-        if len(temp_row) == 3:
-            buttons.append(temp_row); temp_row = []
-    if temp_row: buttons.append(temp_row)
-    
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{search_key}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}")])
-    await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
-
-# --- SIZE MENU ---
-@Client.on_callback_query(filters.regex(r"^size_menu#"))
-async def size_menu_handler(client, query):
-    parts = query.data.split("#")
-    files, _, search_key = await get_menu_files(parts)
-    if not files: return await query.answer("Expired or Empty.", show_alert=True)
-    
-    curr_qual, curr_lang, curr_year, curr_size, curr_type, curr_sort = parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
-    size_ranges = get_size_ranges(files)
-    
-    buttons = []
-    temp_row = []
-    for size_cat in size_ranges:
-        temp_row.append(InlineKeyboardButton(size_cat, callback_data=f"filter_sel#{search_key}#{curr_qual}#{curr_lang}#{curr_year}#{size_cat}#{curr_type}#{curr_sort}"))
-        if len(temp_row) == 2:
-            buttons.append(temp_row); temp_row = []
-    if temp_row: buttons.append(temp_row)
-    
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_sel#{search_key}#{curr_qual}#{curr_lang}#{curr_year}#{curr_size}#{curr_type}#{curr_sort}")])
     await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
@@ -582,8 +629,7 @@ async def handle_next_back(client, query):
         limit = group_settings.get('result_page_limit', 10)
         howto_url = group_settings.get('howto_url')
         
-        if mode == 'hybrid':
-            mode = 'button' if len(files) <= limit else 'text'
+        if mode == 'hybrid': mode = 'button' if len(files) <= limit else 'text'
 
         extra_btn = []
         if howto_url: extra_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
@@ -595,28 +641,33 @@ async def handle_next_back(client, query):
         ]
         extra_btn.append(media_row)
 
-        row2 = []
-        q_txt = "Select Qualities 🔽" if sel_qual == "None" else f"{sel_qual.upper()} ✅"
-        row2.append(InlineKeyboardButton(q_txt, callback_data=f"qual_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
-        l_txt = "Select Language 🔽" if sel_lang == "None" else f"{sel_lang} ✅"
-        row2.append(InlineKeyboardButton(l_txt, callback_data=f"lang_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
+        # Labels for Row 2 & 3
+        q_label = f"{sel_qual.upper()} ✅" if sel_qual != "None" else "Select Qualities 🔽"
+        l_label = f"{sel_lang} ✅" if sel_lang != "None" else "Select Language 🔽"
+        y_label = f"{sel_year} ✅" if sel_year != "None" else "Select Year 🔽"
+        s_label = f"{sel_size} ✅" if sel_size != "None" else "Select Size 🔽"
+
+        row2 = [
+            InlineKeyboardButton(q_label, callback_data=f"qual_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"),
+            InlineKeyboardButton(l_label, callback_data=f"lang_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")
+        ]
         extra_btn.append(row2)
 
-        row3 = []
-        y_txt = "Select Year 🔽" if sel_year == "None" else f"{sel_year} ✅"
-        row3.append(InlineKeyboardButton(y_txt, callback_data=f"year_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
-        s_txt = "Select Size 🔽" if sel_size == "None" else f"{sel_size} ✅"
-        row3.append(InlineKeyboardButton(s_txt, callback_data=f"size_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
+        row3 = [
+            InlineKeyboardButton(y_label, callback_data=f"year_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"),
+            InlineKeyboardButton(s_label, callback_data=f"size_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")
+        ]
         extra_btn.append(row3)
 
-        # ROW 4 Sort
+        # ROW 4
         sort_label = "Sort By Files 🔽"
         if sel_sort != "relevance": sort_label = f"Sort: {sel_sort.replace('_', ' ').title()} 🔽"
         extra_btn.append([InlineKeyboardButton(sort_label, callback_data=f"sort_menu#{search_key}#{sel_qual}#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}")])
 
-        # Wrong Result (Key)
+        # Wrong Result
         extra_btn.append([InlineKeyboardButton("♻️ Wrong Result? Click Here", callback_data=f"recheck_1#{search_key}")])
 
+        # Reset Buttons
         reset_row = []
         if sel_qual != "None": reset_row.append(InlineKeyboardButton("All Qualities 🔄", callback_data=f"filter_sel#{search_key}#None#{sel_lang}#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))
         if sel_lang != "None": reset_row.append(InlineKeyboardButton("All Languages 🔄", callback_data=f"filter_sel#{search_key}#{sel_qual}#None#{sel_year}#{sel_size}#{sel_type}#{sel_sort}"))

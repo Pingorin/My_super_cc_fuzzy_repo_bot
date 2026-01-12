@@ -10,20 +10,25 @@ logger = logging.getLogger(__name__)
 
 class MediaDB:
     def __init__(self, uri, database_name):
+        # ✅ Connection: Using DATABASE_URI (Exclusively for Files)
         self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         
         self.data_col = self.db.files_data   
         self.search_col = self.db.files_search 
         self.counters = self.db.counters
+        
+        # ✅ Collection for Site Mode Cache (Temporary Results)
         self.search_cache = self.db.search_cache 
 
     async def ensure_indexes(self):
+        # Regular indexes for fallback search
         await self.search_col.create_index("file_name")
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
         await self.data_col.create_index("file_unique_id", unique=True)
-        # Verify Search Cache has TTL (Expiry) - Cleans up old query cache automatically
+        
+        # ✅ TTL Index for Site Mode (Auto-delete cache after 1 hour)
         await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
 
     async def get_next_sequence_value(self, sequence_name, increment=1):
@@ -35,6 +40,7 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
+    # --- 🧹 TEXT CLEANER HELPER (Optimized) ---
     @staticmethod
     def clean_text(text):
         if not text: return ""
@@ -42,46 +48,6 @@ class MediaDB:
         text = re.sub(r"@\w+", "", text)
         text = re.sub(r"[-_.]", " ", text)
         return re.sub(r"\s+", " ", text).strip()
-
-    @staticmethod
-    def get_readable_size(size):
-        if not size: return "0 B"
-        power = 2**10
-        n = 0
-        power_labels = {0 : '', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
-        while size > power:
-            size /= power
-            n += 1
-        return f"{size:.2f} {power_labels[n]}B"
-
-    # ✅ 1. NEW: REGISTER QUERY (Fixes Button Limit Error)
-    async def register_search_query(self, query):
-        """
-        Saves a long query to the database and returns a short 8-char ID.
-        This prevents 'BUTTON_DATA_INVALID' errors in Telegram.
-        """
-        unique_id = str(uuid.uuid4())[:8]
-        try:
-            await self.search_cache.insert_one({
-                "_id": unique_id,
-                "query": query,
-                "type": "query_cache", # Distinguishes from full result cache
-                "created_at": datetime.datetime.utcnow()
-            })
-            return unique_id
-        except Exception as e:
-            logger.error(f"Error registering query: {e}")
-            return "error"
-
-    # ✅ 2. NEW: GET QUERY
-    async def get_search_query(self, unique_id):
-        """Retrieves the original query using the short ID."""
-        try:
-            doc = await self.search_cache.find_one({"_id": unique_id})
-            if doc:
-                return doc.get("query")
-        except: pass
-        return None
 
     async def save_batch(self, items):
         if not items: return 0, 0 
@@ -123,12 +89,6 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
 
-            file_type = "document" 
-            if getattr(message, 'video', None):
-                file_type = "video"
-            elif getattr(message, 'document', None):
-                file_type = "document"
-
             data_docs.append({
                 '_id': current_id,
                 'msg_id': message.id,
@@ -142,8 +102,7 @@ class MediaDB:
                 'file_size': media.file_size, 
                 'caption': caption,
                 'link_id': current_id,
-                'chat_id': message.chat.id,
-                'file_type': file_type 
+                'chat_id': message.chat.id # ✅ Added chat_id here for Web Links
             })
             current_id += 1
 
@@ -179,87 +138,53 @@ class MediaDB:
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    # ✅ 3. REGEX SEARCH (For Level 1 Wrong Result Fallback)
-    async def get_regex_search_results(self, query):
-        """
-        Level 1 Loose Search: Matches ANY word in the query (OR logic).
-        Example: "Spider Man" -> Regex: "Spider|Man"
-        """
-        # Split words, filter out single letters or empty strings to avoid noise
-        words = [w for w in query.split(" ") if len(w) > 1] 
-        if not words: return []
-        
-        # Construct Regex: word1|word2|word3
-        regex_pattern = "|".join(map(re.escape, words))
-        
+    async def get_search_results(self, query):
         try:
-            # We search specifically in file_name using regex
-            # Case insensitive search ($options: "i")
-            cursor = self.search_col.find({
-                "file_name": {"$regex": regex_pattern, "$options": "i"}
-            }).limit(20) # Limit to 20 for loose search to maintain performance
+            words = query.split()
             
-            return await cursor.to_list(length=20)
-        except Exception as e:
-            print(f"Regex Search Error: {e}")
-            return []
-
-    # ✅ UPDATED SEARCH METHOD WITH SORTING
-    async def get_search_results(self, query, sort_mode="relevance"):
-        """
-        Fetches search results with sorting.
-        sort_mode: 'relevance', 'newest', 'oldest', 'size_asc', 'size_desc'
-        """
-        
-        # Determine Sorting Order
-        sort_criteria = []
-        if sort_mode == "newest":
-            sort_criteria = [('link_id', -1)] # Descending ID
-        elif sort_mode == "oldest":
-            sort_criteria = [('link_id', 1)]  # Ascending ID
-        elif sort_mode == "size_desc":
-            sort_criteria = [('file_size', -1)]
-        elif sort_mode == "size_asc":
-            sort_criteria = [('file_size', 1)]
-        else:
-            # Relevance (Default) - Default to natural/newest
-            sort_criteria = [('link_id', -1)] 
-
-        try:
-            # ATLAS SEARCH
-            search_stage = {
-                "$search": {
-                    "index": "default",
-                    "text": {
-                        "query": query,
-                        "path": ["file_name", "caption"],
-                        "fuzzy": {"maxEdits": 1}
+            if len(words) <= 1:
+                search_stage = {
+                    "$search": {
+                        "index": "default",
+                        "text": {
+                            "query": query,
+                            "path": ["file_name", "caption"],
+                            "fuzzy": {"maxEdits": 2, "prefixLength": 0, "maxExpansions": 50}
+                        }
                     }
                 }
-            }
-            
-            pipeline = [search_stage]
-            
-            # Apply Sort Stage for Atlas
-            if sort_mode != "relevance":
-                pipeline.append({"$sort": dict(sort_criteria)})
-            
-            pipeline.append({"$limit": 50})
-            
+            else:
+                must_clauses = []
+                for word in words:
+                    must_clauses.append({
+                        "text": {
+                            "query": word,
+                            "path": ["file_name", "caption"],
+                            "fuzzy": {"maxEdits": 1}
+                        }
+                    })
+                
+                search_stage = {
+                    "$search": {
+                        "index": "default",
+                        "compound": {
+                            "must": must_clauses
+                        }
+                    }
+                }
+
+            pipeline = [search_stage, {"$limit": 50}] # Increased limit for better Site Mode results
             cursor = self.search_col.aggregate(pipeline)
             files = await cursor.to_list(length=50)
             return files
             
-        except Exception:
-            # FALLBACK REGEX SEARCH
+        except Exception as e:
+            # Fallback to Regex
             safe_query = re.escape(query)
             regex = re.compile(safe_query, re.IGNORECASE)
             
             cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})
-            
-            if sort_criteria:
-                cursor.sort(sort_criteria)
-            
+            cursor.sort('$natural', -1)
             return await cursor.to_list(length=50)
 
     async def total_files_count(self):
@@ -272,28 +197,40 @@ class MediaDB:
         except:
             return 0
 
+    # ==================================================================
+    # 🌍 SITE MODE METHODS (Save & Retrieve Cache)
+    # ==================================================================
+
     async def save_search_results(self, query, files, chat_id):
-        unique_id = str(uuid.uuid4())[:8]
+        """
+        Saves search results to MongoDB with a short UUID for Web View.
+        Added `chat_id` param to fix 'None' type error in Web Server.
+        """
+        unique_id = str(uuid.uuid4())[:8] # Short 8-char ID
+        
+        # Simplify data to save space
         simplified_files = []
         for file in files:
-            readable_size = self.get_readable_size(file['file_size'])
             simplified_files.append({
                 "file_name": file['file_name'],
-                "file_size": readable_size, 
+                "file_size": file['file_size'],
                 "link_id": file['link_id'],
-                "file_chat_id": file.get('chat_id', chat_id) 
+                # Try to get specific chat_id from file dict
+                "file_chat_id": file.get('chat_id') 
             })
 
         await self.search_cache.insert_one({
             "_id": unique_id,
             "query": query,
-            "chat_id": chat_id,
+            "chat_id": chat_id, # ✅ Saves User ID for fallback link generation
             "files": simplified_files,
             "created_at": datetime.datetime.utcnow()
         })
         return unique_id
 
     async def get_cached_results(self, unique_id):
+        """Retrieves cached results for the Web Server."""
         return await self.search_cache.find_one({"_id": unique_id})
 
+# Initialize with DATABASE_URI
 Media = MediaDB(DATABASE_URI, DATABASE_NAME)

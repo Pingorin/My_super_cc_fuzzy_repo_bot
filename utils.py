@@ -147,47 +147,11 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. FILTER BUTTONS HELPER (NEW)
-def get_filter_buttons(search_id, active_filter=None):
-    """
-    Generates Video/Docs toggle buttons.
-    active_filter: 'video' | 'document' | None
-    """
-    buttons = []
-    
-    # --- Logic for Row 1: Videos | Docs ---
-    
-    # Video Button Logic
-    if active_filter == 'video':
-        vid_btn = InlineKeyboardButton("Videos ✅", callback_data="ignore_click")
-    else:
-        # filter_{search_id}_{mode}_{page}
-        vid_btn = InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_video_0")
-
-    # Docs Button Logic
-    if active_filter == 'document':
-        doc_btn = InlineKeyboardButton("Docs ✅", callback_data="ignore_click")
-    else:
-        doc_btn = InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_document_0")
-
-    # Add Row 1
-    buttons.append([vid_btn, doc_btn])
-
-    # --- Logic for Row 2: All Media Types ---
-    # Only show "All Media Types" (Unfilter) if a specific filter is currently active
-    if active_filter is not None:
-        buttons.append([
-            InlineKeyboardButton("All Media Types 🔄", callback_data=f"unfilter_{search_id}_all_0")
-        ])
-
-    return buttons
-
-# ✅ 5. PAGINATION HELPER (UPDATED WITH SESSION ID & FILTER)
-def get_pagination_row(current_offset, limit, total_count, unique_id, active_filter=None):
+# ✅ 4. PAGINATION HELPER (UPDATED FOR SESSION KEY)
+def get_pagination_row(current_offset, limit, total_count, unique_id):
     """
     Generates the navigation row: [ ⬅️ Back ] [ 1/5 ] [ Next ➡️ ]
-    Uses unique_id to prevent Button Data Invalid.
-    Passes active_filter to keep the filter state alive across pages.
+    Uses unique_id instead of query to prevent Button Data Invalid error.
     """
     buttons = []
     
@@ -197,36 +161,28 @@ def get_pagination_row(current_offset, limit, total_count, unique_id, active_fil
 
     if total_pages == 1:
         return []
-        
-    # Handle 'None' filter for string formatting in callback
-    filter_str = str(active_filter) if active_filter else "None"
 
     # 1. Back Button
     if current_offset >= limit:
-        # Format: next_{unique_id}_{offset}_{active_filter}
-        buttons.append(InlineKeyboardButton(
-            "⬅️ Back", 
-            callback_data=f"next_{unique_id}_{current_offset - limit}_{filter_str}"
-        ))
+        # ✅ FIX: next_{unique_id}_{offset}
+        buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"next_{unique_id}_{current_offset - limit}"))
 
     # 2. Page Counter (Static)
     buttons.append(InlineKeyboardButton(f"📑 {current_page}/{total_pages}", callback_data="pages"))
 
     # 3. Next Button
     if current_offset + limit < total_count:
-        # Format: next_{unique_id}_{offset}_{active_filter}
-        buttons.append(InlineKeyboardButton(
-            "Next ➡️", 
-            callback_data=f"next_{unique_id}_{current_offset + limit}_{filter_str}"
-        ))
+        # ✅ FIX: next_{unique_id}_{offset}
+        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"next_{unique_id}_{current_offset + limit}"))
 
     return buttons
 
-# ✅ 6. BUTTON PARSER (UPDATED)
-def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active_filter=None):
+# ✅ 5. BUTTON PARSER (UPDATED FOR SESSION KEY)
+def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10):
     """
     Generates buttons for Inline Result Mode with Pagination.
     REQUIRES unique_id for pagination buttons.
+    Optional: query (only for text highlighting).
     """
     
     # Slice the files based on offset and limit
@@ -261,14 +217,14 @@ def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     # --- ADD PAGINATION ROW ---
-    # We pass unique_id and active_filter to keep state
-    pagination = get_pagination_row(offset, limit, len(files), unique_id, active_filter)
+    # We now pass unique_id instead of query
+    pagination = get_pagination_row(offset, limit, len(files), unique_id)
     if pagination:
         buttons.append(pagination)
             
     return buttons
 
-# ✅ 7. SHORTLINK GENERATOR
+# ✅ 6. SHORTLINK GENERATOR
 async def get_shortlink(site, api, link):
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}
@@ -286,7 +242,7 @@ async def get_shortlink(site, api, link):
         logger.error(f"Shortlink Exception ({site}): {e}")
         return None 
 
-# ✅ 8. FSUB STATUS HELPERS
+# ✅ 7. FSUB STATUS HELPERS
 async def _get_fsub_status(bot, user_id, channel_id):
     try:
         member = await bot.get_chat_member(channel_id, user_id)

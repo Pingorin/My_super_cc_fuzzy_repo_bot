@@ -1,6 +1,7 @@
 import logging
 import re
 import uuid
+import secrets # ✅ Added for generating secure short keys
 import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError
@@ -18,8 +19,11 @@ class MediaDB:
         self.search_col = self.db.files_search 
         self.counters = self.db.counters
         
-        # ✅ Collection for Site Mode Cache (Temporary Results)
+        # ✅ Collection for Site Mode Cache (Web View)
         self.search_cache = self.db.search_cache 
+
+        # ✅ NEW: Collection for Search Sessions (Button Pagination Fix)
+        self.search_results = self.db.search_results
 
     async def ensure_indexes(self):
         # Regular indexes for fallback search
@@ -30,6 +34,10 @@ class MediaDB:
         
         # ✅ TTL Index for Site Mode (Auto-delete cache after 1 hour)
         await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
+
+        # ✅ NEW: TTL Index for Search Results (Auto-delete after 48 Hours)
+        # 172800 seconds = 48 hours
+        await self.search_results.create_index("created_at", expireAfterSeconds=172800)
 
     async def get_next_sequence_value(self, sequence_name, increment=1):
         doc = await self.counters.find_one_and_update(
@@ -204,7 +212,6 @@ class MediaDB:
     async def save_search_results(self, query, files, chat_id):
         """
         Saves search results to MongoDB with a short UUID for Web View.
-        Added `chat_id` param to fix 'None' type error in Web Server.
         """
         unique_id = str(uuid.uuid4())[:8] # Short 8-char ID
         
@@ -215,14 +222,13 @@ class MediaDB:
                 "file_name": file['file_name'],
                 "file_size": file['file_size'],
                 "link_id": file['link_id'],
-                # Try to get specific chat_id from file dict
                 "file_chat_id": file.get('chat_id') 
             })
 
         await self.search_cache.insert_one({
             "_id": unique_id,
             "query": query,
-            "chat_id": chat_id, # ✅ Saves User ID for fallback link generation
+            "chat_id": chat_id, 
             "files": simplified_files,
             "created_at": datetime.datetime.utcnow()
         })
@@ -231,6 +237,43 @@ class MediaDB:
     async def get_cached_results(self, unique_id):
         """Retrieves cached results for the Web Server."""
         return await self.search_cache.find_one({"_id": unique_id})
+
+    # ==================================================================
+    # 🔑 NEW SESSION SYSTEM METHODS (For Button Pagination)
+    # ==================================================================
+
+    async def save_search_result(self, query, files):
+        """
+        Saves the search result to DB and returns a unique ID (Key).
+        Used to fix BUTTON_DATA_INVALID error in buttons.
+        """
+        # Generate a short 6-char URL-safe key (e.g., 'Xy9-Az')
+        unique_id = secrets.token_urlsafe(6)
+        
+        # Simplify file data to save DB space
+        simplified_files = []
+        for file in files:
+            simplified_files.append({
+                'file_name': file.get('file_name'),
+                'file_size': file.get('file_size'),
+                'link_id': file.get('link_id'),
+                'caption': file.get('caption', None)
+            })
+
+        await self.search_results.insert_one({
+            "_id": unique_id,
+            "query": query,
+            "files": simplified_files,
+            "created_at": datetime.datetime.utcnow()
+        })
+        
+        return unique_id
+
+    async def get_search_session(self, unique_id):
+        """
+        Retrieves the saved files list using the Unique ID.
+        """
+        return await self.search_results.find_one({"_id": unique_id})
 
 # Initialize with DATABASE_URI
 Media = MediaDB(DATABASE_URI, DATABASE_NAME)

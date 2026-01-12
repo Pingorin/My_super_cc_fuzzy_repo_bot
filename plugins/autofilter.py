@@ -8,7 +8,6 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import PORT, SITE_URL
-# ✅ Added filter_by_type and get_filter_buttons to imports
 from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, filter_by_type, get_filter_buttons
 
 logger = logging.getLogger(__name__)
@@ -158,8 +157,8 @@ async def auto_filter(client, message):
 
         # --- MODE A: BUTTON ---
         if mode == 'button':
-            # ⚠️ Pass unique_id instead of query
-            buttons = btn_parser(files, message.chat.id, unique_id, offset, limit)
+            # ⚠️ FIXED: Explicitly pass arguments to prevent 'int' object has no attribute 'lower' error
+            buttons = btn_parser(files, message.chat.id, unique_id, query=query, offset=offset, limit=limit)
             
             # ✅ Add Filters
             if filter_row: buttons.append(filter_row)
@@ -304,11 +303,12 @@ async def auto_filter(client, message):
 # 🎯 FILTER BUTTON HANDLER (Videos / Docs / All)
 # ==============================================================================
 
-@Client.on_callback_query(filters.regex(r"^filter_media_"))
+@Client.on_callback_query(filters.regex(r"^filter_media#"))
 async def handle_filter_click(client, query):
     try:
-        # Format: filter_media_{unique_id}_{type}
-        _, _, unique_id, f_type = query.data.split("_")
+        # ✅ FIXED: Separator is '#' to prevent splitting errors
+        # Format: filter_media#{unique_id}#{type}
+        _, unique_id, f_type = query.data.split("#")
         
         # 1. Get Session
         session = await Media.get_search_session(unique_id)
@@ -341,7 +341,8 @@ async def handle_filter_click(client, query):
         
         # --- RENDER NEW RESPONSE ---
         if mode == 'button':
-            buttons = btn_parser(filtered_files, query.message.chat.id, unique_id, offset, limit)
+            # ⚠️ FIXED: Explicitly pass arguments
+            buttons = btn_parser(filtered_files, query.message.chat.id, unique_id, query=None, offset=offset, limit=limit)
             
             # Add Filters
             if filter_row: buttons.append(filter_row)
@@ -399,15 +400,16 @@ async def handle_filter_click(client, query):
 # ⏭️ PAGINATION CALLBACK HANDLER (Next/Back Logic)
 # ==============================================================================
 
-@Client.on_callback_query(filters.regex(r"^next_"))
+@Client.on_callback_query(filters.regex(r"^next#"))
 async def handle_next_back(client, query):
     try:
-        # ✅ Updated Format: next_{unique_id}_{offset}_{active_filter}
-        data_parts = query.data.split("_")
+        # ✅ FIXED: Separator is '#'
+        # Format: next#{unique_id}#{offset}#{active_filter}
+        data_parts = query.data.split("#")
         unique_id = data_parts[1]
         offset = int(data_parts[2])
         
-        # Check if filter param exists (backwards compatibility)
+        # Check if filter param exists
         active_filter = data_parts[3] if len(data_parts) > 3 else "all"
         
         # 1. Fetch Saved Data using Unique ID
@@ -448,8 +450,8 @@ async def handle_next_back(client, query):
         
         # --- BUTTON MODE ---
         if mode == 'button':
-            # Pass unique_id to btn_parser
-            buttons = btn_parser(filtered_files, query.message.chat.id, unique_id, offset, limit)
+            # ⚠️ FIXED: Explicitly pass arguments
+            buttons = btn_parser(filtered_files, query.message.chat.id, unique_id, query=None, offset=offset, limit=limit)
             
             # Insert Filter Buttons
             if filter_row: buttons.append(filter_row)

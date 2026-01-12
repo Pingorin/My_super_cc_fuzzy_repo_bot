@@ -1,7 +1,7 @@
 import logging
 import re
 import uuid
-import secrets 
+import secrets # ✅ Added for generating secure short keys
 import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class MediaDB:
     def __init__(self, uri, database_name):
-        # ✅ Connection: Using DATABASE_URI
+        # ✅ Connection: Using DATABASE_URI (Exclusively for Files)
         self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         
@@ -48,7 +48,7 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
-    # --- 🧹 TEXT CLEANER HELPER ---
+    # --- 🧹 TEXT CLEANER HELPER (Optimized) ---
     @staticmethod
     def clean_text(text):
         if not text: return ""
@@ -97,9 +97,6 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
 
-            # Detect MIME Type for Filtering
-            mime_type = getattr(media, "mime_type", "document/unknown")
-
             data_docs.append({
                 '_id': current_id,
                 'msg_id': message.id,
@@ -112,9 +109,8 @@ class MediaDB:
                 'file_name': file_name,
                 'file_size': media.file_size, 
                 'caption': caption,
-                'mime_type': mime_type, # ✅ Save MIME Type for filtering
                 'link_id': current_id,
-                'chat_id': message.chat.id
+                'chat_id': message.chat.id # ✅ Added chat_id here for Web Links
             })
             current_id += 1
 
@@ -150,48 +146,54 @@ class MediaDB:
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    # ==================================================================
-    # 🔍 SEARCH LOGIC (Updated for File Type Filter)
-    # ==================================================================
-    async def get_search_results(self, query, file_type=None, max_results=100):
-        """
-        query: Text to search
-        file_type: "video" | "document" | None (For filtering)
-        """
+    async def get_search_results(self, query):
         try:
-            # 1. Prepare Regex for Text Search
-            regex = re.compile(re.escape(query), re.IGNORECASE)
-
-            # 2. Prepare Filter Query (MIME Type)
-            filter_query = {}
-            if file_type == "video":
-                # Select files where mime_type contains 'video'
-                filter_query = {"mime_type": {"$regex": "video", "$options": "i"}}
-            elif file_type == "document":
-                # Select files where mime_type does NOT contain 'video'
-                filter_query = {"mime_type": {"$not": {"$regex": "video", "$options": "i"}}}
-
-            # 3. Combine Queries
-            # If a filter is applied, use $and. Otherwise, use standard $or.
-            if file_type:
-                mongo_query = {
-                    "$and": [
-                        {"$or": [{"file_name": regex}, {"caption": regex}]},
-                        filter_query
-                    ]
+            words = query.split()
+            
+            if len(words) <= 1:
+                search_stage = {
+                    "$search": {
+                        "index": "default",
+                        "text": {
+                            "query": query,
+                            "path": ["file_name", "caption"],
+                            "fuzzy": {"maxEdits": 2, "prefixLength": 0, "maxExpansions": 50}
+                        }
+                    }
                 }
             else:
-                mongo_query = {"$or": [{"file_name": regex}, {"caption": regex}]}
+                must_clauses = []
+                for word in words:
+                    must_clauses.append({
+                        "text": {
+                            "query": word,
+                            "path": ["file_name", "caption"],
+                            "fuzzy": {"maxEdits": 1}
+                        }
+                    })
+                
+                search_stage = {
+                    "$search": {
+                        "index": "default",
+                        "compound": {
+                            "must": must_clauses
+                        }
+                    }
+                }
 
-            # 4. Execute Query
-            cursor = self.search_col.find(mongo_query)
-            cursor.sort('$natural', -1) # Sort by newest
-            
-            return await cursor.to_list(length=max_results)
+            pipeline = [search_stage, {"$limit": 50}] # Increased limit for better Site Mode results
+            cursor = self.search_col.aggregate(pipeline)
+            files = await cursor.to_list(length=50)
+            return files
             
         except Exception as e:
-            print(f"DB Search Error: {e}")
-            return []
+            # Fallback to Regex
+            safe_query = re.escape(query)
+            regex = re.compile(safe_query, re.IGNORECASE)
+            
+            cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})
+            cursor.sort('$natural', -1)
+            return await cursor.to_list(length=50)
 
     async def total_files_count(self):
         return await self.data_col.count_documents({})
@@ -208,8 +210,12 @@ class MediaDB:
     # ==================================================================
 
     async def save_search_results(self, query, files, chat_id):
-        unique_id = str(uuid.uuid4())[:8] 
+        """
+        Saves search results to MongoDB with a short UUID for Web View.
+        """
+        unique_id = str(uuid.uuid4())[:8] # Short 8-char ID
         
+        # Simplify data to save space
         simplified_files = []
         for file in files:
             simplified_files.append({
@@ -229,10 +235,11 @@ class MediaDB:
         return unique_id
 
     async def get_cached_results(self, unique_id):
+        """Retrieves cached results for the Web Server."""
         return await self.search_cache.find_one({"_id": unique_id})
 
     # ==================================================================
-    # 🔑 SEARCH SESSION METHODS (For Button Pagination Fix)
+    # 🔑 NEW SESSION SYSTEM METHODS (For Button Pagination)
     # ==================================================================
 
     async def save_search_result(self, query, files):
@@ -240,7 +247,7 @@ class MediaDB:
         Saves the search result to DB and returns a unique ID (Key).
         Used to fix BUTTON_DATA_INVALID error in buttons.
         """
-        # Generate a short 6-char URL-safe key
+        # Generate a short 6-char URL-safe key (e.g., 'Xy9-Az')
         unique_id = secrets.token_urlsafe(6)
         
         # Simplify file data to save DB space

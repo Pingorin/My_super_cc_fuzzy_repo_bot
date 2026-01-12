@@ -54,9 +54,14 @@ def format_text_results(files, query, chat_id):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
+        
+        # Always use the Group ID (chat_id) for the link
         f_chat_id = chat_id
         
+        # Link directs to the bot with the specific Group ID
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
+        
+        # HTML Link formatting for cleaner look
         text += f"{i}. 📂 <a href='{link}'>{f_name}</a> [{f_size}]\n\n"
         
     return text
@@ -67,15 +72,15 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         f"⚡ **Hey {query} lovers!**\n"
         f"👻 **Here are your results....**\n"
         f"⌛ **Time taken:** {time_taken} seconds\n"
-        f"Files: {len(files)}\n\n"
+        f"code: {len(files)}\n\n"
     )
     
     for file in files:
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
+
         f_chat_id = chat_id
-        
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         
         # Auto-Detect Quality
@@ -113,21 +118,22 @@ def format_card_result(file, current_index, total_count):
     
     text += f"File {current_index + 1} of {total_count}"
     return text
-
+ 
 async def post_to_telegraph(files, query, chat_id):
+# ✅ 4. FILTERING LOGIC (STRICT MODE)
     """Generates a Telegraph page for Site Mode."""
     if not telegraph_client: return None
-    
+
     html_content = f"<h3>Search Results for: {query}</h3><br>"
     for file in files:
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
         f_chat_id = chat_id
-        
+
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         html_content += f"<p>📂 <a href='{link}'>{f_name}</a> [{f_size}]</p><hr>"
-    
+
     try:
         response = telegraph_client.create_page(
             title=f"Results: {query}", 
@@ -140,12 +146,12 @@ async def post_to_telegraph(files, query, chat_id):
 
 # ==============================================================================
 # ✅ 4. FILTERING LOGIC & BUTTONS (NEW)
-# ==============================================================================
+# ================================
 
 def filter_by_type(files, f_type):
     """
-    Filters files based on 'file_type' (video/document).
-    f_type: 'video', 'document', or 'all'
+    Filters files based on 'file_type' saved in DB.
+    Strictly separates Streamable Videos from Documents.
     """
     if not f_type or f_type.lower() == "all":
         return files
@@ -157,35 +163,34 @@ def filter_by_type(files, f_type):
         # DB se type nikalo, default 'document' agar missing ho
         db_type = f.get('file_type', 'document').lower()
         
-        if target_type == "video" and "video" in db_type:
+        # Agar user ne Video manga aur DB mein bhi 'video' (Streamable) hai
+        if target_type == "video" and db_type == "video":
             filtered.append(f)
-        # If user wants docs, we exclude confirmed videos
-        elif target_type == "document" and "video" not in db_type:
+            
+        # Agar user ne Docs manga aur DB mein bhi 'document' (File) hai
+        elif target_type == "document" and db_type == "document":
             filtered.append(f)
             
     return filtered
 
 def get_filter_buttons(unique_id, active_filter="all"):
     """
-    Generates the Video/Docs/All buttons row.
-    Structure: [Videos] [Docs]
-    If Selected: [Videos ✅] [Docs] + Next Row [All Media Types]
+    Generates Filter Buttons using '#' separator to avoid crashes.
     """
     btn_row = []
     reset_row = []
     
-    # Callback format: filter_media#{unique_id}#{type}
-    # We use '#' separator to prevent errors with underscores in unique_id
+    # Using '#' separator
     
     if active_filter == "video":
         btn_row.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
         btn_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_media#{unique_id}#document"))
-        reset_row.append(InlineKeyboardButton("All Media Types", callback_data=f"filter_media#{unique_id}#all"))
+        reset_row.append(InlineKeyboardButton("Show All Media", callback_data=f"filter_media#{unique_id}#all"))
         
     elif active_filter == "document":
         btn_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_media#{unique_id}#video"))
         btn_row.append(InlineKeyboardButton("Docs ✅", callback_data="ignore"))
-        reset_row.append(InlineKeyboardButton("All Media Types", callback_data=f"filter_media#{unique_id}#all"))
+        reset_row.append(InlineKeyboardButton("Show All Media", callback_data=f"filter_media#{unique_id}#all"))
         
     else: # Default (All)
         btn_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_media#{unique_id}#video"))
@@ -193,14 +198,10 @@ def get_filter_buttons(unique_id, active_filter="all"):
         
     return btn_row, reset_row
 
-# ==============================================================================
-# ✅ 5. PAGINATION HELPER (UPDATED FOR FILTERS & SAFE SEPARATORS)
-# ==============================================================================
-
+# ✅ 5. PAGINATION HELPER (UPDATED FOR FILTERS)
 def get_pagination_row(current_offset, limit, total_count, unique_id, active_filter="all"):
     """
-    Generates the navigation row: [ ⬅️ Back ] [ 1/5 ] [ Next ➡️ ]
-    Uses unique_id + active_filter for persistence.
+    Generates navigation row using '#' separator and preserving active_filter.
     """
     buttons = []
     
@@ -213,7 +214,7 @@ def get_pagination_row(current_offset, limit, total_count, unique_id, active_fil
 
     # 1. Back Button
     if current_offset >= limit:
-        # Format: next#{unique_id}#{offset}#{active_filter}
+        # Format: next#unique_id#offset#active_filter
         buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"next#{unique_id}#{current_offset - limit}#{active_filter}"))
 
     # 2. Page Counter (Static)
@@ -221,19 +222,15 @@ def get_pagination_row(current_offset, limit, total_count, unique_id, active_fil
 
     # 3. Next Button
     if current_offset + limit < total_count:
-        # Format: next#{unique_id}#{offset}#{active_filter}
+        # Format: next#unique_id#offset#active_filter
         buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"next#{unique_id}#{current_offset + limit}#{active_filter}"))
 
     return buttons
 
-# ==============================================================================
 # ✅ 6. BUTTON PARSER (UPDATED)
-# ==============================================================================
-
 def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active_filter="all"):
     """
     Generates buttons for Inline Result Mode with Pagination.
-    REQUIRES unique_id & active_filter for pagination buttons.
     """
     
     # Slice the files based on offset and limit
@@ -244,21 +241,21 @@ def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active
         f_name = file.get('file_name', 'Unknown File')
         f_size = get_size(file.get('file_size', 0))
         link_id = file.get('link_id')
+        
         f_chat_id = chat_id
         caption = file.get('caption')
 
         display_name = f_name
         # Simple caption logic to highlight query
-        if query and caption:
-            # Safe check to prevent 'int' object has no attribute 'lower'
-            if isinstance(query, str):
-                q = query.lower()
-                n = f_name.lower()
-                c = caption.lower()
-                if q not in n and q in c:
-                    clean_cap = caption.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
-                    if len(clean_cap) > 60: clean_cap = clean_cap[:57] + "..."
-                    display_name = clean_cap
+        # Safe check for query type to prevent errors
+        if query and isinstance(query, str) and caption:
+            q = query.lower()
+            n = f_name.lower()
+            c = caption.lower()
+            if q not in n and q in c:
+                clean_cap = caption.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
+                if len(clean_cap) > 60: clean_cap = clean_cap[:57] + "..."
+                display_name = clean_cap
 
         btn_text = f"📂 {display_name} [{f_size}]"
         
@@ -267,7 +264,7 @@ def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     # --- ADD PAGINATION ROW ---
-    # We now pass unique_id and active_filter
+    # Pass unique_id and active_filter
     pagination = get_pagination_row(offset, limit, len(files), unique_id, active_filter)
     if pagination:
         buttons.append(pagination)

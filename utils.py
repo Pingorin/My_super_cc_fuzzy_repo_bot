@@ -54,9 +54,17 @@ def format_text_results(files, query, chat_id):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
+        
+        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id) for the link
+        # This ensures the bot checks THIS group's settings, not the file's source channel
         f_chat_id = chat_id
+        
+        # Link directs to the bot with the specific Group ID
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
+        
+        # HTML Link formatting for cleaner look
         text += f"{i}. 📂 <a href='{link}'>{f_name}</a> [{f_size}]\n\n"
+        
     return text
 
 def format_detailed_results(files, query, chat_id, time_taken=0):
@@ -72,12 +80,17 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
+
+        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
         f_chat_id = chat_id
+        
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         
+        # Auto-Detect Quality
         q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
         quality = q_match.group(0) if q_match else "N/A"
         
+        # Auto-Detect Language
         l_matches = re.findall(r"\b(Hindi|Eng|English|Tam|Tamil|Tel|Telugu|Mal|Malayalam|Kan|Kannada|Ben|Bengali|Pun|Punjabi|Mar|Marathi)\b", f_name, re.IGNORECASE)
         if l_matches:
             lang = ", ".join(sorted(set([l.capitalize() for l in l_matches])))
@@ -89,12 +102,14 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         text += f"📀 𝙦𝙪𝙖𝙡𝙞𝙩𝙮: {quality}\n"
         text += f"🌍 𝙡𝙖𝙣𝙜𝙪𝙖𝙜𝙚: {lang}\n"
         text += f"📦 [{f_size}]\n\n"
+        
     return text
 
 def format_card_result(file, current_index, total_count):
     """Generates the Single Card layout."""
     f_name = file['file_name']
     f_size = get_size(file['file_size'])
+    
     f_type = "Document"
     if f_name.endswith(('.mkv', '.mp4', '.avi', '.webm', '.mov')): f_type = "Video"
     elif f_name.endswith(('.mp3', '.flac', '.wav', '.m4a')): f_type = "Audio"
@@ -103,53 +118,84 @@ def format_card_result(file, current_index, total_count):
     text = f"🎬 **{f_name}**\n\n"
     text += f"🗂️ **Type:** {f_type}\n"
     text += f"💾 **Size:** {f_size}\n\n"
+    
     text += f"File {current_index + 1} of {total_count}"
     return text
 
 async def post_to_telegraph(files, query, chat_id):
     """Generates a Telegraph page for Site Mode."""
     if not telegraph_client: return None
+    
     html_content = f"<h3>Search Results for: {query}</h3><br>"
     for file in files:
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
+        
+        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
         f_chat_id = chat_id
+        
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         html_content += f"<p>📂 <a href='{link}'>{f_name}</a> [{f_size}]</p><hr>"
+    
     try:
-        response = telegraph_client.create_page(title=f"Results: {query}", html_content=html_content)
+        response = telegraph_client.create_page(
+            title=f"Results: {query}", 
+            html_content=html_content
+        )
         return response['url']
     except Exception as e:
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. PAGINATION HELPER
+# ✅ 4. PAGINATION HELPER (NEW)
 def get_pagination_row(current_offset, limit, total_count, query):
+    """
+    Generates the navigation row: [ ⬅️ Back ] [ 1/5 ] [ Next ➡️ ]
+    """
     buttons = []
+    
+    # Calculate Page Numbers
     current_page = int(current_offset / limit) + 1
     total_pages = math.ceil(total_count / limit)
-    if total_pages == 1: return []
 
+    if total_pages == 1:
+        return []
+
+    # 1. Back Button
     if current_offset >= limit:
         buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"next_{current_offset - limit}_{query}"))
+
+    # 2. Page Counter (Static)
     buttons.append(InlineKeyboardButton(f"📑 {current_page}/{total_pages}", callback_data="pages"))
+
+    # 3. Next Button
     if current_offset + limit < total_count:
         buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"next_{current_offset + limit}_{query}"))
+
     return buttons
 
-# ✅ 5. BUTTON PARSER
+# ✅ 5. BUTTON PARSER (Updated for Pagination)
 def btn_parser(files, chat_id, query, offset=0, limit=10):
+    """
+    Generates buttons for Inline Result Mode with Pagination.
+    """
+    # Slice the files based on offset and limit
     current_files = files[offset : offset + limit]
+    
     buttons = []
     for file in current_files:
         f_name = file.get('file_name', 'Unknown File')
         f_size = get_size(file.get('file_size', 0))
         link_id = file.get('link_id')
+        
+        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
         f_chat_id = chat_id
+        
         caption = file.get('caption')
 
         display_name = f_name
+        # Simple caption logic to highlight query
         if query and caption:
             q = query.lower()
             n = f_name.lower()
@@ -160,19 +206,26 @@ def btn_parser(files, chat_id, query, offset=0, limit=10):
                 display_name = clean_cap
 
         btn_text = f"📂 {display_name} [{f_size}]"
+        
         if link_id is not None:
             url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
+    # --- ADD PAGINATION ROW ---
+    # Max length for callback data is 64 bytes. Truncate query if too long.
     safe_query = query[:20] if query else "blank"
+    
     pagination = get_pagination_row(offset, limit, len(files), safe_query)
-    if pagination: buttons.append(pagination)
+    if pagination:
+        buttons.append(pagination)
+            
     return buttons
 
 # ✅ 6. SHORTLINK GENERATOR
 async def get_shortlink(site, api, link):
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}
+    
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params, timeout=20) as response:
@@ -195,7 +248,8 @@ async def _get_fsub_status(bot, user_id, channel_id):
         if member.status in [enums.ChatMemberStatus.LEFT, enums.ChatMemberStatus.BANNED]:
             if await db.is_user_pending(user_id, channel_id): return "PENDING"
             return "NOT_JOINED"
-        if member.status == enums.ChatMemberStatus.RESTRICTED: return "PENDING"
+        if member.status == enums.ChatMemberStatus.RESTRICTED:
+            return "PENDING"
     except UserNotParticipant:
         if await db.is_user_pending(user_id, channel_id): return "PENDING"
         return "NOT_JOINED"
@@ -212,6 +266,7 @@ async def _get_normal_fsub_status(bot, user_id, channel_id):
 
 async def check_fsub_status(bot, user_id, grp_id=None):
     id_1, id_2, id_3 = AUTH_CHANNEL, AUTH_CHANNEL_2, AUTH_CHANNEL_3
+    
     if grp_id:
         settings = await db.get_group_settings(grp_id)
         if settings:
@@ -230,6 +285,7 @@ async def check_fsub_status(bot, user_id, grp_id=None):
     if id_2: status_2 = await _get_fsub_status(bot, user_id, id_2)
     status_3 = "MEMBER"
     if id_3: status_3 = await _get_normal_fsub_status(bot, user_id, id_3)
+    
     return status_1, status_2, status_3, id_1, id_2, id_3
 
 async def check_fsub_4_status(bot, user_id, grp_id=None):
@@ -241,92 +297,7 @@ async def check_fsub_4_status(bot, user_id, grp_id=None):
             if isinstance(fsub_channels, dict) and fsub_channels.get('4'):
                  id_4 = int(fsub_channels['4'])
             elif settings.get('fsub_id_4'): id_4 = int(settings['fsub_id_4'])
+        
     if not id_4: return "MEMBER", None 
     status = await _get_fsub_status(bot, user_id, id_4)
     return status, id_4
-
-# ✅ 8. QUALITY EXTRACTOR HELPER
-def get_qualities(files):
-    qualities = {"4k": 0, "1080p": 0, "720p": 0, "480p": 0, "360p": 0, "hd": 0}
-    for file in files:
-        name = file.get('file_name', '').lower()
-        if "2160p" in name or "4k" in name: qualities["4k"] += 1
-        elif "1080p" in name: qualities["1080p"] += 1
-        elif "720p" in name: qualities["720p"] += 1
-        elif "480p" in name: qualities["480p"] += 1
-        elif "360p" in name: qualities["360p"] += 1
-        elif "hd" in name: qualities["hd"] += 1
-    return {k: v for k, v in qualities.items() if v > 0}
-
-# ✅ 9. LANGUAGE EXTRACTOR HELPER
-def get_languages(files):
-    lang_map = {
-        "Hindi": r"\b(hindi|hin|hind)\b",
-        "English": r"\b(english|eng)\b",
-        "Tamil": r"\b(tamil|tam)\b",
-        "Telugu": r"\b(telugu|tel)\b",
-        "Malayalam": r"\b(malayalam|mal)\b",
-        "Kannada": r"\b(kannada|kan)\b",
-        "Bengali": r"\b(bengali|ben)\b",
-        "Punjabi": r"\b(punjabi|pun)\b",
-        "Urdu": r"\b(urdu)\b",
-        "Dual": r"\b(dual)\b",
-        "Multi": r"\b(multi)\b"
-    }
-    found = {k: 0 for k in lang_map.keys()}
-    for file in files:
-        name = file.get('file_name', '').lower()
-        for lang, regex in lang_map.items():
-            if re.search(regex, name):
-                found[lang] += 1
-    return {k: v for k, v in found.items() if v > 0}
-
-# ✅ 10. YEAR EXTRACTOR HELPER
-def get_years(files):
-    """
-    Scans files and counts years (e.g., 2023, 2024, 1999).
-    """
-    years = {}
-    # Regex for years 1900-2099
-    regex = r"\b(19|20)\d{2}\b"
-    
-    for file in files:
-        name = file.get('file_name', '')
-        match = re.search(regex, name)
-        if match:
-            year = match.group(0)
-            if year in years:
-                years[year] += 1
-            else:
-                years[year] = 1
-    
-    # Sort years descending (newest first)
-    return dict(sorted(years.items(), key=lambda item: item[0], reverse=True))
-
-# ✅ 11. SIZE EXTRACTOR HELPER (NEW)
-def get_size_ranges(files):
-    """
-    Checks which size categories contain files.
-    """
-    # Categories: <500MB, 500MB-1GB, 1GB-2GB, >2GB
-    ranges = {
-        "<500MB": False,
-        "500MB-1GB": False,
-        "1GB-2GB": False,
-        ">2GB": False
-    }
-    
-    for file in files:
-        size = file.get('file_size', 0)
-        
-        if size < 524288000: # 500 MB in bytes
-            ranges["<500MB"] = True
-        elif 524288000 <= size < 1073741824: # 500MB - 1GB
-            ranges["500MB-1GB"] = True
-        elif 1073741824 <= size < 2147483648: # 1GB - 2GB
-            ranges["1GB-2GB"] = True
-        elif size >= 2147483648: # > 2GB
-            ranges[">2GB"] = True
-            
-    # Return only categories that verify True
-    return [k for k, v in ranges.items() if v]

@@ -1,7 +1,7 @@
 import logging
 import re
 import uuid
-import secrets # ✅ Added for generating secure short keys
+import secrets
 import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError
@@ -11,32 +11,22 @@ logger = logging.getLogger(__name__)
 
 class MediaDB:
     def __init__(self, uri, database_name):
-        # ✅ Connection: Using DATABASE_URI (Exclusively for Files)
         self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         
         self.data_col = self.db.files_data   
         self.search_col = self.db.files_search 
         self.counters = self.db.counters
-        
-        # ✅ Collection for Site Mode Cache (Web View)
         self.search_cache = self.db.search_cache 
-
-        # ✅ NEW: Collection for Search Sessions (Button Pagination Fix)
         self.search_results = self.db.search_results
 
     async def ensure_indexes(self):
-        # Regular indexes for fallback search
         await self.search_col.create_index("file_name")
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
+        await self.search_col.create_index("file_type") # ✅ Added Index for Filtering
         await self.data_col.create_index("file_unique_id", unique=True)
-        
-        # ✅ TTL Index for Site Mode (Auto-delete cache after 1 hour)
         await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
-
-        # ✅ NEW: TTL Index for Search Results (Auto-delete after 48 Hours)
-        # 172800 seconds = 48 hours
         await self.search_results.create_index("created_at", expireAfterSeconds=172800)
 
     async def get_next_sequence_value(self, sequence_name, increment=1):
@@ -48,7 +38,6 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
-    # --- 🧹 TEXT CLEANER HELPER (Optimized) ---
     @staticmethod
     def clean_text(text):
         if not text: return ""
@@ -89,6 +78,14 @@ class MediaDB:
             file_name = self.clean_text(media.file_name)
             if not file_name: file_name = "Unknown File"
 
+            # ✅ Determine File Type (Video vs Document)
+            file_type = "document" # Default
+            if hasattr(media, "mime_type") and media.mime_type and "video" in media.mime_type:
+                file_type = "video"
+            # Fallback: Check extension
+            elif file_name.lower().endswith(('.mkv', '.mp4', '.avi', '.webm', '.mov', '.flv', '.m4v')):
+                file_type = "video"
+
             caption = message.caption.html if message.caption else None
             if caption:
                 caption = self.clean_text(caption)
@@ -109,8 +106,9 @@ class MediaDB:
                 'file_name': file_name,
                 'file_size': media.file_size, 
                 'caption': caption,
+                'file_type': file_type, # ✅ Save File Type
                 'link_id': current_id,
-                'chat_id': message.chat.id # ✅ Added chat_id here for Web Links
+                'chat_id': message.chat.id
             })
             current_id += 1
 
@@ -146,10 +144,12 @@ class MediaDB:
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    async def get_search_results(self, query):
+    # ✅ UPDATED: Added file_type parameter
+    async def get_search_results(self, query, file_type=None):
         try:
             words = query.split()
             
+            # --- 1. Construct Search Query ---
             if len(words) <= 1:
                 search_stage = {
                     "$search": {
@@ -181,9 +181,20 @@ class MediaDB:
                     }
                 }
 
-            pipeline = [search_stage, {"$limit": 50}] # Increased limit for better Site Mode results
+            # --- 2. Construct Filter Stage ---
+            pipeline = [search_stage]
+            
+            if file_type:
+                # Add a $match stage to filter by file_type
+                pipeline.append({
+                    "$match": {"file_type": file_type}
+                })
+
+            # --- 3. Execute ---
+            pipeline.append({"$limit": 100}) # Limit results
+            
             cursor = self.search_col.aggregate(pipeline)
-            files = await cursor.to_list(length=50)
+            files = await cursor.to_list(length=100)
             return files
             
         except Exception as e:
@@ -191,9 +202,15 @@ class MediaDB:
             safe_query = re.escape(query)
             regex = re.compile(safe_query, re.IGNORECASE)
             
-            cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})
+            filter_query = {"$or": [{"file_name": regex}, {"caption": regex}]}
+            
+            # Apply File Type Filter for Regex Fallback
+            if file_type:
+                filter_query["file_type"] = file_type
+
+            cursor = self.search_col.find(filter_query)
             cursor.sort('$natural', -1)
-            return await cursor.to_list(length=50)
+            return await cursor.to_list(length=100)
 
     async def total_files_count(self):
         return await self.data_col.count_documents({})
@@ -205,17 +222,8 @@ class MediaDB:
         except:
             return 0
 
-    # ==================================================================
-    # 🌍 SITE MODE METHODS (Save & Retrieve Cache)
-    # ==================================================================
-
     async def save_search_results(self, query, files, chat_id):
-        """
-        Saves search results to MongoDB with a short UUID for Web View.
-        """
-        unique_id = str(uuid.uuid4())[:8] # Short 8-char ID
-        
-        # Simplify data to save space
+        unique_id = str(uuid.uuid4())[:8] 
         simplified_files = []
         for file in files:
             simplified_files.append({
@@ -235,29 +243,18 @@ class MediaDB:
         return unique_id
 
     async def get_cached_results(self, unique_id):
-        """Retrieves cached results for the Web Server."""
         return await self.search_cache.find_one({"_id": unique_id})
 
-    # ==================================================================
-    # 🔑 NEW SESSION SYSTEM METHODS (For Button Pagination)
-    # ==================================================================
-
     async def save_search_result(self, query, files):
-        """
-        Saves the search result to DB and returns a unique ID (Key).
-        Used to fix BUTTON_DATA_INVALID error in buttons.
-        """
-        # Generate a short 6-char URL-safe key (e.g., 'Xy9-Az')
         unique_id = secrets.token_urlsafe(6)
-        
-        # Simplify file data to save DB space
         simplified_files = []
         for file in files:
             simplified_files.append({
                 'file_name': file.get('file_name'),
                 'file_size': file.get('file_size'),
                 'link_id': file.get('link_id'),
-                'caption': file.get('caption', None)
+                'caption': file.get('caption', None),
+                'file_type': file.get('file_type', 'document') # Store type in session too
             })
 
         await self.search_results.insert_one({
@@ -270,10 +267,6 @@ class MediaDB:
         return unique_id
 
     async def get_search_session(self, unique_id):
-        """
-        Retrieves the saved files list using the Unique ID.
-        """
         return await self.search_results.find_one({"_id": unique_id})
 
-# Initialize with DATABASE_URI
 Media = MediaDB(DATABASE_URI, DATABASE_NAME)

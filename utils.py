@@ -147,13 +147,62 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. PAGINATION HELPER (UPDATED FOR FILTERS)
-def get_pagination_row(current_offset, limit, total_count, unique_id, active_mode=None):
+# ✅ 4. FILTERING LOGIC (NEW)
+
+def filter_by_type(files, f_type):
+    """
+    Filters files based on 'file_type' (video/document).
+    f_type: 'video', 'document', or 'all'
+    """
+    if not f_type or f_type.lower() == "all":
+        return files
+        
+    filtered = []
+    target_type = f_type.lower()
+    
+    for f in files:
+        # DB se type nikalo, default 'document' agar missing ho
+        db_type = f.get('file_type', 'document').lower()
+        
+        if target_type == "video" and "video" in db_type:
+            filtered.append(f)
+        elif target_type == "document" and "video" not in db_type:
+            filtered.append(f)
+            
+    return filtered
+
+def get_filter_buttons(unique_id, active_filter="all"):
+    """
+    Generates the Video/Docs/All buttons row.
+    Structure: [Videos] [Docs]
+    If Selected: [Videos ✅] [Docs] + Next Row [All Media Types]
+    """
+    btn_row = []
+    reset_row = []
+    
+    # Callback format: filter_media_{unique_id}_{type}
+    
+    if active_filter == "video":
+        btn_row.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
+        btn_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_media_{unique_id}_document"))
+        reset_row.append(InlineKeyboardButton("All Media Types", callback_data=f"filter_media_{unique_id}_all"))
+        
+    elif active_filter == "document":
+        btn_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_media_{unique_id}_video"))
+        btn_row.append(InlineKeyboardButton("Docs ✅", callback_data="ignore"))
+        reset_row.append(InlineKeyboardButton("All Media Types", callback_data=f"filter_media_{unique_id}_all"))
+        
+    else: # Default (All)
+        btn_row.append(InlineKeyboardButton("Videos", callback_data=f"filter_media_{unique_id}_video"))
+        btn_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_media_{unique_id}_document"))
+        
+    return btn_row, reset_row
+
+# ✅ 5. PAGINATION HELPER (UPDATED FOR FILTERS)
+def get_pagination_row(current_offset, limit, total_count, unique_id, active_filter="all"):
     """
     Generates the navigation row: [ ⬅️ Back ] [ 1/5 ] [ Next ➡️ ]
-    Supports:
-    - Standard Mode: next_{unique_id}_{offset}
-    - Filter Mode: filter_{unique_id}_{mode}_{offset}
+    Uses unique_id + active_filter for persistence.
     """
     buttons = []
     
@@ -164,33 +213,26 @@ def get_pagination_row(current_offset, limit, total_count, unique_id, active_mod
     if total_pages == 1:
         return []
 
-    # Determine Callback Prefix based on Mode
-    if active_mode:
-        # If filtering, we use the filter callback structure
-        prefix = f"filter_{unique_id}_{active_mode}"
-    else:
-        # Standard pagination
-        prefix = f"next_{unique_id}"
-
     # 1. Back Button
     if current_offset >= limit:
-        buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"{prefix}_{current_offset - limit}"))
+        # Format: next_{unique_id}_{offset}_{active_filter}
+        buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"next_{unique_id}_{current_offset - limit}_{active_filter}"))
 
     # 2. Page Counter (Static)
     buttons.append(InlineKeyboardButton(f"📑 {current_page}/{total_pages}", callback_data="pages"))
 
     # 3. Next Button
     if current_offset + limit < total_count:
-        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"{prefix}_{current_offset + limit}"))
+        # Format: next_{unique_id}_{offset}_{active_filter}
+        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"next_{unique_id}_{current_offset + limit}_{active_filter}"))
 
     return buttons
 
-# ✅ 5. BUTTON PARSER (UPDATED FOR FILTERS)
-def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active_mode=None):
+# ✅ 6. BUTTON PARSER (UPDATED FOR FILTERS)
+def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active_filter="all"):
     """
     Generates buttons for Inline Result Mode with Pagination.
     REQUIRES unique_id for pagination buttons.
-    Supports active_mode for filtering pagination.
     """
     
     # Slice the files based on offset and limit
@@ -225,40 +267,11 @@ def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     # --- ADD PAGINATION ROW ---
-    # We now pass unique_id and active_mode to pagination
-    pagination = get_pagination_row(offset, limit, len(files), unique_id, active_mode)
+    # We now pass unique_id and active_filter
+    pagination = get_pagination_row(offset, limit, len(files), unique_id, active_filter)
     if pagination:
         buttons.append(pagination)
             
-    return buttons
-
-# ✅ 6. NEW FILTER BUTTONS GENERATOR
-def get_filter_buttons(search_id, active_mode=None):
-    """
-    Generates toggle buttons for Media Type filtering.
-    active_mode: None (All), 'video', or 'document'
-    """
-    buttons = []
-    
-    # Define Base Buttons with Status Indicators
-    vid_text = "Videos ✅" if active_mode == 'video' else "Videos 📹"
-    doc_text = "Docs ✅" if active_mode == 'document' else "Docs 📂"
-    
-    # Row 1: The Toggle Switches (Reset offset to 0 when switching)
-    # Callback Format: filter_{search_id}_{mode}_{offset}
-    row1 = [
-        InlineKeyboardButton(vid_text, callback_data=f"filter_{search_id}_video_0"),
-        InlineKeyboardButton(doc_text, callback_data=f"filter_{search_id}_document_0")
-    ]
-    buttons.append(row1)
-    
-    # Row 2: "Back to All" (Only shows if a filter is active)
-    if active_mode:
-        row2 = [
-            InlineKeyboardButton("⬅️ All Media Types", callback_data=f"unfilter_{search_id}_all_0")
-        ]
-        buttons.append(row2)
-        
     return buttons
 
 # ✅ 7. SHORTLINK GENERATOR

@@ -8,8 +8,8 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import PORT, SITE_URL
-# ✅ Added get_filter_buttons to imports
-from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, get_filter_buttons
+# ✅ Added filter_by_type and get_filter_buttons to imports
+from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, filter_by_type, get_filter_buttons
 
 logger = logging.getLogger(__name__)
 
@@ -142,11 +142,11 @@ async def auto_filter(client, message):
         # Capture the message sent by bot
         sent_msg = None 
 
-        # --- PREPARE FOOTER BUTTONS ---
-
-        # 1. Filter Buttons (Default: All Media) 
-        filter_buttons = get_filter_buttons(unique_id, active_mode=None)
-
+        # ✅ PREPARE BUTTONS: Filter, HowTo, Premium
+        
+        # 1. Filter Buttons (Default: All)
+        filter_row, reset_row = get_filter_buttons(unique_id, "all")
+        
         # 2. How To Download URL
         howto_url = group_settings.get('howto_url')
         howto_btn = []
@@ -161,10 +161,10 @@ async def auto_filter(client, message):
             # ⚠️ Pass unique_id instead of query
             buttons = btn_parser(files, message.chat.id, unique_id, offset, limit)
             
-            # ✅ Inject Filters (Above How To)
-            for row in filter_buttons:
-                buttons.append(row)
-
+            # ✅ Add Filters
+            if filter_row: buttons.append(filter_row)
+            if reset_row: buttons.append(reset_row)
+            
             # Add How To Button
             if howto_btn: buttons.append(howto_btn[0])
             # Add Free Premium Button
@@ -186,18 +186,17 @@ async def auto_filter(client, message):
             text = format_text_results(page_files, query, message.chat.id)
             
             btn = []
+            # ✅ Add Filters
+            if filter_row: btn.append(filter_row)
+            if reset_row: btn.append(reset_row)
             
-            # ✅ Inject Filters
-            for row in filter_buttons:
-                btn.append(row)
-
-            # Add How To Button FIRST
+            # Add How To Button
             if howto_btn: btn.append(howto_btn[0])
             # Add Free Premium Button
             btn.append(free_prem_btn)
 
-            # ⚠️ Pass unique_id to pagination
-            pagination = get_pagination_row(offset, limit, total_results, unique_id)
+            # ⚠️ Pass unique_id to pagination (default filter 'all')
+            pagination = get_pagination_row(offset, limit, total_results, unique_id, "all")
             if pagination: btn.append(pagination)
             
             sent_msg = await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
@@ -208,18 +207,17 @@ async def auto_filter(client, message):
             text = format_detailed_results(page_files, query, message.chat.id, time_taken)
             
             btn = []
+            # ✅ Add Filters
+            if filter_row: btn.append(filter_row)
+            if reset_row: btn.append(reset_row)
             
-            # ✅ Inject Filters
-            for row in filter_buttons:
-                btn.append(row)
-
-            # Add How To Button FIRST
+            # Add How To Button
             if howto_btn: btn.append(howto_btn[0])
             # Add Free Premium Button
             btn.append(free_prem_btn)
 
             # ⚠️ Pass unique_id to pagination
-            pagination = get_pagination_row(offset, limit, total_results, unique_id)
+            pagination = get_pagination_row(offset, limit, total_results, unique_id, "all")
             if pagination: btn.append(pagination)
             
             sent_msg = await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
@@ -238,16 +236,13 @@ async def auto_filter(client, message):
             
             btn = [[InlineKeyboardButton("🔎 View Results Online", url=final_site_url)]]
             
-            # ✅ Inject Filters (Shortcut for user)
-            for row in filter_buttons:
-                btn.append(row)
-
             # Add How To Button
             if howto_btn: btn.append(howto_btn[0])
             # Add Free Premium Button
             btn.append(free_prem_btn)
             
-            pagination = get_pagination_row(offset, limit, total_results, unique_id)
+            # Pagination
+            pagination = get_pagination_row(offset, limit, total_results, unique_id, "all")
             if pagination: btn.append(pagination)
             
             sent_msg = await message.reply_text(
@@ -265,17 +260,13 @@ async def auto_filter(client, message):
             chat_id = message.chat.id
             btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
 
-            # ✅ Inject Filters
-            for row in filter_buttons:
-                btn.append(row)
-
             # Add How To Button
             if howto_btn: btn.append(howto_btn[0])
             # Add Free Premium Button
             btn.append(free_prem_btn)
 
             if total_results > 1:
-                # ⚠️ Use unique_id in callback data instead of query
+                # ⚠️ Use unique_id in callback data
                 btn.append([
                     InlineKeyboardButton(f"1/{total_results}", callback_data="pages"),
                     InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{unique_id}_0")
@@ -308,6 +299,102 @@ async def auto_filter(client, message):
     except Exception as e:
         logger.error(f"Search Error: {e}")
 
+
+# ==============================================================================
+# 🎯 FILTER BUTTON HANDLER (Videos / Docs / All)
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^filter_media_"))
+async def handle_filter_click(client, query):
+    try:
+        # Format: filter_media_{unique_id}_{type}
+        _, _, unique_id, f_type = query.data.split("_")
+        
+        # 1. Get Session
+        session = await Media.get_search_session(unique_id)
+        if not session: return await query.answer("Search Expired.", show_alert=True)
+        
+        original_files = session['files']
+        req = session['query']
+        
+        # 2. Apply Filter
+        filtered_files = filter_by_type(original_files, f_type)
+        total_results = len(filtered_files)
+        
+        if total_results == 0:
+            return await query.answer(f"No {f_type}s found for this search!", show_alert=True)
+            
+        # 3. Settings & UI Setup
+        group_settings = await db.get_group_settings(query.message.chat.id)
+        mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
+        limit = group_settings.get('result_page_limit', 10) if group_settings else 10
+        if mode == 'hybrid': mode = 'button' if len(filtered_files) <= limit else 'text'
+        
+        howto_url = group_settings.get('howto_url')
+        howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
+        free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
+        
+        # 4. Generate Filter Buttons (Updated with Checkmark)
+        filter_row, reset_row = get_filter_buttons(unique_id, f_type)
+        
+        offset = 0 # Reset to page 1
+        
+        # --- RENDER NEW RESPONSE ---
+        if mode == 'button':
+            buttons = btn_parser(filtered_files, query.message.chat.id, unique_id, offset, limit)
+            
+            # Add Filters
+            if filter_row: buttons.append(filter_row)
+            if reset_row: buttons.append(reset_row)
+            
+            if howto_btn: buttons.append(howto_btn[0])
+            buttons.append(free_prem_btn)
+            
+            # Pagination (Pass current f_type)
+            pagination = get_pagination_row(offset, limit, total_results, unique_id, f_type)
+            if pagination: buttons.append(pagination)
+            
+            text = f"⚡ **Hey {query.from_user.mention}!**\n👻 **Results for:** `{req}`\n📂 **Filtered:** {f_type.capitalize()}"
+            await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+            
+        elif mode == 'text':
+            page_files = filtered_files[offset : offset + limit]
+            text = format_text_results(page_files, req, query.message.chat.id)
+            # Add header for filter
+            text = f"📂 **Filter:** {f_type.capitalize()} Only\n\n" + text
+            
+            btn = []
+            if filter_row: btn.append(filter_row)
+            if reset_row: btn.append(reset_row)
+            if howto_btn: btn.append(howto_btn[0])
+            btn.append(free_prem_btn)
+            
+            pagination = get_pagination_row(offset, limit, total_results, unique_id, f_type)
+            if pagination: btn.append(pagination)
+            
+            await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn))
+            
+        elif mode == 'detailed':
+            page_files = filtered_files[offset : offset + limit]
+            text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
+            text = f"📂 **Filter:** {f_type.capitalize()} Only\n\n" + text
+            
+            btn = []
+            if filter_row: btn.append(filter_row)
+            if reset_row: btn.append(reset_row)
+            if howto_btn: btn.append(howto_btn[0])
+            btn.append(free_prem_btn)
+            
+            pagination = get_pagination_row(offset, limit, total_results, unique_id, f_type)
+            if pagination: btn.append(pagination)
+            
+            await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn))
+
+    except Exception as e:
+        logger.error(f"Filter Error: {e}")
+        await query.answer("Error filtering.", show_alert=True)
+
+
 # ==============================================================================
 # ⏭️ PAGINATION CALLBACK HANDLER (Next/Back Logic)
 # ==============================================================================
@@ -315,9 +402,13 @@ async def auto_filter(client, message):
 @Client.on_callback_query(filters.regex(r"^next_"))
 async def handle_next_back(client, query):
     try:
-        # ✅ Callback Format: next_{unique_id}_{offset}
-        _, unique_id, offset = query.data.split("_") 
-        offset = int(offset)
+        # ✅ Updated Format: next_{unique_id}_{offset}_{active_filter}
+        data_parts = query.data.split("_")
+        unique_id = data_parts[1]
+        offset = int(data_parts[2])
+        
+        # Check if filter param exists (backwards compatibility)
+        active_filter = data_parts[3] if len(data_parts) > 3 else "all"
         
         # 1. Fetch Saved Data using Unique ID
         session = await Media.get_search_session(unique_id)
@@ -325,9 +416,12 @@ async def handle_next_back(client, query):
         if not session:
             return await query.answer("❌ Search expired or no files found.", show_alert=True)
             
-        files = session['files']
+        original_files = session['files']
         req = session['query'] # Original Query for display
-        total_results = len(files)
+        
+        # ✅ Apply Filter Before slicing pages
+        filtered_files = filter_by_type(original_files, active_filter)
+        total_results = len(filtered_files)
         
         # 2. Get Settings Again
         group_settings = await db.get_group_settings(query.message.chat.id)
@@ -336,57 +430,56 @@ async def handle_next_back(client, query):
 
         # Adjust Mode for Hybrid
         if mode == 'hybrid':
-            mode = 'button' if len(files) <= limit else 'text'
+            mode = 'button' if len(filtered_files) <= limit else 'text'
 
-        # --- PREPARE FOOTER BUTTONS ---
-
-        # ✅ 1. Filter Buttons (Pagination on Main Search = No Filter Active)
-        # Note: If filtering is active, it uses a different callback handler (filter_ or unfilter_)
-        # This handler handles standard "Next" on the main list.
-        filter_buttons = get_filter_buttons(unique_id, active_mode=None)
-
-        # 2. How To Download URL
+        # ✅ NEW: Get How To Download URL (For Pagination)
         howto_url = group_settings.get('howto_url')
         howto_btn = []
         if howto_url:
             howto_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
             
-        # 3. Free Premium Button
+        # ✅ NEW: Free Premium Button
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
+
+        # ✅ Generate Filter Row (Keep current state)
+        filter_row, reset_row = get_filter_buttons(unique_id, active_filter)
 
         # 3. Generate New Content
         
         # --- BUTTON MODE ---
         if mode == 'button':
             # Pass unique_id to btn_parser
-            buttons = btn_parser(files, query.message.chat.id, unique_id, offset, limit)
+            buttons = btn_parser(filtered_files, query.message.chat.id, unique_id, offset, limit)
             
-            # ✅ Inject Filters
-            for row in filter_buttons:
-                buttons.append(row)
-                
+            # Insert Filter Buttons
+            if filter_row: buttons.append(filter_row)
+            if reset_row: buttons.append(reset_row)
+
             # Add How To Button
             if howto_btn: buttons.append(howto_btn[0])
             # Add Free Premium
             buttons.append(free_prem_btn)
+            
+            # Pagination with active_filter
+            pagination = get_pagination_row(offset, limit, total_results, unique_id, active_filter)
+            if pagination: buttons.append(pagination)
+            
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
             
         # --- TEXT MODE ---
         elif mode == 'text':
-            page_files = files[offset : offset + limit]
+            page_files = filtered_files[offset : offset + limit]
             text = format_text_results(page_files, req, query.message.chat.id)
+            if active_filter != "all": text = f"📂 **Filter:** {active_filter.capitalize()}\n\n" + text
             
             btn = []
-            
-            # ✅ Inject Filters
-            for row in filter_buttons:
-                btn.append(row)
-                
+            if filter_row: btn.append(filter_row)
+            if reset_row: btn.append(reset_row)
             if howto_btn: btn.append(howto_btn[0])
             btn.append(free_prem_btn) # Add Free Premium
             
             # Pass unique_id to pagination
-            pagination = get_pagination_row(offset, limit, total_results, unique_id)
+            pagination = get_pagination_row(offset, limit, total_results, unique_id, active_filter)
             if pagination: btn.append(pagination)
             
             await query.message.edit_text(
@@ -397,21 +490,19 @@ async def handle_next_back(client, query):
 
         # --- DETAILED MODE ---
         elif mode == 'detailed':
-            page_files = files[offset : offset + limit]
+            page_files = filtered_files[offset : offset + limit]
             # Time taken passed as 0 or empty for edits
             text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
+            if active_filter != "all": text = f"📂 **Filter:** {active_filter.capitalize()}\n\n" + text
             
             btn = []
-            
-            # ✅ Inject Filters
-            for row in filter_buttons:
-                btn.append(row)
-
+            if filter_row: btn.append(filter_row)
+            if reset_row: btn.append(reset_row)
             if howto_btn: btn.append(howto_btn[0])
             btn.append(free_prem_btn) # Add Free Premium
             
             # Pass unique_id to pagination
-            pagination = get_pagination_row(offset, limit, total_results, unique_id)
+            pagination = get_pagination_row(offset, limit, total_results, unique_id, active_filter)
             if pagination: btn.append(pagination)
             
             await query.message.edit_text(
@@ -429,15 +520,11 @@ async def handle_next_back(client, query):
             
             btn = [[InlineKeyboardButton("🔎 View Results Online", url=final_site_url)]]
             
-            # ✅ Inject Filters
-            for row in filter_buttons:
-                btn.append(row)
-
             if howto_btn: btn.append(howto_btn[0])
             btn.append(free_prem_btn) # Add Free Premium
             
             # Pass unique_id to pagination
-            pagination = get_pagination_row(offset, limit, total_results, unique_id)
+            pagination = get_pagination_row(offset, limit, total_results, unique_id, "all")
             if pagination: btn.append(pagination)
             
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
@@ -474,11 +561,6 @@ async def card_next_nav(client, query):
         chat_id = query.message.chat.id
         btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
         
-        # ✅ Inject Filters
-        filter_buttons = get_filter_buttons(unique_id, active_mode=None)
-        for row in filter_buttons:
-            btn.append(row)
-
         if howto_url: btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
         # Add Free Premium
         btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
@@ -519,11 +601,6 @@ async def card_prev_nav(client, query):
         chat_id = query.message.chat.id
         btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
         
-        # ✅ Inject Filters
-        filter_buttons = get_filter_buttons(unique_id, active_mode=None)
-        for row in filter_buttons:
-            btn.append(row)
-
         if howto_url: btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
         # Add Free Premium
         btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])

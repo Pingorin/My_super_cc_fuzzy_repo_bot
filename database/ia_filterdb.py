@@ -97,15 +97,18 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
             
-            # ✅ DETECT FILE TYPE
-            # We check the mime_type attribute safely
-            mime = getattr(media, "mime_type", "").lower()
-            if "video" in mime:
-                file_type = "video"
-            elif "audio" in mime:
-                file_type = "audio"
+            # ✅ DETECT FILE TYPE (STRICT MODE)
+            # Checks Pyrogram Object Class Name (Video vs Document vs Audio)
+            media_type = media.__class__.__name__.lower()
+
+            if media_type == "video":
+                file_type = "video"      # Streamable Video
+            elif media_type == "audio":
+                file_type = "audio"      # Audio File
+            elif media_type == "document":
+                file_type = "document"   # File / Document (includes MKV sent as doc)
             else:
-                file_type = "document"
+                file_type = "document"   # Fallback
 
             data_docs.append({
                 '_id': current_id,

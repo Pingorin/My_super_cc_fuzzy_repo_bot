@@ -56,7 +56,6 @@ def format_text_results(files, query, chat_id):
         link_id = file['link_id']
         
         # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id) for the link
-        # This ensures the bot checks THIS group's settings, not the file's source channel
         f_chat_id = chat_id
         
         # Link directs to the bot with the specific Group ID
@@ -148,10 +147,11 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. PAGINATION HELPER (NEW)
-def get_pagination_row(current_offset, limit, total_count, query):
+# ✅ 4. PAGINATION HELPER (UPDATED FOR SESSION KEY)
+def get_pagination_row(current_offset, limit, total_count, unique_id):
     """
     Generates the navigation row: [ ⬅️ Back ] [ 1/5 ] [ Next ➡️ ]
+    Uses unique_id instead of query to prevent Button Data Invalid error.
     """
     buttons = []
     
@@ -164,22 +164,27 @@ def get_pagination_row(current_offset, limit, total_count, query):
 
     # 1. Back Button
     if current_offset >= limit:
-        buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"next_{current_offset - limit}_{query}"))
+        # ✅ FIX: next_{unique_id}_{offset}
+        buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"next_{unique_id}_{current_offset - limit}"))
 
     # 2. Page Counter (Static)
     buttons.append(InlineKeyboardButton(f"📑 {current_page}/{total_pages}", callback_data="pages"))
 
     # 3. Next Button
     if current_offset + limit < total_count:
-        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"next_{current_offset + limit}_{query}"))
+        # ✅ FIX: next_{unique_id}_{offset}
+        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"next_{unique_id}_{current_offset + limit}"))
 
     return buttons
 
-# ✅ 5. BUTTON PARSER (Updated for Pagination)
-def btn_parser(files, chat_id, query, offset=0, limit=10):
+# ✅ 5. BUTTON PARSER (UPDATED FOR SESSION KEY)
+def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10):
     """
     Generates buttons for Inline Result Mode with Pagination.
+    REQUIRES unique_id for pagination buttons.
+    Optional: query (only for text highlighting).
     """
+    
     # Slice the files based on offset and limit
     current_files = files[offset : offset + limit]
     
@@ -212,10 +217,8 @@ def btn_parser(files, chat_id, query, offset=0, limit=10):
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     # --- ADD PAGINATION ROW ---
-    # Max length for callback data is 64 bytes. Truncate query if too long.
-    safe_query = query[:20] if query else "blank"
-    
-    pagination = get_pagination_row(offset, limit, len(files), safe_query)
+    # We now pass unique_id instead of query
+    pagination = get_pagination_row(offset, limit, len(files), unique_id)
     if pagination:
         buttons.append(pagination)
             

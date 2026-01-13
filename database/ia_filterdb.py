@@ -99,11 +99,17 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
 
-            # ✅ NEW: Determine File Type Logic (Video vs Document)
-            # This tags the file immediately upon saving
-            file_type = "document" # Default
-            if getattr(media, "mime_type", "").startswith("video/") or file_name.lower().endswith(('.mkv', '.mp4', '.avi', '.webm', '.mov', '.flv')):
+            # ✅ STRICT FILE TYPE DETECTION
+            # Default to document (File)
+            file_type = "document" 
+            
+            # Logic: If it has 'duration' and 'width', Telegram considers it a Streamable Video.
+            # This strictly separates 'Video' objects from 'Document' objects.
+            if hasattr(media, "width") and hasattr(media, "duration"):
                 file_type = "video"
+            elif hasattr(media, "mime_type") and str(media.mime_type).startswith("video/") and not hasattr(media, "file_name"):
+                 # Edge case: Video notes or specific video types without filenames
+                 file_type = "video"
 
             data_docs.append({
                 '_id': current_id,
@@ -119,7 +125,7 @@ class MediaDB:
                 'caption': caption,
                 'link_id': current_id,
                 'chat_id': message.chat.id,
-                'file_type': file_type  # ✅ Saved to DB
+                'file_type': file_type  # ✅ Correctly Saved to DB
             })
             current_id += 1
 
@@ -155,7 +161,7 @@ class MediaDB:
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    # ✅ UPDATED: Supports strict 'file_type' filtering
+    # ✅ SEARCH WITH STRICT TYPE FILTERING
     async def get_search_results(self, query, file_type=None):
         try:
             words = query.split()
@@ -185,7 +191,8 @@ class MediaDB:
             pipeline = [search_stage]
 
             # ✅ STRICT FILTER LOGIC
-            # This ensures only 'video' or 'document' is returned based on user click
+            # If user clicks "Videos", fetch ONLY files saved as 'video'
+            # If user clicks "Docs", fetch ONLY files saved as 'document'
             if file_type:
                 pipeline.append({
                     "$match": {

@@ -31,13 +31,12 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-# ✅ 2. TELEGRAPH SETUP (For Site Mode)
+# ✅ 2. TELEGRAPH SETUP
 try:
     from telegraph import Telegraph
     telegraph_client = Telegraph()
     telegraph_client.create_account(short_name='AutoFilter')
 except Exception as e:
-    # logger.warning(f"Telegraph library not found or error: {e}")
     telegraph_client = None
 
 # ✅ 3. RESULT MODE FORMATTERS
@@ -53,7 +52,6 @@ def format_text_results(files, query, chat_id):
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         text += f"{i}. 📂 <a href='{link}'>{f_name}</a> [{f_size}]\n\n"
-        
     return text
 
 def format_detailed_results(files, query, chat_id, time_taken=0):
@@ -64,7 +62,6 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         f"⌛ **Time taken:** {time_taken} seconds\n"
         f"code: {len(files)}\n\n"
     )
-    
     for file in files:
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
@@ -75,15 +72,10 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
         quality = q_match.group(0) if q_match else "N/A"
         
-        l_matches = re.findall(r"\b(Hindi|Eng|English|Tam|Tamil|Tel|Telugu|Mal|Malayalam|Kan|Kannada|Ben|Bengali|Pun|Punjabi|Mar|Marathi)\b", f_name, re.IGNORECASE)
-        lang = ", ".join(sorted(set([l.capitalize() for l in l_matches]))) if l_matches else "N/A"
-
         text += f"📂 <a href='{link}'>𝘾𝙡𝙞𝙘𝙠 𝙩𝙤 𝙜𝙖𝙩 𝙩𝙝𝙞𝙨 𝙛𝙞𝙡𝙚 📥</a>\n"
         text += f"🖥 𝙉𝙖𝙢𝙚: {f_name}\n"
         text += f"📀 𝙦𝙪𝙖𝙡𝙞𝙩𝙮: {quality}\n"
-        text += f"🌍 𝙡𝙖𝙣𝙜𝙪𝙖𝙜𝙚: {lang}\n"
         text += f"📦 [{f_size}]\n\n"
-        
     return text
 
 def format_card_result(file, current_index, total_count):
@@ -102,28 +94,7 @@ def format_card_result(file, current_index, total_count):
     text += f"File {current_index + 1} of {total_count}"
     return text
 
-async def post_to_telegraph(files, query, chat_id):
-    """Generates a Telegraph page for Site Mode."""
-    if not telegraph_client: return None
-    html_content = f"<h3>Search Results for: {query}</h3><br>"
-    for file in files:
-        f_name = file['file_name']
-        f_size = get_size(file['file_size'])
-        link_id = file['link_id']
-        f_chat_id = chat_id
-        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
-        html_content += f"<p>📂 <a href='{link}'>{f_name}</a> [{f_size}]</p><hr>"
-    try:
-        response = telegraph_client.create_page(title=f"Results: {query}", html_content=html_content)
-        return response['url']
-    except Exception as e:
-        logger.error(f"Telegraph Error: {e}")
-        return None
-
-# ==============================================================================
-# ✅ 4. FILTERING LOGIC & DYNAMIC BUTTONS
-# ==============================================================================
-
+# ✅ 4. FILTERING LOGIC
 def filter_by_type(files, f_type):
     """
     Strictly filters files based on 'file_type' saved in DB.
@@ -136,8 +107,7 @@ def filter_by_type(files, f_type):
     target_type = f_type.lower()
     
     for f in files:
-        # Get type from DB (Saved during indexing)
-        # Default to 'document' if missing to prevent errors
+        # Get type from DB. Default to 'document' if missing.
         db_type = f.get('file_type', 'document').lower()
         
         if target_type == "video" and db_type == "video":
@@ -147,42 +117,33 @@ def filter_by_type(files, f_type):
             
     return filtered
 
+# ✅ 5. DYNAMIC BUTTONS (Fixed for 3 Arguments)
 def get_dynamic_filter_buttons(unique_id, active_filter="all", page=0):
     """
-    Generates dynamic filter buttons with Swap Logic.
-    Uses '#' separator to prevent crashes with unique IDs containing underscores.
-    Accepts 'page' argument to prevent 'TypeError'.
+    Generates dynamic filter buttons.
+    Accepts 'page' argument to prevent TypeError.
     """
-    btn_row = []
-    
-    # Define Buttons
-    # Using '#' separator: filter_media#unique_id#type
+    # Callback Format: filter_media#unique_id#type
     
     vid_btn = InlineKeyboardButton("🎬 Videos", callback_data=f"filter_media#{unique_id}#video")
     doc_btn = InlineKeyboardButton("📂 Docs", callback_data=f"filter_media#{unique_id}#document")
-    # Reset button uses 'unfilter_media' logic (or just set filter to 'all')
     reset_btn = InlineKeyboardButton("🔄 All Media Types", callback_data=f"unfilter_media#{unique_id}#")
     
-    # --- SWAP LOGIC ---
+    btn_row = []
+    
     if active_filter == "video":
-        # Videos selected -> Show Reset + Docs
         btn_row.append(reset_btn)
         btn_row.append(doc_btn)
-        
     elif active_filter == "document":
-        # Docs selected -> Show Videos + Reset
         btn_row.append(vid_btn)
         btn_row.append(reset_btn)
-        
-    else: # Default (All)
-        # All selected -> Show Videos + Docs
+    else:
         btn_row.append(vid_btn)
         btn_row.append(doc_btn)
         
-    # Returning as list of buttons (single row) and empty list (no second row required for this style)
-    return btn_row, []
+    return btn_row
 
-# ✅ 5. PAGINATION HELPER
+# ✅ 6. PAGINATION HELPER
 def get_pagination_row(current_offset, limit, total_count, unique_id, active_filter="all"):
     """
     Generates navigation row using '#' separator.
@@ -196,7 +157,6 @@ def get_pagination_row(current_offset, limit, total_count, unique_id, active_fil
 
     # Back Button
     if current_offset >= limit:
-        # Format: next#unique_id#offset#active_filter
         buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"next#{unique_id}#{current_offset - limit}#{active_filter}"))
 
     # Page Counter
@@ -208,10 +168,12 @@ def get_pagination_row(current_offset, limit, total_count, unique_id, active_fil
 
     return buttons
 
-# ✅ 6. BUTTON PARSER
-def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active_filter="all"):
+# ✅ 7. BUTTON PARSER (Cleaned)
+def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10):
     """
-    Generates file buttons + pagination.
+    Generates ONLY the file buttons. 
+    Pagination is appended later in autofilter.py to ensure correct order:
+    [Files] -> [Filter Buttons] -> [Pagination]
     """
     current_files = files[offset : offset + limit]
     buttons = []
@@ -224,7 +186,6 @@ def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active
         caption = file.get('caption')
 
         display_name = f_name
-        # Safe check for query type
         if query and isinstance(query, str) and caption:
             q = query.lower()
             n = f_name.lower()
@@ -240,14 +201,9 @@ def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active
             url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
-    # Add Pagination Row (passing active_filter)
-    pagination = get_pagination_row(offset, limit, len(files), unique_id, active_filter)
-    if pagination:
-        buttons.append(pagination)
-            
     return buttons
 
-# ✅ 7. SHORTLINK GENERATOR
+# ✅ 8. SHORTLINK GENERATOR
 async def get_shortlink(site, api, link):
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}
@@ -263,7 +219,7 @@ async def get_shortlink(site, api, link):
         logger.error(f"Shortlink Exception ({site}): {e}")
         return None 
 
-# ✅ 8. FSUB STATUS HELPERS
+# ✅ 9. FSUB STATUS HELPERS
 async def _get_fsub_status(bot, user_id, channel_id):
     try:
         member = await bot.get_chat_member(channel_id, user_id)

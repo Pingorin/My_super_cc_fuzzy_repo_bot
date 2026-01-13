@@ -151,7 +151,7 @@ def filter_by_type(files, f_type):
             
     return filtered
 
-def get_filter_buttons(unique_id, active_filter="all"):
+def get_dynamic_filter_buttons(unique_id, active_filter="all"):
     """
     Generates dynamic filter buttons with Swap Logic.
     Uses '#' separator to prevent crashes with unique IDs containing underscores.
@@ -163,7 +163,8 @@ def get_filter_buttons(unique_id, active_filter="all"):
     
     vid_btn = InlineKeyboardButton("🎬 Videos", callback_data=f"filter_media#{unique_id}#video")
     doc_btn = InlineKeyboardButton("📂 Docs", callback_data=f"filter_media#{unique_id}#document")
-    reset_btn = InlineKeyboardButton("🔄 All Media Types", callback_data=f"filter_media#{unique_id}#all")
+    # Reset button uses 'unfilter_media' to match your requested logic
+    reset_btn = InlineKeyboardButton("🔄 All Media Types", callback_data=f"unfilter_media#{unique_id}#")
     
     # --- SWAP LOGIC ---
     if active_filter == "video":
@@ -181,7 +182,6 @@ def get_filter_buttons(unique_id, active_filter="all"):
         btn_row.append(vid_btn)
         btn_row.append(doc_btn)
         
-    # We return tuple (row1, row2) but here we fit all in one row or simple list
     # Returning as list of buttons (single row) and empty list (no second row required for this style)
     return btn_row, []
 

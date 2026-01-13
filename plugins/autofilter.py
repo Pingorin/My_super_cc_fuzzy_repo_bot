@@ -8,7 +8,16 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import PORT, SITE_URL
-from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, filter_by_type, get_filter_buttons
+from utils import (
+    temp, 
+    btn_parser, 
+    format_text_results, 
+    format_detailed_results, 
+    format_card_result, 
+    get_pagination_row, 
+    filter_by_type, 
+    get_dynamic_filter_buttons # ✅ New Helper
+)
 
 logger = logging.getLogger(__name__)
 
@@ -143,8 +152,8 @@ async def auto_filter(client, message):
 
         # ✅ PREPARE BUTTONS: Filter, HowTo, Premium
         
-        # 1. Filter Buttons (Default: All)
-        filter_row, reset_row = get_filter_buttons(unique_id, "all")
+        # 1. Dynamic Filter Buttons (Default: All)
+        filter_row = get_dynamic_filter_buttons(unique_id, "all", 0)
         
         # 2. How To Download URL
         howto_url = group_settings.get('howto_url')
@@ -157,12 +166,11 @@ async def auto_filter(client, message):
 
         # --- MODE A: BUTTON ---
         if mode == 'button':
-            # ⚠️ FIXED: Explicitly pass arguments to prevent 'int' object has no attribute 'lower' error
+            # Explicitly pass arguments to prevent errors
             buttons = btn_parser(files, message.chat.id, unique_id, query=query, offset=offset, limit=limit)
             
-            # ✅ Add Filters
+            # ✅ Add Filters (Swapping Logic)
             if filter_row: buttons.append(filter_row)
-            if reset_row: buttons.append(reset_row)
             
             # Add How To Button
             if howto_btn: buttons.append(howto_btn[0])
@@ -187,7 +195,6 @@ async def auto_filter(client, message):
             btn = []
             # ✅ Add Filters
             if filter_row: btn.append(filter_row)
-            if reset_row: btn.append(reset_row)
             
             # Add How To Button
             if howto_btn: btn.append(howto_btn[0])
@@ -208,7 +215,6 @@ async def auto_filter(client, message):
             btn = []
             # ✅ Add Filters
             if filter_row: btn.append(filter_row)
-            if reset_row: btn.append(reset_row)
             
             # Add How To Button
             if howto_btn: btn.append(howto_btn[0])
@@ -300,112 +306,161 @@ async def auto_filter(client, message):
 
 
 # ==============================================================================
-# 🎯 FILTER BUTTON HANDLER (Videos / Docs / All)
+# 🎬 FILTER BUTTON HANDLER (Videos / Docs)
 # ==============================================================================
-
-@Client.on_callback_query(filters.regex(r"^filter_media#"))
-async def handle_filter_click(client, query):
+@Client.on_callback_query(filters.regex(r"^filter_"))
+async def filter_media_handler(client, query):
+    # Regex structure: filter_{search_id}_mode_{type}_{page}
     try:
-        # ✅ FIXED: Separator is '#' to prevent splitting errors
-        # Format: filter_media#{unique_id}#{type}
-        _, unique_id, f_type = query.data.split("#")
+        data = query.data.split("_")
+        # index 0=filter, 1=search_id, 2=mode, 3=type, 4=page
+        search_id = data[1]
+        target_type = data[3]  # 'video' or 'document'
+        page = int(data[4])
         
-        # 1. Get Session
-        session = await Media.get_search_session(unique_id)
-        if not session: return await query.answer("Search Expired.", show_alert=True)
-        
-        original_files = session['files']
-        req = session['query']
-        
-        # 2. Apply Filter
-        filtered_files = filter_by_type(original_files, f_type)
-        total_results = len(filtered_files)
-        
-        if total_results == 0:
-            return await query.answer(f"No {f_type}s found for this search!", show_alert=True)
+        # 1. Fetch the Session (Original Query Results)
+        session = await Media.get_search_session(search_id)
+        if not session:
+            return await query.answer("❌ Search expired. Please search again.", show_alert=True)
             
-        # 3. Settings & UI Setup
-        group_settings = await db.get_group_settings(query.message.chat.id)
-        mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
-        limit = group_settings.get('result_page_limit', 10) if group_settings else 10
-        if mode == 'hybrid': mode = 'button' if len(filtered_files) <= limit else 'text'
+        original_files = session['files']
+        original_query = session['query']
         
-        howto_url = group_settings.get('howto_url')
+        # 2. Filter the files using helper
+        filtered_files = filter_by_type(original_files, target_type)
+        total_results = len(filtered_files)
+
+        if total_results == 0:
+            return await query.answer(f"⚠️ No {target_type}s found in this search!", show_alert=True)
+
+        # 3. Get User Settings
+        settings = await db.get_group_settings(query.message.chat.id)
+        limit = settings.get('result_page_limit', 10) if settings else 10
+        offset = page * limit
+        mode = settings.get('result_mode', 'hybrid') if settings else 'hybrid'
+        if mode == 'hybrid': mode = 'button' if len(filtered_files) <= limit else 'text'
+
+        # 4. Prepare Extras
+        howto_url = settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
-        # 4. Generate Filter Buttons (Updated with Checkmark)
-        filter_row, reset_row = get_filter_buttons(unique_id, f_type)
-        
-        offset = 0 # Reset to page 1
-        
-        # --- RENDER NEW RESPONSE ---
+        # 5. Get Filter Buttons (Swapped)
+        filter_row = get_dynamic_filter_buttons(search_id, target_type, page)
+
+        # --- RENDER ---
         if mode == 'button':
-            # ⚠️ FIXED: Explicitly pass arguments
-            buttons = btn_parser(filtered_files, query.message.chat.id, unique_id, query=None, offset=offset, limit=limit)
+            buttons = btn_parser(filtered_files, query.message.chat.id, search_id, offset=offset, limit=limit)
             
-            # Add Filters
             if filter_row: buttons.append(filter_row)
-            if reset_row: buttons.append(reset_row)
-            
-            if howto_btn: buttons.append(howto_btn[0])
+            if howto_btn: buttons.append(howto_btn)
             buttons.append(free_prem_btn)
             
-            # Pagination (Pass current f_type)
-            pagination = get_pagination_row(offset, limit, total_results, unique_id, f_type)
+            # Pagination (Pass target_type)
+            pagination = get_pagination_row(offset, limit, total_results, search_id, target_type)
             if pagination: buttons.append(pagination)
-            
-            text = f"⚡ **Hey {query.from_user.mention}!**\n👻 **Results for:** `{req}`\n📂 **Filtered:** {f_type.capitalize()}"
+
+            text = f"⚡ **Results for:** `{original_query}`\n📂 **Filter:** {target_type.capitalize()} Only ✅"
             await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
             
         elif mode == 'text':
             page_files = filtered_files[offset : offset + limit]
-            text = format_text_results(page_files, req, query.message.chat.id)
-            # Add header for filter
-            text = f"📂 **Filter:** {f_type.capitalize()} Only\n\n" + text
+            text = format_text_results(page_files, original_query, query.message.chat.id)
+            text = f"📂 **Filter:** {target_type.capitalize()} Only ✅\n\n" + text
             
             btn = []
             if filter_row: btn.append(filter_row)
-            if reset_row: btn.append(reset_row)
-            if howto_btn: btn.append(howto_btn[0])
+            if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
             
-            pagination = get_pagination_row(offset, limit, total_results, unique_id, f_type)
-            if pagination: btn.append(pagination)
-            
-            await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn))
-            
-        elif mode == 'detailed':
-            page_files = filtered_files[offset : offset + limit]
-            text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
-            text = f"📂 **Filter:** {f_type.capitalize()} Only\n\n" + text
-            
-            btn = []
-            if filter_row: btn.append(filter_row)
-            if reset_row: btn.append(reset_row)
-            if howto_btn: btn.append(howto_btn[0])
-            btn.append(free_prem_btn)
-            
-            pagination = get_pagination_row(offset, limit, total_results, unique_id, f_type)
+            pagination = get_pagination_row(offset, limit, total_results, search_id, target_type)
             if pagination: btn.append(pagination)
             
             await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn))
 
     except Exception as e:
         logger.error(f"Filter Error: {e}")
-        await query.answer("Error filtering.", show_alert=True)
+        await query.answer("Error applying filter.", show_alert=True)
+
+
+# ==============================================================================
+# 🔄 UNFILTER HANDLER (Reset to All)
+# ==============================================================================
+@Client.on_callback_query(filters.regex(r"^unfilter_"))
+async def unfilter_media_handler(client, query):
+    # Regex structure: unfilter_{search_id}_mode_
+    try:
+        data = query.data.split("_")
+        search_id = data[1]
+        
+        # 1. Fetch Session
+        session = await Media.get_search_session(search_id)
+        if not session:
+            return await query.answer("❌ Search expired.", show_alert=True)
+
+        # 2. Get ORIGINAL files (No Filtering)
+        all_files = session['files']
+        original_query = session['query']
+        total_results = len(all_files)
+
+        # 3. Settings
+        settings = await db.get_group_settings(query.message.chat.id)
+        limit = settings.get('result_page_limit', 10) if settings else 10
+        offset = 0 # Reset to first page
+        mode = settings.get('result_mode', 'hybrid') if settings else 'hybrid'
+        if mode == 'hybrid': mode = 'button' if len(all_files) <= limit else 'text'
+
+        # 4. Prepare Extras
+        howto_url = settings.get('howto_url')
+        howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
+        free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
+
+        # 5. Get Filter Buttons (Mode = 'all')
+        filter_row = get_dynamic_filter_buttons(search_id, "all", 0)
+
+        # --- RENDER ---
+        if mode == 'button':
+            buttons = btn_parser(all_files, query.message.chat.id, search_id, offset=offset, limit=limit)
+            
+            if filter_row: buttons.append(filter_row)
+            if howto_btn: buttons.append(howto_btn)
+            buttons.append(free_prem_btn)
+            
+            # Pagination (Pass 'all')
+            pagination = get_pagination_row(offset, limit, total_results, search_id, "all")
+            if pagination: buttons.append(pagination)
+            
+            text = f"⚡ **Results for:** `{original_query}`\n📂 **Filter:** All Media Types"
+            await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+            
+        elif mode == 'text':
+            page_files = all_files[offset : offset + limit]
+            text = format_text_results(page_files, original_query, query.message.chat.id)
+            
+            btn = []
+            if filter_row: btn.append(filter_row)
+            if howto_btn: btn.append(howto_btn)
+            btn.append(free_prem_btn)
+            
+            pagination = get_pagination_row(offset, limit, total_results, search_id, "all")
+            if pagination: btn.append(pagination)
+            
+            await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn))
+
+    except Exception as e:
+        logger.error(f"Unfilter Error: {e}")
+        await query.answer("Error resetting filter.", show_alert=True)
 
 
 # ==============================================================================
 # ⏭️ PAGINATION CALLBACK HANDLER (Next/Back Logic)
 # ==============================================================================
-
-@Client.on_callback_query(filters.regex(r"^next#"))
+@Client.on_callback_query(filters.regex(r"^next_"))
 async def handle_next_back(client, query):
     try:
-        # ✅ FIXED: Separator is '#'
-        # Format: next#{unique_id}#{offset}#{active_filter}
-        data_parts = query.data.split("#")
+        # ✅ Separator is '_' because that's what we used in get_pagination_row
+        # Format: next_{unique_id}_{offset}_{active_filter}
+        data_parts = query.data.split("_")
         unique_id = data_parts[1]
         offset = int(data_parts[2])
         
@@ -419,7 +474,7 @@ async def handle_next_back(client, query):
             return await query.answer("❌ Search expired or no files found.", show_alert=True)
             
         original_files = session['files']
-        req = session['query'] # Original Query for display
+        req = session['query']
         
         # ✅ Apply Filter Before slicing pages
         filtered_files = filter_by_type(original_files, active_filter)
@@ -434,32 +489,21 @@ async def handle_next_back(client, query):
         if mode == 'hybrid':
             mode = 'button' if len(filtered_files) <= limit else 'text'
 
-        # ✅ NEW: Get How To Download URL (For Pagination)
         howto_url = group_settings.get('howto_url')
-        howto_btn = []
-        if howto_url:
-            howto_btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
-            
-        # ✅ NEW: Free Premium Button
+        howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
         # ✅ Generate Filter Row (Keep current state)
-        filter_row, reset_row = get_filter_buttons(unique_id, active_filter)
+        filter_row = get_dynamic_filter_buttons(unique_id, active_filter, int(offset/limit))
 
         # 3. Generate New Content
         
         # --- BUTTON MODE ---
         if mode == 'button':
-            # ⚠️ FIXED: Explicitly pass arguments
             buttons = btn_parser(filtered_files, query.message.chat.id, unique_id, query=None, offset=offset, limit=limit)
             
-            # Insert Filter Buttons
             if filter_row: buttons.append(filter_row)
-            if reset_row: buttons.append(reset_row)
-
-            # Add How To Button
-            if howto_btn: buttons.append(howto_btn[0])
-            # Add Free Premium
+            if howto_btn: buttons.append(howto_btn)
             buttons.append(free_prem_btn)
             
             # Pagination with active_filter
@@ -472,13 +516,12 @@ async def handle_next_back(client, query):
         elif mode == 'text':
             page_files = filtered_files[offset : offset + limit]
             text = format_text_results(page_files, req, query.message.chat.id)
-            if active_filter != "all": text = f"📂 **Filter:** {active_filter.capitalize()}\n\n" + text
+            if active_filter != "all": text = f"📂 **Filter:** {active_filter.capitalize()} Only ✅\n\n" + text
             
             btn = []
             if filter_row: btn.append(filter_row)
-            if reset_row: btn.append(reset_row)
-            if howto_btn: btn.append(howto_btn[0])
-            btn.append(free_prem_btn) # Add Free Premium
+            if howto_btn: btn.append(howto_btn)
+            btn.append(free_prem_btn) 
             
             # Pass unique_id to pagination
             pagination = get_pagination_row(offset, limit, total_results, unique_id, active_filter)
@@ -493,17 +536,14 @@ async def handle_next_back(client, query):
         # --- DETAILED MODE ---
         elif mode == 'detailed':
             page_files = filtered_files[offset : offset + limit]
-            # Time taken passed as 0 or empty for edits
             text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
-            if active_filter != "all": text = f"📂 **Filter:** {active_filter.capitalize()}\n\n" + text
+            if active_filter != "all": text = f"📂 **Filter:** {active_filter.capitalize()} Only ✅\n\n" + text
             
             btn = []
             if filter_row: btn.append(filter_row)
-            if reset_row: btn.append(reset_row)
-            if howto_btn: btn.append(howto_btn[0])
-            btn.append(free_prem_btn) # Add Free Premium
+            if howto_btn: btn.append(howto_btn)
+            btn.append(free_prem_btn)
             
-            # Pass unique_id to pagination
             pagination = get_pagination_row(offset, limit, total_results, unique_id, active_filter)
             if pagination: btn.append(pagination)
             
@@ -515,7 +555,6 @@ async def handle_next_back(client, query):
 
         # --- SITE MODE ---
         elif mode == 'site':
-            # Reuse unique_id for site link
             base_url = SITE_URL.rstrip('/') if (SITE_URL and SITE_URL.startswith("http")) else "http://127.0.0.1:8080"
             page_no = int(offset / limit) + 1
             final_site_url = f"{base_url}/results/{unique_id}?page={page_no}"
@@ -523,9 +562,8 @@ async def handle_next_back(client, query):
             btn = [[InlineKeyboardButton("🔎 View Results Online", url=final_site_url)]]
             
             if howto_btn: btn.append(howto_btn[0])
-            btn.append(free_prem_btn) # Add Free Premium
+            btn.append(free_prem_btn)
             
-            # Pass unique_id to pagination
             pagination = get_pagination_row(offset, limit, total_results, unique_id, "all")
             if pagination: btn.append(pagination)
             
@@ -534,88 +572,3 @@ async def handle_next_back(client, query):
     except Exception as e:
         logger.error(f"Pagination Error: {e}")
         await query.answer("⚠️ Error switching page.", show_alert=True)
-
-# Card Mode Handlers (Updated for Session ID)
-@Client.on_callback_query(filters.regex(r"^card_next_"))
-async def card_next_nav(client, query):
-    try:
-        # Format: card_next_{unique_id}_{current_index}
-        _, _, unique_id, index = query.data.split("_") 
-        current_index = int(index)
-        
-        # 1. Fetch Session
-        session = await Media.get_search_session(unique_id)
-        if not session: return await query.answer("Expired.", show_alert=True)
-        files = session['files']
-        
-        total = len(files)
-        next_index = current_index + 1
-        if next_index >= total: next_index = 0
-        file = files[next_index]
-        text = format_card_result(file, next_index, total)
-        
-        # ✅ Fetch Settings for Buttons
-        group_settings = await db.get_group_settings(query.message.chat.id)
-        howto_url = group_settings.get('howto_url')
-        
-        btn = []
-        link_id = file['link_id']
-        chat_id = query.message.chat.id
-        btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
-        
-        if howto_url: btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
-        # Add Free Premium
-        btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
-
-        nav_row = []
-        # Updated callbacks to use unique_id
-        if next_index > 0: nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{unique_id}_{next_index}"))
-        nav_row.append(InlineKeyboardButton(f"{next_index + 1}/{total}", callback_data="pages"))
-        if next_index < total - 1: nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{unique_id}_{next_index}"))
-        btn.append(nav_row)
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
-    except Exception as e: await query.answer(f"Error: {e}", show_alert=True)
-
-@Client.on_callback_query(filters.regex(r"^card_prev_"))
-async def card_prev_nav(client, query):
-    try:
-        # Format: card_prev_{unique_id}_{current_index}
-        _, _, unique_id, index = query.data.split("_")
-        current_index = int(index)
-        
-        # 1. Fetch Session
-        session = await Media.get_search_session(unique_id)
-        if not session: return await query.answer("Expired.", show_alert=True)
-        files = session['files']
-        
-        total = len(files)
-        prev_index = current_index - 1
-        if prev_index < 0: prev_index = total - 1
-        file = files[prev_index]
-        text = format_card_result(file, prev_index, total)
-        
-        # ✅ Fetch Settings for Buttons
-        group_settings = await db.get_group_settings(query.message.chat.id)
-        howto_url = group_settings.get('howto_url')
-        
-        btn = []
-        link_id = file['link_id']
-        chat_id = query.message.chat.id
-        btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
-        
-        if howto_url: btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
-        # Add Free Premium
-        btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
-        
-        nav_row = []
-        # Updated callbacks to use unique_id
-        if prev_index > 0: nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{unique_id}_{prev_index}"))
-        nav_row.append(InlineKeyboardButton(f"{prev_index + 1}/{total}", callback_data="pages"))
-        if prev_index < total - 1: nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{unique_id}_{prev_index}"))
-        btn.append(nav_row)
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
-    except Exception as e: await query.answer(f"Error: {e}", show_alert=True)
-
-@Client.on_callback_query(filters.regex(r"^pages$"))
-async def page_counter_callback(client, query):
-    await query.answer(f"Current Page Indicator", show_alert=False)

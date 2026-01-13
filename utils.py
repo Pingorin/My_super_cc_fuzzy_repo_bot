@@ -1,21 +1,16 @@
 import logging
 import math
 import aiohttp
-import os
 import re
+import os
 from pyrogram.types import InlineKeyboardButton
 from pyrogram import enums
 from pyrogram.errors import UserNotParticipant
 from database.users_chats_db import db
-from info import ADMINS, AUTH_CHANNEL
 
 # Optional Imports from Info.py
-try: from info import AUTH_CHANNEL_2
-except: AUTH_CHANNEL_2 = None
-try: from info import AUTH_CHANNEL_3
-except: AUTH_CHANNEL_3 = None
-try: from info import AUTH_CHANNEL_4
-except: AUTH_CHANNEL_4 = None
+try: from info import AUTH_CHANNEL, AUTH_CHANNEL_2, AUTH_CHANNEL_3, AUTH_CHANNEL_4, API_ID, API_HASH, BOT_TOKEN
+except: pass
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +37,7 @@ try:
     telegraph_client = Telegraph()
     telegraph_client.create_account(short_name='AutoFilter')
 except Exception as e:
-    logger.warning(f"Telegraph library not found or error: {e}")
+    # logger.warning(f"Telegraph library not found or error: {e}")
     telegraph_client = None
 
 # ✅ 3. RESULT MODE FORMATTERS
@@ -126,7 +121,7 @@ async def post_to_telegraph(files, query, chat_id):
         return None
 
 # ==============================================================================
-# ✅ 4. FILTERING LOGIC & DYNAMIC BUTTONS (UPDATED)
+# ✅ 4. FILTERING LOGIC & DYNAMIC BUTTONS
 # ==============================================================================
 
 def filter_by_type(files, f_type):
@@ -142,6 +137,7 @@ def filter_by_type(files, f_type):
     
     for f in files:
         # Get type from DB (Saved during indexing)
+        # Default to 'document' if missing to prevent errors
         db_type = f.get('file_type', 'document').lower()
         
         if target_type == "video" and db_type == "video":
@@ -151,10 +147,11 @@ def filter_by_type(files, f_type):
             
     return filtered
 
-def get_dynamic_filter_buttons(unique_id, active_filter="all"):
+def get_dynamic_filter_buttons(unique_id, active_filter="all", page=0):
     """
     Generates dynamic filter buttons with Swap Logic.
     Uses '#' separator to prevent crashes with unique IDs containing underscores.
+    Accepts 'page' argument to prevent 'TypeError'.
     """
     btn_row = []
     
@@ -163,7 +160,7 @@ def get_dynamic_filter_buttons(unique_id, active_filter="all"):
     
     vid_btn = InlineKeyboardButton("🎬 Videos", callback_data=f"filter_media#{unique_id}#video")
     doc_btn = InlineKeyboardButton("📂 Docs", callback_data=f"filter_media#{unique_id}#document")
-    # Reset button uses 'unfilter_media' to match your requested logic
+    # Reset button uses 'unfilter_media' logic (or just set filter to 'all')
     reset_btn = InlineKeyboardButton("🔄 All Media Types", callback_data=f"unfilter_media#{unique_id}#")
     
     # --- SWAP LOGIC ---
@@ -185,7 +182,7 @@ def get_dynamic_filter_buttons(unique_id, active_filter="all"):
     # Returning as list of buttons (single row) and empty list (no second row required for this style)
     return btn_row, []
 
-# ✅ 5. PAGINATION HELPER (UPDATED)
+# ✅ 5. PAGINATION HELPER
 def get_pagination_row(current_offset, limit, total_count, unique_id, active_filter="all"):
     """
     Generates navigation row using '#' separator.
@@ -211,11 +208,10 @@ def get_pagination_row(current_offset, limit, total_count, unique_id, active_fil
 
     return buttons
 
-# ✅ 6. BUTTON PARSER (UPDATED)
+# ✅ 6. BUTTON PARSER
 def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active_filter="all"):
     """
     Generates file buttons + pagination.
-    Uses '#' separator logic implicit in get_pagination_row.
     """
     current_files = files[offset : offset + limit]
     buttons = []
@@ -251,7 +247,7 @@ def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active
             
     return buttons
 
-# ✅ 7. SHORTLINK GENERATOR (Unchanged)
+# ✅ 7. SHORTLINK GENERATOR
 async def get_shortlink(site, api, link):
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}
@@ -262,13 +258,12 @@ async def get_shortlink(site, api, link):
                     data = await response.json()
                     if "shortenedUrl" in data: return data["shortenedUrl"]
                     elif "status" in data and data["status"] == "success" and "shortenedUrl" in data: return data["shortenedUrl"]
-                logger.error(f"Shortener Failed ({site}): Status {response.status}")
                 return None 
     except Exception as e:
         logger.error(f"Shortlink Exception ({site}): {e}")
         return None 
 
-# ✅ 8. FSUB STATUS HELPERS (Unchanged)
+# ✅ 8. FSUB STATUS HELPERS
 async def _get_fsub_status(bot, user_id, channel_id):
     try:
         member = await bot.get_chat_member(channel_id, user_id)

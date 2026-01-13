@@ -25,7 +25,10 @@ class temp(object):
     B_LINK = None
     ME = None
 
+# ==============================================================================
 # ✅ 1. GENERAL HELPERS
+# ==============================================================================
+
 def get_size(size):
     if not size: return "0 B"
     power = 2**10
@@ -36,7 +39,9 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
+# ==============================================================================
 # ✅ 2. TELEGRAPH SETUP (For Site Mode)
+# ==============================================================================
 try:
     from telegraph import Telegraph
     telegraph_client = Telegraph()
@@ -45,108 +50,9 @@ except Exception as e:
     logger.warning(f"Telegraph library not found or error: {e}")
     telegraph_client = None
 
-# ✅ 3. RESULT MODE FORMATTERS
-
-def format_text_results(files, query, chat_id):
-    """Generates the List layout for Text Mode."""
-    text = f"👻 **Results for:** `{query}`\n\n"
-    for i, file in enumerate(files, 1):
-        f_name = file['file_name']
-        f_size = get_size(file['file_size'])
-        link_id = file['link_id']
-        
-        # Always use the Group ID (chat_id) for the link
-        f_chat_id = chat_id
-        
-        # Link directs to the bot with the specific Group ID
-        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
-        
-        # HTML Link formatting for cleaner look
-        text += f"{i}. 📂 <a href='{link}'>{f_name}</a> [{f_size}]\n\n"
-        
-    return text
-
-def format_detailed_results(files, query, chat_id, time_taken=0):
-    """Generates the detailed layout with Metadata."""
-    text = (
-        f"⚡ **Hey {query} lovers!**\n"
-        f"👻 **Here are your results....**\n"
-        f"⌛ **Time taken:** {time_taken} seconds\n"
-        f"code: {len(files)}\n\n"
-    )
-    
-    for file in files:
-        f_name = file['file_name']
-        f_size = get_size(file['file_size'])
-        link_id = file['link_id']
-
-        f_chat_id = chat_id
-        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
-        
-        # Auto-Detect Quality
-        q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
-        quality = q_match.group(0) if q_match else "N/A"
-        
-        # Auto-Detect Language
-        l_matches = re.findall(r"\b(Hindi|Eng|English|Tam|Tamil|Tel|Telugu|Mal|Malayalam|Kan|Kannada|Ben|Bengali|Pun|Punjabi|Mar|Marathi)\b", f_name, re.IGNORECASE)
-        if l_matches:
-            lang = ", ".join(sorted(set([l.capitalize() for l in l_matches])))
-        else:
-            lang = "N/A"
-
-        text += f"📂 <a href='{link}'>𝘾𝙡𝙞𝙘𝙠 𝙩𝙤 𝙜𝙖𝙩 𝙩𝙝𝙞𝙨 𝙛𝙞𝙡𝙚 📥</a>\n"
-        text += f"🖥 𝙉𝙖𝙢𝙚: {f_name}\n"
-        text += f"📀 𝙦𝙪𝙖𝙡𝙞𝙩𝙮: {quality}\n"
-        text += f"🌍 𝙡𝙖𝙣𝙜𝙪𝙖𝙜𝙚: {lang}\n"
-        text += f"📦 [{f_size}]\n\n"
-        
-    return text
-
-def format_card_result(file, current_index, total_count):
-    """Generates the Single Card layout."""
-    f_name = file['file_name']
-    f_size = get_size(file['file_size'])
-    
-    f_type = "Document"
-    if f_name.endswith(('.mkv', '.mp4', '.avi', '.webm', '.mov')): f_type = "Video"
-    elif f_name.endswith(('.mp3', '.flac', '.wav', '.m4a')): f_type = "Audio"
-    elif f_name.endswith(('.jpg', '.jpeg', '.png', '.webp')): f_type = "Photo"
-
-    text = f"🎬 **{f_name}**\n\n"
-    text += f"🗂️ **Type:** {f_type}\n"
-    text += f"💾 **Size:** {f_size}\n\n"
-    
-    text += f"File {current_index + 1} of {total_count}"
-    return text
- 
-async def post_to_telegraph(files, query, chat_id):
-# ✅ 4. FILTERING LOGIC (STRICT MODE)
-    """Generates a Telegraph page for Site Mode."""
-    if not telegraph_client: return None
-
-    html_content = f"<h3>Search Results for: {query}</h3><br>"
-    for file in files:
-        f_name = file['file_name']
-        f_size = get_size(file['file_size'])
-        link_id = file['link_id']
-        f_chat_id = chat_id
-
-        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
-        html_content += f"<p>📂 <a href='{link}'>{f_name}</a> [{f_size}]</p><hr>"
-
-    try:
-        response = telegraph_client.create_page(
-            title=f"Results: {query}", 
-            html_content=html_content
-        )
-        return response['url']
-    except Exception as e:
-        logger.error(f"Telegraph Error: {e}")
-        return None
-
 # ==============================================================================
-# ✅ 4. FILTERING LOGIC & BUTTONS (NEW)
-# ================================
+# ✅ 3. FILTERING LOGIC & BUTTONS (STRICT MODE)
+# ==============================================================================
 
 def filter_by_type(files, f_type):
     """
@@ -181,7 +87,6 @@ def get_filter_buttons(unique_id, active_filter="all"):
     reset_row = []
     
     # Using '#' separator
-    
     if active_filter == "video":
         btn_row.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
         btn_row.append(InlineKeyboardButton("Docs", callback_data=f"filter_media#{unique_id}#document"))
@@ -198,7 +103,10 @@ def get_filter_buttons(unique_id, active_filter="all"):
         
     return btn_row, reset_row
 
-# ✅ 5. PAGINATION HELPER (UPDATED FOR FILTERS)
+# ==============================================================================
+# ✅ 4. PAGINATION HELPER (UPDATED)
+# ==============================================================================
+
 def get_pagination_row(current_offset, limit, total_count, unique_id, active_filter="all"):
     """
     Generates navigation row using '#' separator and preserving active_filter.
@@ -227,27 +135,92 @@ def get_pagination_row(current_offset, limit, total_count, unique_id, active_fil
 
     return buttons
 
-# ✅ 6. BUTTON PARSER (UPDATED)
+# ==============================================================================
+# ✅ 5. RESULT MODE FORMATTERS & BUTTON PARSER
+# ==============================================================================
+
+def format_text_results(files, query, chat_id):
+    """Generates the List layout for Text Mode."""
+    text = f"👻 **Results for:** `{query}`\n\n"
+    for i, file in enumerate(files, 1):
+        f_name = file['file_name']
+        f_size = get_size(file['file_size'])
+        link_id = file['link_id']
+        f_chat_id = chat_id
+        
+        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
+        text += f"{i}. 📂 <a href='{link}'>{f_name}</a> [{f_size}]\n\n"
+        
+    return text
+
+def format_detailed_results(files, query, chat_id, time_taken=0):
+    """Generates the detailed layout with Metadata."""
+    text = (
+        f"⚡ **Hey {query} lovers!**\n"
+        f"👻 **Here are your results....**\n"
+        f"⌛ **Time taken:** {time_taken} seconds\n"
+        f"Files Found: {len(files)}\n\n"
+    )
+    
+    for file in files:
+        f_name = file['file_name']
+        f_size = get_size(file['file_size'])
+        link_id = file['link_id']
+        f_chat_id = chat_id
+        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
+        
+        q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
+        quality = q_match.group(0) if q_match else "N/A"
+        
+        l_matches = re.findall(r"\b(Hindi|Eng|English|Tam|Tamil|Tel|Telugu|Mal|Malayalam|Kan|Kannada|Ben|Bengali|Pun|Punjabi|Mar|Marathi)\b", f_name, re.IGNORECASE)
+        if l_matches:
+            lang = ", ".join(sorted(set([l.capitalize() for l in l_matches])))
+        else:
+            lang = "N/A"
+
+        text += f"📂 <a href='{link}'>𝘾𝙡𝙞𝙘𝙠 𝙩𝙤 𝙜𝙚𝙩 𝙩𝙝𝙞𝙨 𝙛𝙞𝙡𝙚 📥</a>\n"
+        text += f"🖥 𝙉𝙖𝙢𝙚: {f_name}\n"
+        text += f"📀 𝙦𝙪𝙖𝙡𝙞𝙩𝙮: {quality}\n"
+        text += f"🌍 𝙡𝙖𝙣𝙜𝙪𝙖𝙜𝙚: {lang}\n"
+        text += f"📦 [{f_size}]\n\n"
+        
+    return text
+
+def format_card_result(file, current_index, total_count):
+    """Generates the Single Card layout."""
+    f_name = file['file_name']
+    f_size = get_size(file['file_size'])
+    
+    f_type = "Document"
+    if f_name.endswith(('.mkv', '.mp4', '.avi', '.webm', '.mov')): f_type = "Video"
+    elif f_name.endswith(('.mp3', '.flac', '.wav', '.m4a')): f_type = "Audio"
+    elif f_name.endswith(('.jpg', '.jpeg', '.png', '.webp')): f_type = "Photo"
+
+    text = f"🎬 **{f_name}**\n\n"
+    text += f"🗂️ **Type:** {f_type}\n"
+    text += f"💾 **Size:** {f_size}\n\n"
+    
+    text += f"File {current_index + 1} of {total_count}"
+    return text
+
 def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active_filter="all"):
     """
     Generates buttons for Inline Result Mode with Pagination.
     """
     
-    # Slice the files based on offset and limit
     current_files = files[offset : offset + limit]
-    
     buttons = []
+    
     for file in current_files:
         f_name = file.get('file_name', 'Unknown File')
         f_size = get_size(file.get('file_size', 0))
         link_id = file.get('link_id')
-        
         f_chat_id = chat_id
         caption = file.get('caption')
 
         display_name = f_name
         # Simple caption logic to highlight query
-        # Safe check for query type to prevent errors
+        # Safe check to ensure query is a string before lower()
         if query and isinstance(query, str) and caption:
             q = query.lower()
             n = f_name.lower()
@@ -264,14 +237,40 @@ def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10, active
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     # --- ADD PAGINATION ROW ---
-    # Pass unique_id and active_filter
     pagination = get_pagination_row(offset, limit, len(files), unique_id, active_filter)
     if pagination:
         buttons.append(pagination)
             
     return buttons
 
-# ✅ 7. SHORTLINK GENERATOR
+async def post_to_telegraph(files, query, chat_id):
+    """Generates a Telegraph page for Site Mode."""
+    if not telegraph_client: return None
+
+    html_content = f"<h3>Search Results for: {query}</h3><br>"
+    for file in files:
+        f_name = file['file_name']
+        f_size = get_size(file['file_size'])
+        link_id = file['link_id']
+        f_chat_id = chat_id
+
+        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
+        html_content += f"<p>📂 <a href='{link}'>{f_name}</a> [{f_size}]</p><hr>"
+
+    try:
+        response = telegraph_client.create_page(
+            title=f"Results: {query}", 
+            html_content=html_content
+        )
+        return response['url']
+    except Exception as e:
+        logger.error(f"Telegraph Error: {e}")
+        return None
+
+# ==============================================================================
+# ✅ 6. SHORTLINK & FSUB HELPERS
+# ==============================================================================
+
 async def get_shortlink(site, api, link):
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}
@@ -289,7 +288,6 @@ async def get_shortlink(site, api, link):
         logger.error(f"Shortlink Exception ({site}): {e}")
         return None 
 
-# ✅ 8. FSUB STATUS HELPERS
 async def _get_fsub_status(bot, user_id, channel_id):
     try:
         member = await bot.get_chat_member(channel_id, user_id)

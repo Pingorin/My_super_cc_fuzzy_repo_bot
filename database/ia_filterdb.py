@@ -1,7 +1,7 @@
 import logging
 import re
 import uuid
-import secrets 
+import secrets
 import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError
@@ -11,32 +11,22 @@ logger = logging.getLogger(__name__)
 
 class MediaDB:
     def __init__(self, uri, database_name):
-        # ✅ Connection: Using DATABASE_URI (Exclusively for Files)
         self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         
         self.data_col = self.db.files_data   
         self.search_col = self.db.files_search 
         self.counters = self.db.counters
-        
-        # ✅ Collection for Site Mode Cache (Web View)
         self.search_cache = self.db.search_cache 
-
-        # ✅ Collection for Search Sessions (Button Pagination Fix)
         self.search_results = self.db.search_results
 
     async def ensure_indexes(self):
-        # Regular indexes for fallback search
         await self.search_col.create_index("file_name")
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
-        await self.search_col.create_index("file_type") # ✅ Added index for file type
+        await self.search_col.create_index("file_type")  # ✅ Added Index for Filtering
         await self.data_col.create_index("file_unique_id", unique=True)
-        
-        # ✅ TTL Index for Site Mode (Auto-delete cache after 1 hour)
         await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
-
-        # ✅ TTL Index for Search Results (Auto-delete after 48 Hours)
         await self.search_results.create_index("created_at", expireAfterSeconds=172800)
 
     async def get_next_sequence_value(self, sequence_name, increment=1):
@@ -48,7 +38,6 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
-    # --- 🧹 TEXT CLEANER HELPER (Optimized) ---
     @staticmethod
     def clean_text(text):
         if not text: return ""
@@ -97,26 +86,17 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
             
-            # ✅ DETECT FILE TYPE (STRICT MODE)
-            # Checks Pyrogram Object Class Name (Video vs Document vs Audio)
-            media_type = media.__class__.__name__.lower()
-
-            if media_type == "video":
-                file_type = "video"      # Streamable Video
-            elif media_type == "audio":
-                file_type = "audio"      # Audio File
-            elif media_type == "document":
-                file_type = "document"   # File / Document (includes MKV sent as doc)
-            else:
-                file_type = "document"   # Fallback
-
+            # ✅ Determine File Type for Filter
+            file_type = "document"
+            if getattr(media, "mime_type", "").startswith("video/") or file_name.lower().endswith(('.mkv', '.mp4', '.avi', '.webm')):
+                file_type = "video"
+            
             data_docs.append({
                 '_id': current_id,
                 'msg_id': message.id,
                 'chat_id': message.chat.id,
                 'file_id': media.file_id,
-                'file_unique_id': media.file_unique_id,
-                'file_type': file_type # ✅ Save to Data Col
+                'file_unique_id': media.file_unique_id
             })
             
             search_docs.append({
@@ -125,7 +105,7 @@ class MediaDB:
                 'caption': caption,
                 'link_id': current_id,
                 'chat_id': message.chat.id,
-                'file_type': file_type # ✅ Save to Search Col for filtering
+                'file_type': file_type # ✅ Save type to DB
             })
             current_id += 1
 
@@ -161,7 +141,8 @@ class MediaDB:
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    async def get_search_results(self, query):
+    # ✅ UPDATED: Supports strict 'file_type' filtering
+    async def get_search_results(self, query, file_type=None):
         try:
             words = query.split()
             
@@ -177,16 +158,7 @@ class MediaDB:
                     }
                 }
             else:
-                must_clauses = []
-                for word in words:
-                    must_clauses.append({
-                        "text": {
-                            "query": word,
-                            "path": ["file_name", "caption"],
-                            "fuzzy": {"maxEdits": 1}
-                        }
-                    })
-                
+                must_clauses = [{"text": {"query": word, "path": ["file_name", "caption"], "fuzzy": {"maxEdits": 1}}} for word in words]
                 search_stage = {
                     "$search": {
                         "index": "default",
@@ -196,9 +168,19 @@ class MediaDB:
                     }
                 }
 
-            pipeline = [search_stage, {"$limit": 50}] 
+            pipeline = [search_stage]
+
+            # ✅ STRICT FILTER LOGIC
+            if file_type:
+                pipeline.append({
+                    "$match": {
+                        "file_type": file_type
+                    }
+                })
+
+            pipeline.append({"$limit": 100}) 
             cursor = self.search_col.aggregate(pipeline)
-            files = await cursor.to_list(length=50)
+            files = await cursor.to_list(length=100)
             return files
             
         except Exception as e:
@@ -206,9 +188,15 @@ class MediaDB:
             safe_query = re.escape(query)
             regex = re.compile(safe_query, re.IGNORECASE)
             
-            cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})
+            filter_dict = {"$or": [{"file_name": regex}, {"caption": regex}]}
+            
+            # Apply Filter to Regex Fallback
+            if file_type:
+                filter_dict["file_type"] = file_type
+            
+            cursor = self.search_col.find(filter_dict)
             cursor.sort('$natural', -1)
-            return await cursor.to_list(length=50)
+            return await cursor.to_list(length=100)
 
     async def total_files_count(self):
         return await self.data_col.count_documents({})
@@ -221,45 +209,13 @@ class MediaDB:
             return 0
 
     # ==================================================================
-    # 🌍 SITE MODE METHODS (Save & Retrieve Cache)
+    # 🔑 NEW SESSION SYSTEM METHODS
     # ==================================================================
 
-    async def save_search_results(self, query, files, chat_id):
+    async def save_search_result(self, query, files, filter_mode=None):
         """
-        Saves search results to MongoDB with a short UUID for Web View.
-        """
-        unique_id = str(uuid.uuid4())[:8] 
-        
-        simplified_files = []
-        for file in files:
-            simplified_files.append({
-                "file_name": file['file_name'],
-                "file_size": file['file_size'],
-                "link_id": file['link_id'],
-                "file_chat_id": file.get('chat_id'),
-                "file_type": file.get('file_type', 'document') # ✅ Cache type
-            })
-
-        await self.search_cache.insert_one({
-            "_id": unique_id,
-            "query": query,
-            "chat_id": chat_id, 
-            "files": simplified_files,
-            "created_at": datetime.datetime.utcnow()
-        })
-        return unique_id
-
-    async def get_cached_results(self, unique_id):
-        """Retrieves cached results for the Web Server."""
-        return await self.search_cache.find_one({"_id": unique_id})
-
-    # ==================================================================
-    # 🔑 NEW SESSION SYSTEM METHODS (For Button Pagination)
-    # ==================================================================
-
-    async def save_search_result(self, query, files):
-        """
-        Saves the search result to DB and returns a unique ID (Key).
+        Saves result to DB.
+        filter_mode: 'video' | 'document' | None (Used to persist button state)
         """
         unique_id = secrets.token_urlsafe(6)
         
@@ -269,24 +225,20 @@ class MediaDB:
                 'file_name': file.get('file_name'),
                 'file_size': file.get('file_size'),
                 'link_id': file.get('link_id'),
-                'caption': file.get('caption', None),
-                'file_type': file.get('file_type', 'document') # ✅ Save type for Buttons
+                'caption': file.get('caption', None)
             })
 
         await self.search_results.insert_one({
             "_id": unique_id,
             "query": query,
             "files": simplified_files,
+            "filter_mode": filter_mode, # ✅ Store filter state
             "created_at": datetime.datetime.utcnow()
         })
         
         return unique_id
 
     async def get_search_session(self, unique_id):
-        """
-        Retrieves the saved files list using the Unique ID.
-        """
         return await self.search_results.find_one({"_id": unique_id})
 
-# Initialize with DATABASE_URI
 Media = MediaDB(DATABASE_URI, DATABASE_NAME)

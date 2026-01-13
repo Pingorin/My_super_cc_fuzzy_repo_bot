@@ -157,6 +157,7 @@ async def auto_filter(client, message):
             buttons = btn_parser(files, message.chat.id, unique_id, query, offset, limit)
             
             # ✅ INJECT FILTER BUTTONS (Video/Docs)
+            # Default is None (All Files)
             filter_btns = get_filter_buttons(unique_id, active_mode=None)
             for row in reversed(filter_btns):
                 buttons.append(row)
@@ -319,6 +320,10 @@ async def handle_next_back(client, query):
             
         files = session['files']
         req = session['query'] # Original Query for display
+        
+        # ✅ CRITICAL: Retrieve the 'file_type' (Video/Doc) from session to maintain state
+        active_filter = session.get('file_type') 
+        
         total_results = len(files)
         
         # 2. Get Settings Again
@@ -346,8 +351,8 @@ async def handle_next_back(client, query):
             # ✅ Pass unique_id and req (query)
             buttons = btn_parser(files, query.message.chat.id, unique_id, req, offset, limit)
             
-            # ✅ RE-INJECT FILTER BUTTONS
-            filter_btns = get_filter_buttons(unique_id, active_mode=None)
+            # ✅ RE-INJECT FILTER BUTTONS (Passing 'active_filter' to keep checkmark ✅)
+            filter_btns = get_filter_buttons(unique_id, active_mode=active_filter)
             for row in reversed(filter_btns):
                 buttons.append(row)
 
@@ -364,8 +369,8 @@ async def handle_next_back(client, query):
             
             btn = []
             
-            # ✅ RE-INJECT FILTER BUTTONS
-            filter_btns = get_filter_buttons(unique_id, active_mode=None)
+            # ✅ RE-INJECT FILTER BUTTONS (Passing 'active_filter')
+            filter_btns = get_filter_buttons(unique_id, active_mode=active_filter)
             for row in filter_btns:
                 btn.append(row)
 
@@ -390,7 +395,7 @@ async def handle_next_back(client, query):
             btn = []
             
             # ✅ RE-INJECT FILTER BUTTONS
-            filter_btns = get_filter_buttons(unique_id, active_mode=None)
+            filter_btns = get_filter_buttons(unique_id, active_mode=active_filter)
             for row in filter_btns:
                 btn.append(row)
 
@@ -462,7 +467,8 @@ async def filter_media_handler(client, query):
             return await query.answer(f"❌ No {filter_type}s found for this search!", show_alert=True)
 
         # 3. Create NEW Session for this Filtered View
-        new_unique_id = await Media.save_search_result(original_query, files)
+        # ✅ CRITICAL: Save 'filter_type' so pagination knows we are in a filtered view
+        new_unique_id = await Media.save_search_result(original_query, files, file_type=filter_type)
         
         # 4. Generate New Buttons
         group_settings = await db.get_group_settings(query.message.chat.id)

@@ -1,7 +1,7 @@
 import logging
 import re
 import uuid
-import secrets
+import secrets 
 import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError
@@ -17,16 +17,28 @@ class MediaDB:
         self.data_col = self.db.files_data   
         self.search_col = self.db.files_search 
         self.counters = self.db.counters
+        
+        # Collection for Site Mode Cache (Web View)
         self.search_cache = self.db.search_cache 
+
+        # Collection for Search Sessions (Button Pagination & Filters)
         self.search_results = self.db.search_results
 
     async def ensure_indexes(self):
+        # Regular indexes for fallback search
         await self.search_col.create_index("file_name")
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
-        await self.search_col.create_index("file_type")  # ✅ Added Index for Filtering
+        
+        # ✅ NEW: Index for strict File Type filtering
+        await self.search_col.create_index("file_type") 
+        
         await self.data_col.create_index("file_unique_id", unique=True)
+        
+        # TTL Index for Site Mode (Auto-delete cache after 1 hour)
         await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
+
+        # TTL Index for Search Results (Auto-delete after 48 Hours)
         await self.search_results.create_index("created_at", expireAfterSeconds=172800)
 
     async def get_next_sequence_value(self, sequence_name, increment=1):
@@ -38,6 +50,7 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
+    # --- 🧹 TEXT CLEANER HELPER ---
     @staticmethod
     def clean_text(text):
         if not text: return ""
@@ -85,12 +98,13 @@ class MediaDB:
                 match = re.search(regex, caption, re.DOTALL)
                 if match:
                     caption = match.group(1) + match.group(2)
-            
-            # ✅ Determine File Type for Filter
-            file_type = "document"
-            if getattr(media, "mime_type", "").startswith("video/") or file_name.lower().endswith(('.mkv', '.mp4', '.avi', '.webm')):
+
+            # ✅ NEW: Determine File Type Logic (Video vs Document)
+            # This tags the file immediately upon saving
+            file_type = "document" # Default
+            if getattr(media, "mime_type", "").startswith("video/") or file_name.lower().endswith(('.mkv', '.mp4', '.avi', '.webm', '.mov', '.flv')):
                 file_type = "video"
-            
+
             data_docs.append({
                 '_id': current_id,
                 'msg_id': message.id,
@@ -105,7 +119,7 @@ class MediaDB:
                 'caption': caption,
                 'link_id': current_id,
                 'chat_id': message.chat.id,
-                'file_type': file_type # ✅ Save type to DB
+                'file_type': file_type  # ✅ Saved to DB
             })
             current_id += 1
 
@@ -171,6 +185,7 @@ class MediaDB:
             pipeline = [search_stage]
 
             # ✅ STRICT FILTER LOGIC
+            # This ensures only 'video' or 'document' is returned based on user click
             if file_type:
                 pipeline.append({
                     "$match": {
@@ -190,7 +205,7 @@ class MediaDB:
             
             filter_dict = {"$or": [{"file_name": regex}, {"caption": regex}]}
             
-            # Apply Filter to Regex Fallback
+            # ✅ Apply Filter to Regex Fallback too
             if file_type:
                 filter_dict["file_type"] = file_type
             
@@ -209,14 +224,42 @@ class MediaDB:
             return 0
 
     # ==================================================================
-    # 🔑 NEW SESSION SYSTEM METHODS
+    # 🌍 SITE MODE METHODS (Save & Retrieve Cache)
+    # ==================================================================
+
+    async def save_search_results(self, query, files, chat_id):
+        unique_id = str(uuid.uuid4())[:8]
+        simplified_files = []
+        for file in files:
+            simplified_files.append({
+                "file_name": file['file_name'],
+                "file_size": file['file_size'],
+                "link_id": file['link_id'],
+                "file_chat_id": file.get('chat_id') 
+            })
+
+        await self.search_cache.insert_one({
+            "_id": unique_id,
+            "query": query,
+            "chat_id": chat_id, 
+            "files": simplified_files,
+            "created_at": datetime.datetime.utcnow()
+        })
+        return unique_id
+
+    async def get_cached_results(self, unique_id):
+        return await self.search_cache.find_one({"_id": unique_id})
+
+    # ==================================================================
+    # 🔑 NEW SESSION SYSTEM METHODS (For Button Pagination & Filters)
     # ==================================================================
 
     async def save_search_result(self, query, files, filter_mode=None):
         """
-        Saves result to DB.
-        filter_mode: 'video' | 'document' | None (Used to persist button state)
+        Saves the search result to DB and returns a unique ID (Key).
+        Includes 'filter_mode' so buttons know which filter is active.
         """
+        # Generate a short 6-char URL-safe key
         unique_id = secrets.token_urlsafe(6)
         
         simplified_files = []
@@ -232,13 +275,17 @@ class MediaDB:
             "_id": unique_id,
             "query": query,
             "files": simplified_files,
-            "filter_mode": filter_mode, # ✅ Store filter state
+            "filter_mode": filter_mode, # ✅ Saved filter state
             "created_at": datetime.datetime.utcnow()
         })
         
         return unique_id
 
     async def get_search_session(self, unique_id):
+        """
+        Retrieves the saved files list using the Unique ID.
+        """
         return await self.search_results.find_one({"_id": unique_id})
 
+# Initialize
 Media = MediaDB(DATABASE_URI, DATABASE_NAME)

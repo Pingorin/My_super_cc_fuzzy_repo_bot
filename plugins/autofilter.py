@@ -3,7 +3,7 @@ import time
 import re
 import random 
 import asyncio 
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
@@ -43,15 +43,14 @@ async def auto_delete_task(bot_message, user_message, delay, show_thanks, query=
     except Exception:
         pass
 
-# ==============================================================================
-# 🔎 MAIN SEARCH HANDLER
-# ==============================================================================
 @Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index", "set_shortner", "settings", "connect", "delreq"]))
 async def auto_filter(client, message):
     
     raw_query = message.text
 
+    # ==================================================================
     # 🛑 ANTI-SPAM & CLEANING LAYERS
+    # ==================================================================
     if message.forward_from or message.forward_from_chat or message.via_bot: return
     if re.search(r"(https?://|www\.|t\.me/|@\w+)", raw_query): return
     NSFW_KEYWORDS = ["porn", "sex", "xxx", "nude", "horny", "gore", "adult", "dick", "pussy"]
@@ -93,6 +92,7 @@ async def auto_filter(client, message):
         # 🔢 3. GENERATE SEARCH ID (DB AUTO-INCREMENT)
         # ==================================================================
         # This ID replaces the long query string in buttons
+        # Returns an integer (e.g., 55) and saves "Avengers" to DB
         search_id = await Media.save_search_query(query, message.from_user.id)
 
         # ==================================================================
@@ -113,7 +113,7 @@ async def auto_filter(client, message):
 
         # --- MODE A: BUTTON ---
         if mode == 'button':
-            # ✅ FIX: Passing search_id instead of query text
+            # ⚠️ Passing search_id (int) instead of query string
             buttons = btn_parser(files, message.chat.id, search_id, offset, limit)
             
             if howto_btn: buttons.append(howto_btn)
@@ -129,6 +129,7 @@ async def auto_filter(client, message):
         # --- MODE B: TEXT LIST ---
         elif mode == 'text':
             page_files = files[offset : offset + limit]
+            # Formatter uses text query for Header display
             text = format_text_results(page_files, query, message.chat.id)
             
             btn = []
@@ -150,6 +151,7 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
 
+            # Pagination uses search_id for Buttons
             pagination = get_pagination_row(search_id, offset, limit, total_results)
             if pagination: btn.append(pagination)
             
@@ -157,6 +159,7 @@ async def auto_filter(client, message):
 
         # --- MODE D: SITE (WEB VIEW) ---
         elif mode == 'site':
+            # Site Mode uses a UUID for the web url, but we can use search_id for button navigation
             web_id = await Media.save_search_results(query, files, message.chat.id)
             
             base_url = SITE_URL.rstrip('/') if (SITE_URL and SITE_URL.startswith("http")) else "http://127.0.0.1:8080"
@@ -173,7 +176,7 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
 
-            # Use DB Pagination for Site Mode Buttons if needed
+            # Use DB Pagination for Site Mode Buttons inside Telegram
             pagination = get_pagination_row(search_id, offset, limit, total_results)
             if pagination: btn.append(pagination)
             
@@ -219,7 +222,6 @@ async def auto_filter(client, message):
 # ⏭️ DATABASE-BASED PAGINATION HANDLER
 # ==============================================================================
 
-
 @Client.on_callback_query(filters.regex(r"^page_"))
 async def handle_pagination(client, query):
     try:
@@ -228,12 +230,12 @@ async def handle_pagination(client, query):
         search_id = int(search_id_str)
         offset = int(offset_str)
         
-        # 1. Fetch Original Query from DB
+        # 1. Fetch Original Query from DB using ID
         req = await Media.get_search_query(search_id)
         if not req:
             return await query.answer("⚠️ Search expired. Please search again.", show_alert=True)
             
-        # 2. Fetch Files
+        # 2. Fetch Files using the Text Query
         files = await Media.get_search_results(req)
         if not files:
             return await query.answer("❌ No files found.", show_alert=True)
@@ -252,28 +254,27 @@ async def handle_pagination(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        # 4. Generate New Content & Update Message
+        # 4. Generate New Content
         
         # --- BUTTON MODE ---
         if mode == 'button':
-            # ✅ FIX: Passing search_id to parser
+            # Pass search_id (int) for next page buttons
             buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit)
             if howto_btn: buttons.append(howto_btn)
             buttons.append(free_prem_btn)
-            
-            # ✅ CRITICAL FIX: Use edit_reply_markup ONLY for button mode
-            # This prevents "Message Not Modified" error because text doesn't change in button mode
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
             
         # --- TEXT MODE ---
         elif mode == 'text':
             page_files = files[offset : offset + limit]
+            # Formatter gets Text Query
             text = format_text_results(page_files, req, query.message.chat.id)
             
             btn = []
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn) 
             
+            # Pagination Row gets Search ID
             pagination = get_pagination_row(search_id, offset, limit, total_results)
             if pagination: btn.append(pagination)
             
@@ -295,8 +296,8 @@ async def handle_pagination(client, query):
 
         # --- SITE MODE ---
         elif mode == 'site':
+            # For Site Mode inside Telegram, we just update the buttons
             btn = []
-            # Site mode logic: just update nav buttons
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn) 
             
@@ -321,7 +322,7 @@ async def card_next_nav(client, query):
         search_id = int(search_id_str)
         current_index = int(index_str)
 
-        # Fetch Query from DB
+        # Fetch Query
         req = await Media.get_search_query(search_id)
         if not req: return await query.answer("⚠️ Search expired.", show_alert=True)
 

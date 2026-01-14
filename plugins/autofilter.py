@@ -8,7 +8,6 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import PORT, SITE_URL
-# ✅ Added get_filter_buttons to imports
 from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, get_filter_buttons
 
 logger = logging.getLogger(__name__)
@@ -116,8 +115,9 @@ async def auto_filter(client, message):
         # 📊 UPDATE STATS: Successful Search
         await db.update_daily_stats(message.chat.id, 'suc')
 
-        # ✅ 3. SAVE SESSION (Generates Unique ID to fix Button Data Invalid)
-        unique_id = await Media.save_search_result(query, files)
+        # ✅ 3. SAVE SESSION (Generates Unique ID for Cache)
+        # We pass file_type=None because this is a fresh global search
+        unique_id = await Media.save_search_result(query, files, file_type=None)
 
         # ✅ 4. Auto-Reaction Logic
         if auto_react:

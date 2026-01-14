@@ -55,7 +55,8 @@ def format_text_results(files, query, chat_id):
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
         
-        # Always use the Group ID (chat_id) for the link
+        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id) for the link
+        # This ensures the bot checks THIS group's settings, not the file's source channel
         f_chat_id = chat_id
         
         # Link directs to the bot with the specific Group ID
@@ -80,7 +81,7 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
 
-        # Always use the Group ID (chat_id)
+        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
         f_chat_id = chat_id
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
@@ -96,10 +97,10 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         else:
             lang = "N/A"
 
-        text += f"📂 <a href='{link}'>Click to get this file 📥</a>\n"
-        text += f"🖥 Name: {f_name}\n"
-        text += f"📀 Quality: {quality}\n"
-        text += f"🌍 Language: {lang}\n"
+        text += f"📂 <a href='{link}'>𝘾𝙡𝙞𝙘𝙠 𝙩𝙤 𝙜𝙖𝙩 𝙩𝙝𝙞𝙨 𝙛𝙞𝙡𝙚 📥</a>\n"
+        text += f"🖥 𝙉𝙖𝙢𝙚: {f_name}\n"
+        text += f"📀 𝙦𝙪𝙖𝙡𝙞𝙩𝙮: {quality}\n"
+        text += f"🌍 𝙡𝙖𝙣𝙜𝙪𝙖𝙜𝙚: {lang}\n"
         text += f"📦 [{f_size}]\n\n"
         
     return text
@@ -131,6 +132,7 @@ async def post_to_telegraph(files, query, chat_id):
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
         
+        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
         f_chat_id = chat_id
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
@@ -146,11 +148,12 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. PAGINATION HELPER (UPDATED FOR DATABASE IDS)
-def get_pagination_row(current_offset, limit, total_count, unique_id):
+# ✅ 4. PAGINATION HELPER (Updated for DB Pagination)
+def get_pagination_row(search_id, current_offset, limit, total_count):
     """
-    Generates the navigation row: [ ⬅️ Back ] [ 1/5 ] [ Next ➡️ ]
-    Uses unique_id (search_id) instead of query string.
+    Generates the navigation row using integer search_id: 
+    [ ⬅️ Back ] [ 1/5 ] [ Next ➡️ ]
+    Callback Data Format: page_{search_id}_{offset}
     """
     buttons = []
     
@@ -163,58 +166,24 @@ def get_pagination_row(current_offset, limit, total_count, unique_id):
 
     # 1. Back Button
     if current_offset >= limit:
-        # ✅ FIXED: Uses 'page_' to match callback.py handler
-        buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"page_{unique_id}_{current_offset - limit}"))
+        buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"page_{search_id}_{current_offset - limit}"))
 
     # 2. Page Counter (Static)
     buttons.append(InlineKeyboardButton(f"📑 {current_page}/{total_pages}", callback_data="pages"))
 
     # 3. Next Button
     if current_offset + limit < total_count:
-        # ✅ FIXED: Uses 'page_' to match callback.py handler
-        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"page_{unique_id}_{current_offset + limit}"))
+        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"page_{search_id}_{current_offset + limit}"))
 
     return buttons
 
-# ✅ 5. MEDIA TYPE FILTER BUTTONS
-def get_filter_buttons(unique_id, active_mode=None):
+# ✅ 5. BUTTON PARSER (Updated for DB Pagination)
+def btn_parser(files, chat_id, search_id, query=None, offset=0, limit=10):
     """
-    Generates the Media Type toggle buttons (Videos vs Documents).
-    unique_id: The numeric search ID from DB.
+    Generates buttons for Inline Result Mode with Integer Pagination.
+    param search_id: Integer ID from sequences collection
+    param query: String (Optional, for text highlighting only)
     """
-    
-    # Determine visual state (Checkmark vs Icon)
-    vid_text = "Videos ✅" if active_mode == 'video' else "Videos 📹"
-    doc_text = "Docs ✅" if active_mode == 'document' else "Docs 📂"
-    
-    # Row 1: The Toggle Buttons
-    # Callbacks format: filter_{type}_{unique_id}
-    row1 = [
-        InlineKeyboardButton(vid_text, callback_data=f"filter_video_{unique_id}"),
-        InlineKeyboardButton(doc_text, callback_data=f"filter_doc_{unique_id}")
-    ]
-    
-    buttons = [row1]
-    
-    # Row 2: "All Media Types" (Only show if a filter is active)
-    if active_mode:
-        buttons.append([
-            InlineKeyboardButton("⬅️ All Media Types", callback_data=f"unfilter_{unique_id}")
-        ])
-        
-    return buttons
-
-# ✅ 6. BUTTON PARSER (UPDATED FOR NUMERIC SEARCH ID)
-def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10):
-    """
-    Generates buttons for Inline Result Mode with Pagination.
-    REQUIRES unique_id (search_id) for pagination buttons.
-    """
-    
-    # Safety check: If query is accidentally passed as int, ignore it
-    if isinstance(query, int):
-        query = None
-
     # Slice the files based on offset and limit
     current_files = files[offset : offset + limit]
     
@@ -224,13 +193,13 @@ def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10):
         f_size = get_size(file.get('file_size', 0))
         link_id = file.get('link_id')
         
-        # Always use the Group ID (chat_id)
+        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
         f_chat_id = chat_id
         
         caption = file.get('caption')
 
         display_name = f_name
-        # Simple caption logic to highlight query (if available)
+        # Simple caption logic to highlight query
         if query and caption:
             q = query.lower()
             n = f_name.lower()
@@ -247,14 +216,14 @@ def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10):
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     # --- ADD PAGINATION ROW ---
-    # We pass unique_id (search_id) instead of query
-    pagination = get_pagination_row(offset, limit, len(files), unique_id)
+    # Passing search_id (int) instead of query string
+    pagination = get_pagination_row(search_id, offset, limit, len(files))
     if pagination:
         buttons.append(pagination)
             
     return buttons
 
-# ✅ 7. SHORTLINK GENERATOR
+# ✅ 6. SHORTLINK GENERATOR
 async def get_shortlink(site, api, link):
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}
@@ -272,7 +241,7 @@ async def get_shortlink(site, api, link):
         logger.error(f"Shortlink Exception ({site}): {e}")
         return None 
 
-# ✅ 8. FSUB STATUS HELPERS
+# ✅ 7. FSUB STATUS HELPERS
 async def _get_fsub_status(bot, user_id, channel_id):
     try:
         member = await bot.get_chat_member(channel_id, user_id)

@@ -56,7 +56,6 @@ def format_text_results(files, query, chat_id):
         link_id = file['link_id']
         
         # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id) for the link
-        # This ensures the bot checks THIS group's settings, not the file's source channel
         f_chat_id = chat_id
         
         # Link directs to the bot with the specific Group ID
@@ -97,11 +96,11 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         else:
             lang = "N/A"
 
-        text += f"📂 <a href='{link}'>𝘾𝙡𝙞𝙘𝙠 𝙩𝙤 𝙜𝙖𝙩 𝙩𝙝𝙞𝙨 𝙛𝙞𝙡𝙚 📥</a>\n"
-        text += f"🖥 𝙉𝙖𝙢𝙚: {f_name}\n"
-        text += f"📀 𝙦𝙪𝙖𝙡𝙞𝙩𝙮: {quality}\n"
-        text += f"🌍 𝙡𝙖𝙣𝙜𝙪𝙖𝙜𝙚: {lang}\n"
-        text += f"📦 [{f_size}]\n\n"
+        text += f"📂 <a href='{link}'>Click to get this file 📥</a>\n"
+        text += f"🖥 Name: {f_name}\n"
+        text += f"📀 Quality: {quality}\n"
+        text += f"🌍 Language: {lang}\n"
+        text += f"📦 Size: [{f_size}]\n\n"
         
     return text
 
@@ -132,7 +131,6 @@ async def post_to_telegraph(files, query, chat_id):
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
         
-        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
         f_chat_id = chat_id
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
@@ -148,11 +146,11 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. PAGINATION HELPER (Updated for DB Pagination)
+# ✅ 4. PAGINATION HELPER (Updated for Database Pagination)
 def get_pagination_row(search_id, current_offset, limit, total_count):
     """
-    Generates the navigation row using integer search_id: 
-    [ ⬅️ Back ] [ 1/5 ] [ Next ➡️ ]
+    Generates the navigation row using integer search_id.
+    Format: [ ⬅️ Back ] [ 1/5 ] [ Next ➡️ ]
     Callback Data Format: page_{search_id}_{offset}
     """
     buttons = []
@@ -161,7 +159,7 @@ def get_pagination_row(search_id, current_offset, limit, total_count):
     current_page = int(current_offset / limit) + 1
     total_pages = math.ceil(total_count / limit)
 
-    if total_pages == 1:
+    if total_pages <= 1:
         return []
 
     # 1. Back Button
@@ -177,12 +175,11 @@ def get_pagination_row(search_id, current_offset, limit, total_count):
 
     return buttons
 
-# ✅ 5. BUTTON PARSER (Updated for DB Pagination)
+# ✅ 5. BUTTON PARSER (Updated for Button Mode & Pagination)
 def btn_parser(files, chat_id, search_id, query=None, offset=0, limit=10):
     """
-    Generates buttons for Inline Result Mode with Integer Pagination.
-    param search_id: Integer ID from sequences collection
-    param query: String (Optional, for text highlighting only)
+    Generates buttons for Inline Result Mode with DB-Based Pagination.
+    param search_id: Integer ID obtained from DB Sequence.
     """
     # Slice the files based on offset and limit
     current_files = files[offset : offset + limit]
@@ -193,9 +190,7 @@ def btn_parser(files, chat_id, search_id, query=None, offset=0, limit=10):
         f_size = get_size(file.get('file_size', 0))
         link_id = file.get('link_id')
         
-        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
         f_chat_id = chat_id
-        
         caption = file.get('caption')
 
         display_name = f_name
@@ -216,7 +211,7 @@ def btn_parser(files, chat_id, search_id, query=None, offset=0, limit=10):
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     # --- ADD PAGINATION ROW ---
-    # Passing search_id (int) instead of query string
+    # Pass search_id (int) to the pagination helper
     pagination = get_pagination_row(search_id, offset, limit, len(files))
     if pagination:
         buttons.append(pagination)

@@ -256,8 +256,6 @@ class MediaDB:
     # ==================================================================
     # 🔢 INTEGER-BASED PAGINATION SYSTEM (Auto-Increment)
     # ==================================================================
-    
-    # 
 
     async def save_active_search(self, query):
         """

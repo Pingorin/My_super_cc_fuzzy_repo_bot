@@ -146,11 +146,11 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. PAGINATION HELPER (UPDATED FOR SESSION KEY)
+# ✅ 4. PAGINATION HELPER (UPDATED FOR DATABASE IDS)
 def get_pagination_row(current_offset, limit, total_count, unique_id):
     """
     Generates the navigation row: [ ⬅️ Back ] [ 1/5 ] [ Next ➡️ ]
-    Uses unique_id instead of query to prevent Button Data Invalid error.
+    Uses unique_id (search_id) instead of query string.
     """
     buttons = []
     
@@ -163,25 +163,24 @@ def get_pagination_row(current_offset, limit, total_count, unique_id):
 
     # 1. Back Button
     if current_offset >= limit:
-        # ✅ FIX: next_{unique_id}_{offset}
-        buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"next_{unique_id}_{current_offset - limit}"))
+        # ✅ FIXED: Uses 'page_' to match callback.py handler
+        buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"page_{unique_id}_{current_offset - limit}"))
 
     # 2. Page Counter (Static)
     buttons.append(InlineKeyboardButton(f"📑 {current_page}/{total_pages}", callback_data="pages"))
 
     # 3. Next Button
     if current_offset + limit < total_count:
-        # ✅ FIX: next_{unique_id}_{offset}
-        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"next_{unique_id}_{current_offset + limit}"))
+        # ✅ FIXED: Uses 'page_' to match callback.py handler
+        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"page_{unique_id}_{current_offset + limit}"))
 
     return buttons
 
-# ✅ 5. MEDIA TYPE FILTER BUTTONS (NEW)
+# ✅ 5. MEDIA TYPE FILTER BUTTONS
 def get_filter_buttons(unique_id, active_mode=None):
     """
-    Generates the Media Type toggle buttons.
-    unique_id: The current search session ID (to maintain context).
-    active_mode: 'video', 'document', or None (for 'All').
+    Generates the Media Type toggle buttons (Videos vs Documents).
+    unique_id: The numeric search ID from DB.
     """
     
     # Determine visual state (Checkmark vs Icon)
@@ -205,15 +204,14 @@ def get_filter_buttons(unique_id, active_mode=None):
         
     return buttons
 
-# ✅ 6. BUTTON PARSER (UPDATED FOR SESSION KEY & SAFETY)
+# ✅ 6. BUTTON PARSER (UPDATED FOR NUMERIC SEARCH ID)
 def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10):
     """
     Generates buttons for Inline Result Mode with Pagination.
-    REQUIRES unique_id for pagination buttons.
-    Optional: query (only for text highlighting).
+    REQUIRES unique_id (search_id) for pagination buttons.
     """
     
-    # Safety: If query is accidentally passed as int (due to old calls), ignore it
+    # Safety check: If query is accidentally passed as int, ignore it
     if isinstance(query, int):
         query = None
 
@@ -232,7 +230,7 @@ def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10):
         caption = file.get('caption')
 
         display_name = f_name
-        # Simple caption logic to highlight query
+        # Simple caption logic to highlight query (if available)
         if query and caption:
             q = query.lower()
             n = f_name.lower()
@@ -249,7 +247,7 @@ def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10):
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     # --- ADD PAGINATION ROW ---
-    # We now pass unique_id instead of query
+    # We pass unique_id (search_id) instead of query
     pagination = get_pagination_row(offset, limit, len(files), unique_id)
     if pagination:
         buttons.append(pagination)

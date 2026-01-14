@@ -261,10 +261,10 @@ class MediaDB:
     # 🔑 NEW SESSION SYSTEM METHODS (For Button Pagination & Filters)
     # ==================================================================
 
-    async def save_search_result(self, query, files, filter_mode=None):
+    async def save_search_result(self, query, files, file_type=None):
         """
         Saves the search result to DB and returns a unique ID (Key).
-        Includes 'filter_mode' so buttons know which filter is active.
+        Includes 'file_type' so buttons know which filter is active.
         """
         # Generate a short 6-char URL-safe key
         unique_id = secrets.token_urlsafe(6)
@@ -282,7 +282,7 @@ class MediaDB:
             "_id": unique_id,
             "query": query,
             "files": simplified_files,
-            "filter_mode": filter_mode, # ✅ Saved filter state
+            "file_type": file_type, # ✅ Saved filter state
             "created_at": datetime.datetime.utcnow()
         })
         

@@ -117,6 +117,7 @@ async def auto_filter(client, message):
         await db.update_daily_stats(message.chat.id, 'suc')
 
         # ✅ 3. SAVE SESSION (Generates Unique ID to fix Button Data Invalid)
+        # Note: Default file_type is None (All Files)
         unique_id = await Media.save_search_result(query, files)
 
         # ✅ 4. Auto-Reaction Logic
@@ -322,6 +323,7 @@ async def handle_next_back(client, query):
         req = session['query'] # Original Query for display
         
         # ✅ CRITICAL: Retrieve the 'file_type' (Video/Doc) from session to maintain state
+        # This prevents the bot from forgetting you selected "Videos" when you click Next
         active_filter = session.get('file_type') 
         
         total_results = len(files)
@@ -468,6 +470,7 @@ async def filter_media_handler(client, query):
 
         # 3. Create NEW Session for this Filtered View
         # ✅ CRITICAL: Save 'filter_type' so pagination knows we are in a filtered view
+        # This prevents "Error filtering results" by ensuring arguments match the DB method
         new_unique_id = await Media.save_search_result(original_query, files, file_type=filter_type)
         
         # 4. Generate New Buttons
@@ -505,6 +508,8 @@ async def filter_media_handler(client, query):
         
     except Exception as e:
         logger.error(f"Filter Error: {e}")
+        # Print actual error to console for debugging
+        print(f"❌ CRITICAL ERROR IN FILTER: {e}")
         await query.answer("⚠️ Error filtering results.", show_alert=True)
 
 

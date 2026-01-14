@@ -10,42 +10,38 @@ logger = logging.getLogger(__name__)
 
 class MediaDB:
     def __init__(self, uri, database_name):
+        # ✅ Connection: Using DATABASE_URI (Exclusively for Files)
         self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         
-        # Core File Collections
         self.data_col = self.db.files_data   
         self.search_col = self.db.files_search 
         self.counters = self.db.counters
         
-        # Collection for Site Mode Cache (Web View)
+        # ✅ Collection for Site Mode Cache (Temporary Results)
         self.search_cache = self.db.search_cache 
-
-        # ✅ NEW: Collection for Integer-Based Pagination (Stores Query Only)
-        self.active_searches = self.db.active_searches
+        
+        # ✅ NEW: Temporary Search Storage for Pagination (Stores "Avengers" -> ID 60)
+        self.temp_searches = self.db.temp_searches
 
     async def ensure_indexes(self):
         # Regular indexes for fallback search
         await self.search_col.create_index("file_name")
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
-        
-        # ✅ Strict File Type Index
-        await self.search_col.create_index("file_type") 
-        
         await self.data_col.create_index("file_unique_id", unique=True)
         
-        # TTL Index for Site Mode (Auto-delete cache after 1 hour)
+        # ✅ TTL Index for Site Mode (Auto-delete cache after 1 hour)
         await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
 
-        # ✅ TTL Index for Active Searches (Auto-delete after 48 Hours)
-        # This prevents the DB from growing infinitely with old search IDs
-        await self.active_searches.create_index("created_at", expireAfterSeconds=172800)
+        # ✅ NEW: TTL Index for Search History (Auto-delete after 48 Hours)
+        # 48 hours * 60 mins * 60 secs = 172800
+        await self.temp_searches.create_index("created_at", expireAfterSeconds=172800)
 
-    # ✅ ATOMIC AUTO-INCREMENT (Used for File IDs and Search IDs)
     async def get_next_sequence_value(self, sequence_name, increment=1):
         """
-        Atomically increments a counter and returns the new integer.
+        Atomically increments the counter for the given sequence_name 
+        and returns the new integer.
         """
         doc = await self.counters.find_one_and_update(
             {"_id": sequence_name},
@@ -55,7 +51,47 @@ class MediaDB:
         )
         return doc["sequence_value"]
 
-    # --- 🧹 TEXT CLEANER HELPER ---
+    # ==================================================================
+    # 🔢 DATABASE PAGINATION LOGIC (NEW)
+    # ==================================================================
+
+    async def save_search_query(self, query, user_id):
+        """
+        1. Gets a unique Integer ID (e.g., 60).
+        2. Saves the query text "Spider Man" with that ID.
+        3. Returns the ID (60) to be used in buttons.
+        """
+        try:
+            # 1. Get unique Auto-ID
+            search_id = await self.get_next_sequence_value("search_id_counter", increment=1)
+            
+            # 2. Save to Temp Collection with TTL
+            await self.temp_searches.insert_one({
+                "_id": int(search_id),
+                "query": query,
+                "user_id": int(user_id),
+                "created_at": datetime.datetime.utcnow() # Trigger for TTL
+            })
+            
+            return int(search_id)
+        except Exception as e:
+            logger.error(f"Error saving search query: {e}")
+            return None
+
+    async def get_search_query(self, search_id):
+        """
+        Retrieves the original text query using the Integer ID.
+        """
+        try:
+            doc = await self.temp_searches.find_one({"_id": int(search_id)})
+            return doc['query'] if doc else None
+        except Exception as e:
+            logger.error(f"Error fetching search ID {search_id}: {e}")
+            return None
+
+    # ==================================================================
+
+    # --- 🧹 TEXT CLEANER HELPER (Optimized) ---
     @staticmethod
     def clean_text(text):
         if not text: return ""
@@ -85,6 +121,7 @@ class MediaDB:
         if not new_items: return 0, pre_duplicate_count 
             
         count = len(new_items)
+        # Reusing the existing sequence logic for file IDs
         end_sequence = await self.get_next_sequence_value("file_id_counter", increment=count)
         start_sequence = end_sequence - count + 1
         
@@ -104,13 +141,6 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
 
-            # ✅ STRICT FILE TYPE DETECTION
-            file_type = "document" 
-            if hasattr(media, "width") and hasattr(media, "duration"):
-                file_type = "video"
-            elif hasattr(media, "mime_type") and str(media.mime_type).startswith("video/") and not hasattr(media, "file_name"):
-                 file_type = "video"
-
             data_docs.append({
                 '_id': current_id,
                 'msg_id': message.id,
@@ -124,8 +154,7 @@ class MediaDB:
                 'file_size': media.file_size, 
                 'caption': caption,
                 'link_id': current_id,
-                'chat_id': message.chat.id,
-                'file_type': file_type 
+                'chat_id': message.chat.id # ✅ Added chat_id here for Web Links
             })
             current_id += 1
 
@@ -161,8 +190,7 @@ class MediaDB:
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    # ✅ SEARCH WITH STRICT TYPE FILTERING
-    async def get_search_results(self, query, file_type=None):
+    async def get_search_results(self, query):
         try:
             words = query.split()
             
@@ -178,7 +206,16 @@ class MediaDB:
                     }
                 }
             else:
-                must_clauses = [{"text": {"query": word, "path": ["file_name", "caption"], "fuzzy": {"maxEdits": 1}}} for word in words]
+                must_clauses = []
+                for word in words:
+                    must_clauses.append({
+                        "text": {
+                            "query": word,
+                            "path": ["file_name", "caption"],
+                            "fuzzy": {"maxEdits": 1}
+                        }
+                    })
+                
                 search_stage = {
                     "$search": {
                         "index": "default",
@@ -188,33 +225,19 @@ class MediaDB:
                     }
                 }
 
-            pipeline = [search_stage]
-
-            # ✅ STRICT FILTER LOGIC (Video vs Document)
-            if file_type:
-                pipeline.append({
-                    "$match": {
-                        "file_type": file_type
-                    }
-                })
-
-            pipeline.append({"$limit": 100}) 
+            pipeline = [search_stage, {"$limit": 50}] # Increased limit for better Site Mode results
             cursor = self.search_col.aggregate(pipeline)
-            files = await cursor.to_list(length=100)
+            files = await cursor.to_list(length=50)
             return files
             
         except Exception as e:
             # Fallback to Regex
             safe_query = re.escape(query)
             regex = re.compile(safe_query, re.IGNORECASE)
-            filter_dict = {"$or": [{"file_name": regex}, {"caption": regex}]}
             
-            if file_type:
-                filter_dict["file_type"] = file_type
-            
-            cursor = self.search_col.find(filter_dict)
+            cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})
             cursor.sort('$natural', -1)
-            return await cursor.to_list(length=100)
+            return await cursor.to_list(length=50)
 
     async def total_files_count(self):
         return await self.data_col.count_documents({})
@@ -227,57 +250,39 @@ class MediaDB:
             return 0
 
     # ==================================================================
-    # 🌍 SITE MODE METHODS
+    # 🌍 SITE MODE METHODS (Save & Retrieve Cache)
     # ==================================================================
 
     async def save_search_results(self, query, files, chat_id):
-        unique_id = str(uuid.uuid4())[:8]
+        """
+        Saves search results to MongoDB with a short UUID for Web View.
+        Added `chat_id` param to fix 'None' type error in Web Server.
+        """
+        unique_id = str(uuid.uuid4())[:8] # Short 8-char ID
+        
+        # Simplify data to save space
         simplified_files = []
         for file in files:
             simplified_files.append({
                 "file_name": file['file_name'],
                 "file_size": file['file_size'],
                 "link_id": file['link_id'],
+                # Try to get specific chat_id from file dict
                 "file_chat_id": file.get('chat_id') 
             })
 
         await self.search_cache.insert_one({
             "_id": unique_id,
             "query": query,
-            "chat_id": chat_id, 
+            "chat_id": chat_id, # ✅ Saves User ID for fallback link generation
             "files": simplified_files,
             "created_at": datetime.datetime.utcnow()
         })
         return unique_id
 
     async def get_cached_results(self, unique_id):
+        """Retrieves cached results for the Web Server."""
         return await self.search_cache.find_one({"_id": unique_id})
 
-    # ==================================================================
-    # 🔢 INTEGER-BASED PAGINATION SYSTEM (Auto-Increment)
-    # ==================================================================
-
-    async def save_active_search(self, query):
-        """
-        1. Gets next Integer ID (e.g., 60).
-        2. Saves ONLY the query string (e.g., "Spider Man").
-        3. Returns the ID (60) for the button data.
-        """
-        search_id = await self.get_next_sequence_value("search_id")
-        
-        await self.active_searches.insert_one({
-            "_id": search_id,        # Integer ID
-            "query": query,          # Text Query
-            "created_at": datetime.datetime.utcnow()
-        })
-        return search_id
-
-    async def get_active_search(self, search_id):
-        """
-        Retrieves the query string using the Integer ID.
-        """
-        doc = await self.active_searches.find_one({"_id": int(search_id)})
-        return doc["query"] if doc else None
-
-# Initialize
+# Initialize with DATABASE_URI
 Media = MediaDB(DATABASE_URI, DATABASE_NAME)

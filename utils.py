@@ -176,7 +176,7 @@ def get_pagination_row(search_id, current_offset, limit, total_count):
     return buttons
 
 # ✅ 5. BUTTON PARSER (Updated for Button Mode & Pagination)
-def btn_parser(files, chat_id, search_id, query=None, offset=0, limit=10):
+def btn_parser(files, chat_id, search_id, offset=0, limit=10):
     """
     Generates buttons for Inline Result Mode with DB-Based Pagination.
     param search_id: Integer ID obtained from DB Sequence.
@@ -191,18 +191,9 @@ def btn_parser(files, chat_id, search_id, query=None, offset=0, limit=10):
         link_id = file.get('link_id')
         
         f_chat_id = chat_id
-        caption = file.get('caption')
-
+        # Note: We removed the caption check logic here because we don't pass the query text string anymore.
+        # This keeps the button parsing simple and error-free.
         display_name = f_name
-        # Simple caption logic to highlight query
-        if query and caption:
-            q = query.lower()
-            n = f_name.lower()
-            c = caption.lower()
-            if q not in n and q in c:
-                clean_cap = caption.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
-                if len(clean_cap) > 60: clean_cap = clean_cap[:57] + "..."
-                display_name = clean_cap
 
         btn_text = f"📂 {display_name} [{f_size}]"
         

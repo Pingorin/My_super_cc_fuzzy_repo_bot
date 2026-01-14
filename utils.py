@@ -55,7 +55,7 @@ def format_text_results(files, query, chat_id):
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
         
-        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id) for the link
+        # Always use the Group ID (chat_id) for the link
         f_chat_id = chat_id
         
         # Link directs to the bot with the specific Group ID
@@ -80,7 +80,7 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
 
-        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
+        # Always use the Group ID (chat_id)
         f_chat_id = chat_id
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
@@ -96,10 +96,10 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         else:
             lang = "N/A"
 
-        text += f"📂 <a href='{link}'>𝘾𝙡𝙞𝙘𝙠 𝙩𝙤 𝙜𝙖𝙩 𝙩𝙝𝙞𝙨 𝙛𝙞𝙡𝙚 📥</a>\n"
-        text += f"🖥 𝙉𝙖𝙢𝙚: {f_name}\n"
-        text += f"📀 𝙦𝙪𝙖𝙡𝙞𝙩𝙮: {quality}\n"
-        text += f"🌍 𝙡𝙖𝙣𝙜𝙪𝙖𝙜𝙚: {lang}\n"
+        text += f"📂 <a href='{link}'>Click to get this file 📥</a>\n"
+        text += f"🖥 Name: {f_name}\n"
+        text += f"📀 Quality: {quality}\n"
+        text += f"🌍 Language: {lang}\n"
         text += f"📦 [{f_size}]\n\n"
         
     return text
@@ -131,7 +131,6 @@ async def post_to_telegraph(files, query, chat_id):
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
         
-        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
         f_chat_id = chat_id
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
@@ -227,7 +226,7 @@ def btn_parser(files, chat_id, unique_id, query=None, offset=0, limit=10):
         f_size = get_size(file.get('file_size', 0))
         link_id = file.get('link_id')
         
-        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
+        # Always use the Group ID (chat_id)
         f_chat_id = chat_id
         
         caption = file.get('caption')

@@ -1,7 +1,6 @@
 import logging
 import re
 import uuid
-import secrets 
 import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError
@@ -14,6 +13,7 @@ class MediaDB:
         self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         
+        # Core File Collections
         self.data_col = self.db.files_data   
         self.search_col = self.db.files_search 
         self.counters = self.db.counters
@@ -21,8 +21,8 @@ class MediaDB:
         # Collection for Site Mode Cache (Web View)
         self.search_cache = self.db.search_cache 
 
-        # Collection for Search Sessions (Button Pagination & Filters)
-        self.search_results = self.db.search_results
+        # ✅ NEW: Collection for Integer-Based Pagination (Stores Query Only)
+        self.active_searches = self.db.active_searches
 
     async def ensure_indexes(self):
         # Regular indexes for fallback search
@@ -30,7 +30,7 @@ class MediaDB:
         await self.search_col.create_index("caption")
         await self.search_col.create_index("link_id")
         
-        # ✅ NEW: Index for strict File Type filtering
+        # ✅ Strict File Type Index
         await self.search_col.create_index("file_type") 
         
         await self.data_col.create_index("file_unique_id", unique=True)
@@ -38,10 +38,15 @@ class MediaDB:
         # TTL Index for Site Mode (Auto-delete cache after 1 hour)
         await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
 
-        # TTL Index for Search Results (Auto-delete after 48 Hours)
-        await self.search_results.create_index("created_at", expireAfterSeconds=172800)
+        # ✅ TTL Index for Active Searches (Auto-delete after 48 Hours)
+        # This prevents the DB from growing infinitely with old search IDs
+        await self.active_searches.create_index("created_at", expireAfterSeconds=172800)
 
+    # ✅ ATOMIC AUTO-INCREMENT (Used for File IDs and Search IDs)
     async def get_next_sequence_value(self, sequence_name, increment=1):
+        """
+        Atomically increments a counter and returns the new integer.
+        """
         doc = await self.counters.find_one_and_update(
             {"_id": sequence_name},
             {"$inc": {"sequence_value": increment}}, 
@@ -100,15 +105,10 @@ class MediaDB:
                     caption = match.group(1) + match.group(2)
 
             # ✅ STRICT FILE TYPE DETECTION
-            # Default to document (File)
             file_type = "document" 
-            
-            # Logic: If it has 'duration' and 'width', Telegram considers it a Streamable Video.
-            # This strictly separates 'Video' objects from 'Document' objects.
             if hasattr(media, "width") and hasattr(media, "duration"):
                 file_type = "video"
             elif hasattr(media, "mime_type") and str(media.mime_type).startswith("video/") and not hasattr(media, "file_name"):
-                 # Edge case: Video notes or specific video types without filenames
                  file_type = "video"
 
             data_docs.append({
@@ -125,7 +125,7 @@ class MediaDB:
                 'caption': caption,
                 'link_id': current_id,
                 'chat_id': message.chat.id,
-                'file_type': file_type  # ✅ Correctly Saved to DB
+                'file_type': file_type 
             })
             current_id += 1
 
@@ -190,9 +190,7 @@ class MediaDB:
 
             pipeline = [search_stage]
 
-            # ✅ STRICT FILTER LOGIC
-            # If user clicks "Videos", fetch ONLY files saved as 'video'
-            # If user clicks "Docs", fetch ONLY files saved as 'document'
+            # ✅ STRICT FILTER LOGIC (Video vs Document)
             if file_type:
                 pipeline.append({
                     "$match": {
@@ -209,10 +207,8 @@ class MediaDB:
             # Fallback to Regex
             safe_query = re.escape(query)
             regex = re.compile(safe_query, re.IGNORECASE)
-            
             filter_dict = {"$or": [{"file_name": regex}, {"caption": regex}]}
             
-            # ✅ Apply Filter to Regex Fallback too
             if file_type:
                 filter_dict["file_type"] = file_type
             
@@ -231,7 +227,7 @@ class MediaDB:
             return 0
 
     # ==================================================================
-    # 🌍 SITE MODE METHODS (Save & Retrieve Cache)
+    # 🌍 SITE MODE METHODS
     # ==================================================================
 
     async def save_search_results(self, query, files, chat_id):
@@ -258,41 +254,32 @@ class MediaDB:
         return await self.search_cache.find_one({"_id": unique_id})
 
     # ==================================================================
-    # 🔑 NEW SESSION SYSTEM METHODS (For Button Pagination & Filters)
+    # 🔢 INTEGER-BASED PAGINATION SYSTEM (Auto-Increment)
     # ==================================================================
+    
+    # 
 
-    async def save_search_result(self, query, files, file_type=None):
+    async def save_active_search(self, query):
         """
-        Saves the search result to DB and returns a unique ID (Key).
-        Includes 'file_type' so buttons know which filter is active.
+        1. Gets next Integer ID (e.g., 60).
+        2. Saves ONLY the query string (e.g., "Spider Man").
+        3. Returns the ID (60) for the button data.
         """
-        # Generate a short 6-char URL-safe key
-        unique_id = secrets.token_urlsafe(6)
+        search_id = await self.get_next_sequence_value("search_id")
         
-        simplified_files = []
-        for file in files:
-            simplified_files.append({
-                'file_name': file.get('file_name'),
-                'file_size': file.get('file_size'),
-                'link_id': file.get('link_id'),
-                'caption': file.get('caption', None)
-            })
-
-        await self.search_results.insert_one({
-            "_id": unique_id,
-            "query": query,
-            "files": simplified_files,
-            "file_type": file_type, # ✅ Saved filter state
+        await self.active_searches.insert_one({
+            "_id": search_id,        # Integer ID
+            "query": query,          # Text Query
             "created_at": datetime.datetime.utcnow()
         })
-        
-        return unique_id
+        return search_id
 
-    async def get_search_session(self, unique_id):
+    async def get_active_search(self, search_id):
         """
-        Retrieves the saved files list using the Unique ID.
+        Retrieves the query string using the Integer ID.
         """
-        return await self.search_results.find_one({"_id": unique_id})
+        doc = await self.active_searches.find_one({"_id": int(search_id)})
+        return doc["query"] if doc else None
 
 # Initialize
 Media = MediaDB(DATABASE_URI, DATABASE_NAME)

@@ -46,30 +46,29 @@ class MediaDB:
             return None
 
     # ==================================================================
-    # 🔍 FIXED SAVE FUNCTION (Overwrites if ID exists)
+    # ⚡ CACHING SAVE FUNCTION (Saves Query + Files)
     # ==================================================================
-    async def save_search_query(self, query, user_id):
+    async def save_search_query(self, query, user_id, files):
         try:
             # 1. Get unique Auto-ID
             search_id = await self.get_next_sequence_value("search_id_counter", increment=1)
             
             if not search_id:
-                print("❌ Failed to generate Search ID (Sequence Error)")
                 return None
 
-            # 2. Upsert (Update if exists, Insert if new)
-            # This fixes the E11000 Duplicate Key Error
+            # 2. Save Query AND Files List (Result Caching)
+            # MongoDB Document Limit is 16MB, storing 50-100 files is very safe.
             await self.temp_searches.update_one(
-                {"_id": int(search_id)},  # Filter by ID
-                {"$set": {                # Set new data
+                {"_id": int(search_id)},
+                {"$set": {
                     "query": query,
                     "user_id": int(user_id),
+                    "files": files, # ✅ Saving the results directly!
                     "created_at": datetime.datetime.utcnow()
                 }},
-                upsert=True               # ✅ Key Fix: Create if missing, Update if exists
+                upsert=True
             )
             
-            print(f"✅ Saved Query: ID={search_id} | Text='{query}'")
             return int(search_id)
 
         except Exception as e:
@@ -77,20 +76,15 @@ class MediaDB:
             return None
 
     async def get_search_query(self, search_id):
+        """
+        Returns the entire document (Query + Cached Files).
+        """
         try:
-            doc = await self.temp_searches.find_one({"_id": int(search_id)})
-            if doc:
-                # print(f"✅ Found Query for ID {search_id}: '{doc['query']}'")
-                return doc['query']
-            else:
-                print(f"⚠️ Query NOT FOUND for ID {search_id}")
-                return None
+            return await self.temp_searches.find_one({"_id": int(search_id)})
         except Exception as e:
             print(f"❌ CRITICAL DB ERROR (Get): {e}")
             return None
 
-    # ==================================================================
-    # 🧹 TEXT CLEANER & BATCH SAVE
     # ==================================================================
     
     @staticmethod
@@ -228,7 +222,6 @@ class MediaDB:
             files = await cursor.to_list(length=50)
             return files
         except Exception as e:
-            # Fallback to Regex
             safe_query = re.escape(query)
             regex = re.compile(safe_query, re.IGNORECASE)
             cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})

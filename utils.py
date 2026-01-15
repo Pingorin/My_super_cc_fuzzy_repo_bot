@@ -1,7 +1,6 @@
 import logging
 import math
 import aiohttp
-import os
 import re
 from pyrogram.types import InlineKeyboardButton
 from pyrogram import enums
@@ -36,7 +35,7 @@ def get_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-# ✅ 2. TELEGRAPH SETUP (For Site Mode)
+# ✅ 2. TELEGRAPH SETUP
 try:
     from telegraph import Telegraph
     telegraph_client = Telegraph()
@@ -54,14 +53,11 @@ def format_text_results(files, query, chat_id):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
-        
-        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id) for the link
         f_chat_id = chat_id
         
         # Link directs to the bot with the specific Group ID
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         
-        # HTML Link formatting for cleaner look
         text += f"{i}. 📂 <a href='{link}'>{f_name}</a> [{f_size}]\n\n"
         
     return text
@@ -79,8 +75,6 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
-
-        # ⚠️ CRITICAL FIX: Always use the Group ID (chat_id)
         f_chat_id = chat_id
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
@@ -130,7 +124,6 @@ async def post_to_telegraph(files, query, chat_id):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
-        
         f_chat_id = chat_id
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
@@ -175,11 +168,12 @@ def get_pagination_row(search_id, current_offset, limit, total_count):
 
     return buttons
 
-# ✅ 5. BUTTON PARSER (Updated for Button Mode & Pagination)
-def btn_parser(files, chat_id, search_id, offset=0, limit=10):
+# ✅ 5. BUTTON PARSER (FIXED ARGUMENTS)
+def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None):
     """
     Generates buttons for Inline Result Mode with DB-Based Pagination.
     param search_id: Integer ID obtained from DB Sequence.
+    param query: Optional string for highlighting (passed only if needed)
     """
     # Slice the files based on offset and limit
     current_files = files[offset : offset + limit]
@@ -191,13 +185,23 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10):
         link_id = file.get('link_id')
         
         f_chat_id = chat_id
-        # Note: We removed the caption check logic here because we don't pass the query text string anymore.
-        # This keeps the button parsing simple and error-free.
+        caption = file.get('caption')
+
         display_name = f_name
+        # Simple caption logic to highlight query (only if query is provided)
+        if query and isinstance(query, str) and caption:
+            q = query.lower()
+            n = f_name.lower()
+            c = caption.lower()
+            if q not in n and q in c:
+                clean_cap = caption.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
+                if len(clean_cap) > 60: clean_cap = clean_cap[:57] + "..."
+                display_name = clean_cap
 
         btn_text = f"📂 {display_name} [{f_size}]"
         
         if link_id is not None:
+            # Using temp.U_NAME which works fine according to you
             url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             

@@ -21,7 +21,6 @@ class MediaDB:
         self.temp_searches = self.db.temp_searches
 
     async def ensure_indexes(self):
-        # Indexes create karte waqt error a sakta hai agar permission issue ho
         try:
             await self.search_col.create_index("file_name")
             await self.search_col.create_index("caption")
@@ -47,7 +46,7 @@ class MediaDB:
             return None
 
     # ==================================================================
-    # 🔍 DEBUGGING SAVE FUNCTION
+    # 🔍 FIXED SAVE FUNCTION (Overwrites if ID exists)
     # ==================================================================
     async def save_search_query(self, query, user_id):
         try:
@@ -58,20 +57,22 @@ class MediaDB:
                 print("❌ Failed to generate Search ID (Sequence Error)")
                 return None
 
-            # 2. Save to Temp Collection
-            await self.temp_searches.insert_one({
-                "_id": int(search_id),
-                "query": query,
-                "user_id": int(user_id),
-                "created_at": datetime.datetime.utcnow()
-            })
+            # 2. Upsert (Update if exists, Insert if new)
+            # This fixes the E11000 Duplicate Key Error
+            await self.temp_searches.update_one(
+                {"_id": int(search_id)},  # Filter by ID
+                {"$set": {                # Set new data
+                    "query": query,
+                    "user_id": int(user_id),
+                    "created_at": datetime.datetime.utcnow()
+                }},
+                upsert=True               # ✅ Key Fix: Create if missing, Update if exists
+            )
             
-            # ✅ SUCCESS LOG
             print(f"✅ Saved Query: ID={search_id} | Text='{query}'")
             return int(search_id)
 
         except Exception as e:
-            # ❌ ERROR LOG
             print(f"❌ CRITICAL DB ERROR (Save): {e}")
             return None
 
@@ -79,7 +80,7 @@ class MediaDB:
         try:
             doc = await self.temp_searches.find_one({"_id": int(search_id)})
             if doc:
-                print(f"✅ Found Query for ID {search_id}: '{doc['query']}'")
+                # print(f"✅ Found Query for ID {search_id}: '{doc['query']}'")
                 return doc['query']
             else:
                 print(f"⚠️ Query NOT FOUND for ID {search_id}")
@@ -88,7 +89,9 @@ class MediaDB:
             print(f"❌ CRITICAL DB ERROR (Get): {e}")
             return None
 
-    # ... (Baaki saare functions same rakhein: clean_text, save_batch, etc.) ...
+    # ==================================================================
+    # 🧹 TEXT CLEANER & BATCH SAVE
+    # ==================================================================
     
     @staticmethod
     def clean_text(text):
@@ -225,6 +228,7 @@ class MediaDB:
             files = await cursor.to_list(length=50)
             return files
         except Exception as e:
+            # Fallback to Regex
             safe_query = re.escape(query)
             regex = re.compile(safe_query, re.IGNORECASE)
             cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})

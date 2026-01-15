@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 REACTIONS = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🎉", "🤩"]
 DELETE_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg" 
 
-# ✅ HELPER: Auto-Delete Logic
 async def auto_delete_task(bot_message, user_message, delay, show_thanks, query="files"):
     if delay <= 0: return 
     await asyncio.sleep(delay)
@@ -31,7 +30,7 @@ async def auto_delete_task(bot_message, user_message, delay, show_thanks, query=
     except: pass
 
 # ==============================================================================
-# 1. MAIN SEARCH HANDLER (Optimized with asyncio.gather)
+# 1. MAIN SEARCH HANDLER
 # ==============================================================================
 @Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index", "set_shortner", "settings", "connect", "delreq"]))
 async def auto_filter(client, message):
@@ -48,7 +47,6 @@ async def auto_filter(client, message):
 
         start_time = time.time()
         
-        # ⚡ OPTIMIZATION: Fetch Settings & Search in Parallel
         task_files = Media.get_search_results(query)
         task_settings = db.get_group_settings(message.chat.id)
         
@@ -56,11 +54,9 @@ async def auto_filter(client, message):
         
         if not files: return
 
-        # Background Stats Update
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'req'))
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'suc'))
 
-        # Settings Logic
         mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
         auto_react = group_settings.get('auto_reaction', False)
@@ -72,8 +68,8 @@ async def auto_filter(client, message):
             try: await message.react(random.choice(REACTIONS))
             except: pass 
 
-        # ✅ SAVE QUERY & GET ID
-        search_id = await Media.save_search_query(query, message.from_user.id)
+        # ✅ SAVE FILES TO CACHE (Pass files list)
+        search_id = await Media.save_search_query(query, message.from_user.id, files)
         if not search_id: search_id = 0
 
         if mode == 'hybrid':
@@ -84,7 +80,6 @@ async def auto_filter(client, message):
         sent_msg = None 
         time_taken = round(time.time() - start_time, 2)
         
-        # Buttons Prep
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         
@@ -94,7 +89,6 @@ async def auto_filter(client, message):
             
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        # --- MODE A: BUTTON ---
         if mode == 'button':
             buttons = btn_parser(files, message.chat.id, search_id, offset, limit, query)
             if howto_btn: buttons.append(howto_btn)
@@ -103,7 +97,6 @@ async def auto_filter(client, message):
             msg_text = f"⚡ **Results for:** `{query}`\nfound {len(files)} files."
             sent_msg = await message.reply_text(text=msg_text, reply_markup=InlineKeyboardMarkup(buttons))
 
-        # --- MODE B/C: TEXT & DETAILED ---
         elif mode in ['text', 'detailed']:
             page_files = files[offset : offset + limit]
             
@@ -119,7 +112,6 @@ async def auto_filter(client, message):
             
             sent_msg = await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
 
-        # --- MODE D: SITE ---
         elif mode == 'site':
             web_id = await Media.save_search_results(query, files, message.chat.id)
             base_url = SITE_URL.rstrip('/') if (SITE_URL and SITE_URL.startswith("http")) else "http://127.0.0.1:8080"
@@ -135,7 +127,6 @@ async def auto_filter(client, message):
             
             sent_msg = await message.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
 
-        # --- MODE E: CARD ---
         elif mode == 'card':
             file = files[0]
             text = format_card_result(file, 0, total_results)
@@ -155,7 +146,6 @@ async def auto_filter(client, message):
 
             sent_msg = await message.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
 
-        # Auto Delete
         if sent_msg and auto_del_time > 0:
             if user_del: 
                 try: await message.delete()
@@ -167,33 +157,36 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# 2. FAST PAGINATION HANDLER (Optimized with asyncio.gather)
+# 2. FAST PAGINATION HANDLER (Uses Cached Files)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^page_"))
 async def handle_pagination(client, query):
     try:
         data = query.data.split("_")
         if len(data) != 3: return await query.answer("❌ Invalid Data", show_alert=True)
-        
-        # Handle Old Buttons
         if data[1] == "None": return await query.answer("⚠️ Old Button. Search Again.", show_alert=True)
         
         search_id = int(data[1])
         offset = int(data[2])
         
-        # 1. Fetch Query
-        req = await Media.get_search_query(search_id)
-        if not req: return await query.answer("⚠️ Search expired.", show_alert=True)
+        # 1. Fetch Cached Data (Includes Query AND Files)
+        cached_data = await Media.get_search_query(search_id)
+        if not cached_data: return await query.answer("⚠️ Search expired.", show_alert=True)
+        
+        # ⚡ USE CACHED FILES IF AVAILABLE
+        query_text = cached_data.get('query')
+        files = cached_data.get('files')
+        
+        # Fallback: If cache has no files (old data), re-search
+        if not files:
+            files = await Media.get_search_results(query_text)
             
-        # ⚡ OPTIMIZATION: Files + Settings Parallel Fetch
-        task_files = Media.get_search_results(req)
-        task_settings = db.get_group_settings(query.message.chat.id)
-        
-        files, group_settings = await asyncio.gather(task_files, task_settings)
-        
         if not files: return await query.answer("❌ No files.", show_alert=True)
             
         total_results = len(files)
+        
+        # Settings
+        group_settings = await db.get_group_settings(query.message.chat.id)
         mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
 
@@ -205,7 +198,7 @@ async def handle_pagination(client, query):
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
         if mode == 'button':
-            buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, req)
+            buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, query_text)
             if howto_btn: buttons.append(howto_btn)
             buttons.append(free_prem_btn)
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
@@ -213,8 +206,8 @@ async def handle_pagination(client, query):
         elif mode in ['text', 'detailed']:
             page_files = files[offset : offset + limit]
             
-            if mode == 'text': text = format_text_results(page_files, req, query.message.chat.id)
-            else: text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
+            if mode == 'text': text = format_text_results(page_files, query_text, query.message.chat.id)
+            else: text = format_detailed_results(page_files, query_text, query.message.chat.id, time_taken=0)
             
             btn = []
             if howto_btn: btn.append(howto_btn)
@@ -237,7 +230,7 @@ async def handle_pagination(client, query):
         await query.answer(f"❌ Error: {e}", show_alert=True)
 
 # ==============================================================================
-# 3. CARD MODE HANDLERS (Missing Code Restored)
+# 3. CARD MODE HANDLERS (Uses Cached Files)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^card_next_"))
@@ -248,10 +241,13 @@ async def card_next_nav(client, query):
         search_id = int(data[2])
         current_index = int(data[3])
 
-        req = await Media.get_search_query(search_id)
-        if not req: return await query.answer("⚠️ Search expired.", show_alert=True)
+        cached_data = await Media.get_search_query(search_id)
+        if not cached_data: return await query.answer("⚠️ Search expired.", show_alert=True)
 
-        files = await Media.get_search_results(req)
+        files = cached_data.get('files')
+        if not files:
+            files = await Media.get_search_results(cached_data.get('query'))
+            
         if not files: return await query.answer("No files found.", show_alert=True)
         
         total = len(files)
@@ -292,10 +288,13 @@ async def card_prev_nav(client, query):
         search_id = int(data[2])
         current_index = int(data[3])
 
-        req = await Media.get_search_query(search_id)
-        if not req: return await query.answer("⚠️ Search expired.", show_alert=True)
+        cached_data = await Media.get_search_query(search_id)
+        if not cached_data: return await query.answer("⚠️ Search expired.", show_alert=True)
 
-        files = await Media.get_search_results(req)
+        files = cached_data.get('files')
+        if not files:
+            files = await Media.get_search_results(cached_data.get('query'))
+
         if not files: return await query.answer("No files found.", show_alert=True)
         
         total = len(files)

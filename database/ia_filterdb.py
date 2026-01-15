@@ -4,7 +4,7 @@ import uuid
 import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError
-from pymongo import ReturnDocument # ✅ Added this import
+from pymongo import ReturnDocument
 from info import DATABASE_URI, DATABASE_NAME
 
 logger = logging.getLogger(__name__)
@@ -21,30 +21,43 @@ class MediaDB:
         self.temp_searches = self.db.temp_searches
 
     async def ensure_indexes(self):
-        await self.search_col.create_index("file_name")
-        await self.search_col.create_index("caption")
-        await self.search_col.create_index("link_id")
-        await self.data_col.create_index("file_unique_id", unique=True)
-        await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
-        await self.temp_searches.create_index("created_at", expireAfterSeconds=172800)
+        # Indexes create karte waqt error a sakta hai agar permission issue ho
+        try:
+            await self.search_col.create_index("file_name")
+            await self.search_col.create_index("caption")
+            await self.search_col.create_index("link_id")
+            await self.data_col.create_index("file_unique_id", unique=True)
+            await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
+            await self.temp_searches.create_index("created_at", expireAfterSeconds=172800)
+            print("✅ Database Indexes Created Successfully")
+        except Exception as e:
+            print(f"❌ Error Creating Indexes: {e}")
 
     async def get_next_sequence_value(self, sequence_name, increment=1):
-        """
-        Atomically increments the counter and returns the new integer.
-        """
-        doc = await self.counters.find_one_and_update(
-            {"_id": sequence_name},
-            {"$inc": {"sequence_value": increment}}, 
-            upsert=True,
-            return_document=ReturnDocument.AFTER # ✅ Explicitly using AFTER
-        )
-        return doc["sequence_value"]
+        try:
+            doc = await self.counters.find_one_and_update(
+                {"_id": sequence_name},
+                {"$inc": {"sequence_value": increment}}, 
+                upsert=True,
+                return_document=ReturnDocument.AFTER 
+            )
+            return doc["sequence_value"]
+        except Exception as e:
+            print(f"❌ Error Getting Sequence ID: {e}")
+            return None
 
+    # ==================================================================
+    # 🔍 DEBUGGING SAVE FUNCTION
+    # ==================================================================
     async def save_search_query(self, query, user_id):
         try:
             # 1. Get unique Auto-ID
             search_id = await self.get_next_sequence_value("search_id_counter", increment=1)
             
+            if not search_id:
+                print("❌ Failed to generate Search ID (Sequence Error)")
+                return None
+
             # 2. Save to Temp Collection
             await self.temp_searches.insert_one({
                 "_id": int(search_id),
@@ -53,21 +66,29 @@ class MediaDB:
                 "created_at": datetime.datetime.utcnow()
             })
             
+            # ✅ SUCCESS LOG
+            print(f"✅ Saved Query: ID={search_id} | Text='{query}'")
             return int(search_id)
+
         except Exception as e:
-            logger.error(f"Error saving search query: {e}")
-            return None # If DB fails, this returns None
+            # ❌ ERROR LOG
+            print(f"❌ CRITICAL DB ERROR (Save): {e}")
+            return None
 
     async def get_search_query(self, search_id):
         try:
             doc = await self.temp_searches.find_one({"_id": int(search_id)})
-            return doc['query'] if doc else None
+            if doc:
+                print(f"✅ Found Query for ID {search_id}: '{doc['query']}'")
+                return doc['query']
+            else:
+                print(f"⚠️ Query NOT FOUND for ID {search_id}")
+                return None
         except Exception as e:
-            logger.error(f"Error fetching search ID {search_id}: {e}")
+            print(f"❌ CRITICAL DB ERROR (Get): {e}")
             return None
 
-    # ... (Keep the clean_text, save_batch, get_file_details, get_search_results methods as they are) ...
-    # Copy paste the rest of your existing functions here if you are replacing the whole file.
+    # ... (Baaki saare functions same rakhein: clean_text, save_batch, etc.) ...
     
     @staticmethod
     def clean_text(text):
@@ -99,6 +120,8 @@ class MediaDB:
             
         count = len(new_items)
         end_sequence = await self.get_next_sequence_value("file_id_counter", increment=count)
+        if not end_sequence: return 0, 0
+        
         start_sequence = end_sequence - count + 1
         
         data_docs = []

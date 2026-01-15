@@ -13,6 +13,7 @@ from utils import temp, btn_parser, format_text_results, format_detailed_results
 
 logger = logging.getLogger(__name__)
 
+# ✅ CONSTANTS
 REACTIONS = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🎉", "🤩"]
 DELETE_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg" 
 
@@ -43,7 +44,20 @@ async def auto_filter(client, message):
 
         start_time = time.time()
         
-        group_settings = await db.get_group_settings(message.chat.id)
+        # ⚡ OPTIMIZATION: Fetch Settings & Search in Parallel
+        # Dono kaam ek saath honge
+        files_task = Media.get_search_results(query)
+        settings_task = db.get_group_settings(message.chat.id)
+        
+        files, group_settings = await asyncio.gather(files_task, settings_task)
+        
+        if not files: return
+        
+        # Stats update background me daal do (Don't wait for it)
+        asyncio.create_task(db.update_daily_stats(message.chat.id, 'req'))
+        asyncio.create_task(db.update_daily_stats(message.chat.id, 'suc'))
+
+        # Settings Parse
         mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
         auto_react = group_settings.get('auto_reaction', False)
@@ -51,22 +65,13 @@ async def auto_filter(client, message):
         user_del = group_settings.get('auto_delete_user_msg', False)
         del_thanks = group_settings.get('delete_thanks_msg', True)
 
-        await db.update_daily_stats(message.chat.id, 'req')
-
-        files = await Media.get_search_results(query)
-        if not files: return
-        
-        await db.update_daily_stats(message.chat.id, 'suc')
         if auto_react:
             try: await message.react(random.choice(REACTIONS))
             except: pass 
 
-        # ✅ SAVE QUERY & GET ID
+        # Save Query & Get ID
         search_id = await Media.save_search_query(query, message.from_user.id)
-        
-        # ⚠️ CRITICAL FIX: If DB failed to return ID, use 0 to prevent crash
-        if not search_id:
-            search_id = 0
+        if not search_id: search_id = 0
 
         if mode == 'hybrid':
             mode = 'button' if len(files) <= limit else 'text'
@@ -152,27 +157,33 @@ async def auto_filter(client, message):
         logger.error(f"Search Error: {e}")
         traceback.print_exc()
 
+# ==============================================================================
+# 2. FAST PAGINATION HANDLER (AsyncIO Gather)
+# ==============================================================================
 @Client.on_callback_query(filters.regex(r"^page_"))
 async def handle_pagination(client, query):
     try:
         data = query.data.split("_")
         if len(data) != 3: return await query.answer("❌ Invalid Data", show_alert=True)
-            
-        # ⚠️ Check if ID is 'None' string before converting (Old messages)
-        if data[1] == "None":
-             return await query.answer("⚠️ Old Button. Please Search Again.", show_alert=True)
+        if data[1] == "None": return await query.answer("⚠️ Old Button. Search Again.", show_alert=True)
         
         search_id = int(data[1])
         offset = int(data[2])
         
+        # 1. Fetch Query Name First (Fast)
         req = await Media.get_search_query(search_id)
         if not req: return await query.answer("⚠️ Search expired.", show_alert=True)
             
-        files = await Media.get_search_results(req)
+        # ⚡ OPTIMIZATION: Fetch Files & Settings TOGETHER
+        # Isse speed badh jayegi
+        task_files = Media.get_search_results(req)
+        task_settings = db.get_group_settings(query.message.chat.id)
+        
+        files, group_settings = await asyncio.gather(task_files, task_settings)
+        
         if not files: return await query.answer("❌ No files.", show_alert=True)
             
         total_results = len(files)
-        group_settings = await db.get_group_settings(query.message.chat.id)
         mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
 
@@ -207,11 +218,7 @@ async def handle_pagination(client, query):
         traceback.print_exc()
         await query.answer(f"❌ Error: {e}", show_alert=True)
 
-# ... (Keep Card Mode Handlers card_next_ / card_prev_ / pages as they were) ...
-# Ensure to verify they also use int(search_id) correctly
-# Since you have the full file in previous message, ensure card mode handlers are present.
-# Below I am attaching the missing Card Mode handlers just in case.
-
+# ... (Card Mode handlers same as before) ...
 @Client.on_callback_query(filters.regex(r"^card_next_"))
 async def card_next_nav(client, query):
     try:

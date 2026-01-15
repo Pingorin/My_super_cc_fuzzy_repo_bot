@@ -18,6 +18,7 @@ except: AUTH_CHANNEL_4 = None
 
 logger = logging.getLogger(__name__)
 
+# ✅ TEMP CLASS (Isi file me define hai, kahin aur se import mat karna)
 class temp(object):
     U_NAME = None
     B_NAME = None
@@ -172,8 +173,6 @@ def get_pagination_row(search_id, current_offset, limit, total_count):
 def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None):
     """
     Generates buttons for Inline Result Mode with DB-Based Pagination.
-    param search_id: Integer ID obtained from DB Sequence.
-    param query: Optional string for highlighting (passed only if needed)
     """
     # Slice the files based on offset and limit
     current_files = files[offset : offset + limit]
@@ -188,7 +187,7 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None):
         caption = file.get('caption')
 
         display_name = f_name
-        # Simple caption logic to highlight query (only if query is provided)
+        # Simple caption logic to highlight query
         if query and isinstance(query, str) and caption:
             q = query.lower()
             n = f_name.lower()
@@ -201,9 +200,10 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None):
         btn_text = f"📂 {display_name} [{f_size}]"
         
         if link_id is not None:
-            # Using temp.U_NAME which works fine according to you
-            url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
-            buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
+            # ✅ FIX: Use temp.U_NAME directly (No circular import)
+            if temp.U_NAME:
+                url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
+                buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     # --- ADD PAGINATION ROW ---
     # Pass search_id (int) to the pagination helper

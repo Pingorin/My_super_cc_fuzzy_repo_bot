@@ -46,30 +46,24 @@ class MediaDB:
             return None
 
     # ==================================================================
-    # ⚡ CACHING SAVE FUNCTION (Saves Query + Files)
+    # ⚡ CACHING SAVE FUNCTION
     # ==================================================================
     async def save_search_query(self, query, user_id, files):
         try:
-            # 1. Get unique Auto-ID
             search_id = await self.get_next_sequence_value("search_id_counter", increment=1)
-            
-            if not search_id:
-                return None
+            if not search_id: return None
 
-            # 2. Save Query AND Files List (Result Caching)
             await self.temp_searches.update_one(
                 {"_id": int(search_id)},
                 {"$set": {
                     "query": query,
                     "user_id": int(user_id),
-                    "files": files, # ✅ Saving the results directly!
+                    "files": files, # Saves files list with 'file_type' inside
                     "created_at": datetime.datetime.utcnow()
                 }},
                 upsert=True
             )
-            
             return int(search_id)
-
         except Exception as e:
             print(f"❌ CRITICAL DB ERROR (Save): {e}")
             return None
@@ -133,17 +127,13 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
 
-            # ✅ DETECT FILE TYPE (Video vs Document)
+            # ✅ STRICT TYPE DETECTION (Video vs Document)
             file_type = "document" # Default
-            try:
-                # Pyrogram media types: Message.video, Message.document
-                if message.video:
-                    file_type = "video"
-                elif message.document:
-                    # Check mime type if available
-                    if message.document.mime_type and "video" in message.document.mime_type:
-                        file_type = "video"
-            except: pass
+            if message.video:
+                file_type = "video"
+            elif message.document:
+                file_type = "document"
+            # Note: Audio/Photos are ignored or treated as per handler, assuming Video/Doc context here.
 
             data_docs.append({
                 '_id': current_id,
@@ -151,7 +141,7 @@ class MediaDB:
                 'chat_id': message.chat.id,
                 'file_id': media.file_id,
                 'file_unique_id': media.file_unique_id,
-                'file_type': file_type # Store in Data Col
+                'file_type': file_type # Saved for reference
             })
             
             search_docs.append({
@@ -160,12 +150,11 @@ class MediaDB:
                 'caption': caption,
                 'link_id': current_id,
                 'chat_id': message.chat.id,
-                'file_type': file_type # ✅ Store in Search Col for filtering
+                'file_type': file_type # ✅ Saved for Filtering
             })
             current_id += 1
 
         saved_count = 0
-        
         if data_docs:
             try:
                 await self.data_col.insert_many(data_docs, ordered=False)
@@ -247,7 +236,7 @@ class MediaDB:
                 "file_size": file['file_size'],
                 "link_id": file['link_id'],
                 "file_chat_id": file.get('chat_id'),
-                "file_type": file.get('file_type', 'document') # ✅ Cache type
+                "file_type": file.get('file_type', 'document') # Cache Type
             })
         await self.search_cache.insert_one({
             "_id": unique_id,

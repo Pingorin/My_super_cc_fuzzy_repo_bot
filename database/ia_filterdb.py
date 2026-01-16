@@ -50,25 +50,20 @@ class MediaDB:
     # ==================================================================
     async def save_search_query(self, query, user_id, files):
         try:
-            # 1. Get unique Auto-ID
             search_id = await self.get_next_sequence_value("search_id_counter", increment=1)
             
-            if not search_id:
-                return None
+            if not search_id: return None
 
-            # 2. Save Query AND Files List (Result Caching)
-            # MongoDB Document Limit is 16MB, storing 50-100 files is very safe.
             await self.temp_searches.update_one(
                 {"_id": int(search_id)},
                 {"$set": {
                     "query": query,
                     "user_id": int(user_id),
-                    "files": files, # ✅ Saving the results directly!
+                    "files": files,
                     "created_at": datetime.datetime.utcnow()
                 }},
                 upsert=True
             )
-            
             return int(search_id)
 
         except Exception as e:
@@ -76,9 +71,6 @@ class MediaDB:
             return None
 
     async def get_search_query(self, search_id):
-        """
-        Returns the entire document (Query + Cached Files).
-        """
         try:
             return await self.temp_searches.find_one({"_id": int(search_id)})
         except Exception as e:
@@ -137,12 +129,21 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
 
+            # ✅ Detect File Type (Video or Document)
+            # This is crucial for the new filter feature
+            file_type = "document" # Default
+            try:
+                if "Video" in str(type(media)):
+                    file_type = "video"
+            except: pass
+
             data_docs.append({
                 '_id': current_id,
                 'msg_id': message.id,
                 'chat_id': message.chat.id,
                 'file_id': media.file_id,
-                'file_unique_id': media.file_unique_id
+                'file_unique_id': media.file_unique_id,
+                'file_type': file_type # Saved in Data Col (Optional)
             })
             
             search_docs.append({
@@ -150,12 +151,12 @@ class MediaDB:
                 'file_size': media.file_size, 
                 'caption': caption,
                 'link_id': current_id,
-                'chat_id': message.chat.id
+                'chat_id': message.chat.id,
+                'file_type': file_type # ✅ Saved in Search Col for Filtering
             })
             current_id += 1
 
         saved_count = 0
-        failed_indices = []
         
         if data_docs:
             try:
@@ -163,23 +164,15 @@ class MediaDB:
                 saved_count = len(data_docs)
             except BulkWriteError as bwe:
                 saved_count = bwe.details['nInserted']
-                for error in bwe.details['writeErrors']:
-                    failed_indices.append(error['index'])
-                pre_duplicate_count += len(failed_indices)
             except Exception as e:
                 print(f"❌ Critical Error Saving FILES_DATA: {e}")
                 return 0, count + pre_duplicate_count
 
             if saved_count > 0:
-                valid_search_docs = []
-                for i, doc in enumerate(search_docs):
-                    if i not in failed_indices:
-                        valid_search_docs.append(doc)
-                if valid_search_docs:
-                    try:
-                        await self.search_col.insert_many(valid_search_docs, ordered=False)
-                    except Exception as e:
-                        print(f"⚠️ Search Index Error: {e}")
+                try:
+                    await self.search_col.insert_many(search_docs, ordered=False)
+                except Exception as e:
+                    print(f"⚠️ Search Index Error: {e}")
                 
         return saved_count, pre_duplicate_count
 
@@ -245,7 +238,8 @@ class MediaDB:
                 "file_name": file['file_name'],
                 "file_size": file['file_size'],
                 "link_id": file['link_id'],
-                "file_chat_id": file.get('chat_id') 
+                "file_chat_id": file.get('chat_id'),
+                "file_type": file.get('file_type', 'document') # ✅ Cache file type
             })
         await self.search_cache.insert_one({
             "_id": unique_id,

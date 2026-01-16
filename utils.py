@@ -23,10 +23,11 @@ class temp(object):
     B_LINK = None
     ME = None
 
-# ✅ 1. FILTER FUNCTION
+# ✅ 1. FILTER FUNCTION (Video vs Document)
 def filter_by_type(files, f_type):
     """
     Filters files by their database 'file_type'.
+    f_type: "Video" or "Document"
     """
     filtered = []
     for f in files:
@@ -57,6 +58,8 @@ try:
 except Exception as e:
     logger.warning(f"Telegraph library not found: {e}")
     telegraph_client = None
+
+# ✅ 3. RESULT MODE FORMATTERS
 
 def format_text_results(files, query, chat_id):
     text = f"👻 **Results for:** `{query}`\n\n"
@@ -105,9 +108,16 @@ def format_card_result(file, current_index, total_count):
     f_name = file['file_name']
     f_size = get_size(file['file_size'])
     f_type = "Document"
-    if f_name.endswith(('.mkv', '.mp4', '.avi', '.webm', '.mov')): f_type = "Video"
-    elif f_name.endswith(('.mp3', '.flac', '.wav', '.m4a')): f_type = "Audio"
-    elif f_name.endswith(('.jpg', '.jpeg', '.png', '.webp')): f_type = "Photo"
+    # Attempt to use database type first
+    db_type = file.get('file_type', 'document')
+    if db_type == 'video':
+        f_type = "Video"
+    elif f_name.endswith(('.mkv', '.mp4', '.avi', '.webm', '.mov')): 
+        f_type = "Video"
+    elif f_name.endswith(('.mp3', '.flac', '.wav', '.m4a')): 
+        f_type = "Audio"
+    elif f_name.endswith(('.jpg', '.jpeg', '.png', '.webp')): 
+        f_type = "Photo"
 
     text = f"🎬 **{f_name}**\n\n"
     text += f"🗂️ **Type:** {f_type}\n"
@@ -132,7 +142,7 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. PAGINATION HELPER (Handles both Standard & Filtered)
+# ✅ 4. PAGINATION HELPER (Updated for Filter Support)
 def get_pagination_row(search_id, current_offset, limit, total_count, filter_type=None):
     buttons = []
     current_page = int(current_offset / limit) + 1
@@ -141,12 +151,10 @@ def get_pagination_row(search_id, current_offset, limit, total_count, filter_typ
     if total_pages <= 1:
         return []
 
-    # Determine callback format based on whether filtering is active
+    # Check if a filter is active to create correct callback
     if filter_type:
-        # e.g., filter_60_mode_video_10
         cb_prefix = f"filter_{search_id}_mode_{filter_type.lower()}"
     else:
-        # e.g., page_60_10
         cb_prefix = f"page_{search_id}"
 
     if current_offset >= limit:
@@ -187,7 +195,7 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, filter
                 url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
                 buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
-    # Add Pagination with Filter Awareness
+    # Add Pagination
     pagination = get_pagination_row(search_id, offset, limit, len(files), filter_type)
     if pagination:
         buttons.append(pagination)

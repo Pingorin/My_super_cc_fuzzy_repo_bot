@@ -23,15 +23,15 @@ class temp(object):
     B_LINK = None
     ME = None
 
-# ✅ 1. FILTER FUNCTION (Video vs Document)
+# ✅ 1. FILTER FUNCTION (STRICT CHECK)
 def filter_by_type(files, f_type):
     """
     Filters files by their database 'file_type'.
-    f_type: "Video" or "Document"
+    f_type: 'Video' or 'Document'
     """
     filtered = []
     for f in files:
-        # Default to 'document' if missing (legacy files)
+        # Default to 'document' if missing (for old files)
         db_type = f.get('file_type', 'document').lower()
         
         if f_type == "Video" and db_type == "video":
@@ -40,6 +40,22 @@ def filter_by_type(files, f_type):
             filtered.append(f)
             
     return filtered
+
+# ✅ 2. FILTER BUTTONS GENERATOR
+def get_filter_buttons(search_id, active_filter=None):
+    row = []
+    if active_filter == "video":
+        row.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
+        row.append(InlineKeyboardButton("All Media Types", callback_data=f"unfilter_{search_id}"))
+    elif active_filter == "document":
+        row.append(InlineKeyboardButton("Docs ✅", callback_data="ignore"))
+        row.append(InlineKeyboardButton("All Media Types", callback_data=f"unfilter_{search_id}"))
+    else:
+        # Default State: Show both options
+        row.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_mode_video_0"))
+        row.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_mode_document_0"))
+        
+    return row
 
 def get_size(size):
     if not size: return "0 B"
@@ -58,8 +74,6 @@ try:
 except Exception as e:
     logger.warning(f"Telegraph library not found: {e}")
     telegraph_client = None
-
-# ✅ 3. RESULT MODE FORMATTERS
 
 def format_text_results(files, query, chat_id):
     text = f"👻 **Results for:** `{query}`\n\n"
@@ -108,16 +122,9 @@ def format_card_result(file, current_index, total_count):
     f_name = file['file_name']
     f_size = get_size(file['file_size'])
     f_type = "Document"
-    # Attempt to use database type first
-    db_type = file.get('file_type', 'document')
-    if db_type == 'video':
-        f_type = "Video"
-    elif f_name.endswith(('.mkv', '.mp4', '.avi', '.webm', '.mov')): 
-        f_type = "Video"
-    elif f_name.endswith(('.mp3', '.flac', '.wav', '.m4a')): 
-        f_type = "Audio"
-    elif f_name.endswith(('.jpg', '.jpeg', '.png', '.webp')): 
-        f_type = "Photo"
+    if f_name.endswith(('.mkv', '.mp4', '.avi', '.webm', '.mov')): f_type = "Video"
+    elif f_name.endswith(('.mp3', '.flac', '.wav', '.m4a')): f_type = "Audio"
+    elif f_name.endswith(('.jpg', '.jpeg', '.png', '.webp')): f_type = "Photo"
 
     text = f"🎬 **{f_name}**\n\n"
     text += f"🗂️ **Type:** {f_type}\n"
@@ -142,7 +149,7 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. PAGINATION HELPER (Updated for Filter Support)
+# ✅ 4. PAGINATION HELPER (Updated)
 def get_pagination_row(search_id, current_offset, limit, total_count, filter_type=None):
     buttons = []
     current_page = int(current_offset / limit) + 1
@@ -151,7 +158,7 @@ def get_pagination_row(search_id, current_offset, limit, total_count, filter_typ
     if total_pages <= 1:
         return []
 
-    # Check if a filter is active to create correct callback
+    # Use 'filter_' callback if filtered, else 'page_'
     if filter_type:
         cb_prefix = f"filter_{search_id}_mode_{filter_type.lower()}"
     else:
@@ -167,7 +174,7 @@ def get_pagination_row(search_id, current_offset, limit, total_count, filter_typ
 
     return buttons
 
-# ✅ 5. BUTTON PARSER (Modified for Filter Pagination)
+# ✅ 5. BUTTON PARSER (Updated)
 def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, filter_type=None):
     current_files = files[offset : offset + limit]
     buttons = []
@@ -195,14 +202,13 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, filter
                 url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
                 buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
-    # Add Pagination
     pagination = get_pagination_row(search_id, offset, limit, len(files), filter_type)
     if pagination:
         buttons.append(pagination)
             
     return buttons
 
-# ... (Keep get_shortlink, check_fsub_status, etc. same as before) ...
+# ... (Keep get_shortlink, fsub status, etc. same as they were) ...
 async def get_shortlink(site, api, link):
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}

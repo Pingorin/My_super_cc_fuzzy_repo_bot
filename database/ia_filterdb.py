@@ -50,20 +50,24 @@ class MediaDB:
     # ==================================================================
     async def save_search_query(self, query, user_id, files):
         try:
+            # 1. Get unique Auto-ID
             search_id = await self.get_next_sequence_value("search_id_counter", increment=1)
             
-            if not search_id: return None
+            if not search_id:
+                return None
 
+            # 2. Save Query AND Files List (Result Caching)
             await self.temp_searches.update_one(
                 {"_id": int(search_id)},
                 {"$set": {
                     "query": query,
                     "user_id": int(user_id),
-                    "files": files,
+                    "files": files, # ✅ Saving the results directly!
                     "created_at": datetime.datetime.utcnow()
                 }},
                 upsert=True
             )
+            
             return int(search_id)
 
         except Exception as e:
@@ -129,12 +133,16 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
 
-            # ✅ Detect File Type (Video or Document)
-            # This is crucial for the new filter feature
+            # ✅ DETECT FILE TYPE (Video vs Document)
             file_type = "document" # Default
             try:
-                if "Video" in str(type(media)):
+                # Pyrogram media types: Message.video, Message.document
+                if message.video:
                     file_type = "video"
+                elif message.document:
+                    # Check mime type if available
+                    if message.document.mime_type and "video" in message.document.mime_type:
+                        file_type = "video"
             except: pass
 
             data_docs.append({
@@ -143,7 +151,7 @@ class MediaDB:
                 'chat_id': message.chat.id,
                 'file_id': media.file_id,
                 'file_unique_id': media.file_unique_id,
-                'file_type': file_type # Saved in Data Col (Optional)
+                'file_type': file_type # Store in Data Col
             })
             
             search_docs.append({
@@ -152,7 +160,7 @@ class MediaDB:
                 'caption': caption,
                 'link_id': current_id,
                 'chat_id': message.chat.id,
-                'file_type': file_type # ✅ Saved in Search Col for Filtering
+                'file_type': file_type # ✅ Store in Search Col for filtering
             })
             current_id += 1
 
@@ -239,7 +247,7 @@ class MediaDB:
                 "file_size": file['file_size'],
                 "link_id": file['link_id'],
                 "file_chat_id": file.get('chat_id'),
-                "file_type": file.get('file_type', 'document') # ✅ Cache file type
+                "file_type": file.get('file_type', 'document') # ✅ Cache type
             })
         await self.search_cache.insert_one({
             "_id": unique_id,

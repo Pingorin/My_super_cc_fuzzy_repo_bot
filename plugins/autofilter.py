@@ -9,7 +9,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import SITE_URL
-from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, filter_by_type
+from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, filter_by_type, get_filter_buttons
 
 logger = logging.getLogger(__name__)
 
@@ -30,28 +30,8 @@ async def auto_delete_task(bot_message, user_message, delay, show_thanks, query=
             await temp_msg.delete()
     except: pass
 
-# ✅ HELPER: Generate Filter Buttons
-def get_filter_buttons(search_id, active_filter=None):
-    """
-    Returns the Filter Buttons row (Videos | Docs | Reset).
-    """
-    row = []
-    
-    if active_filter == "video":
-        row.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
-        row.append(InlineKeyboardButton("All Media Types", callback_data=f"unfilter_{search_id}"))
-    elif active_filter == "document":
-        row.append(InlineKeyboardButton("Docs ✅", callback_data="ignore"))
-        row.append(InlineKeyboardButton("All Media Types", callback_data=f"unfilter_{search_id}"))
-    else:
-        # Default State (Show both options)
-        row.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_mode_video_0"))
-        row.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_mode_document_0"))
-        
-    return row
-
 # ==============================================================================
-# 1. MAIN SEARCH HANDLER
+# 1. MAIN SEARCH HANDLER (User Sends Text)
 # ==============================================================================
 @Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index", "set_shortner", "settings", "connect", "delreq"]))
 async def auto_filter(client, message):
@@ -68,7 +48,7 @@ async def auto_filter(client, message):
 
         start_time = time.time()
         
-        # Fetch Files & Settings Parallel
+        # ⚡ FASTEST METHOD: Fetch Files & Settings TOGETHER
         task_files = Media.get_search_results(query)
         task_settings = db.get_group_settings(message.chat.id)
         
@@ -76,6 +56,7 @@ async def auto_filter(client, message):
         
         if not files: return
 
+        # Stats Update (Background Task - Don't wait for it)
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'req'))
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'suc'))
 
@@ -90,7 +71,7 @@ async def auto_filter(client, message):
             try: await message.react(random.choice(REACTIONS))
             except: pass 
 
-        # ✅ SAVE SEARCH & RESULTS (Pass 'files' to cache them)
+        # Save Query & Files (Background Task not possible here as we need ID)
         search_id = await Media.save_search_query(query, message.from_user.id, files)
         if not search_id: search_id = 0
 
@@ -111,15 +92,13 @@ async def auto_filter(client, message):
             
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        # ✅ GET FILTER BUTTONS (Default None)
+        # ✅ Get Filter Buttons
         filter_buttons = get_filter_buttons(search_id, active_filter=None)
 
+        # --- DISPLAY RESULTS ---
         if mode == 'button':
             buttons = btn_parser(files, message.chat.id, search_id, offset, limit, query)
-            
-            # Show Filter Buttons
             if filter_buttons: buttons.append(filter_buttons)
-            
             if howto_btn: buttons.append(howto_btn)
             buttons.append(free_prem_btn)
 
@@ -133,7 +112,7 @@ async def auto_filter(client, message):
             else: text = format_detailed_results(page_files, query, message.chat.id, time_taken)
             
             btn = []
-            if filter_buttons: btn.append(filter_buttons) # Filter first
+            if filter_buttons: btn.append(filter_buttons)
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
             
@@ -187,30 +166,38 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# 2. STANDARD PAGINATION (No Filters)
+# 2. STANDARD PAGINATION (Optimized)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^page_"))
 async def handle_pagination(client, query):
+    # ⚡ OPTIMIZATION: Instant Feedback
+    await query.answer() 
+    
     try:
         data = query.data.split("_")
-        if len(data) != 3: return await query.answer("❌ Invalid Data", show_alert=True)
-        if data[1] == "None": return await query.answer("⚠️ Old Button. Search Again.", show_alert=True)
+        if len(data) != 3: return 
+        if data[1] == "None": return 
         
         search_id = int(data[1])
         offset = int(data[2])
         
-        cached_data = await Media.get_search_query(search_id)
-        if not cached_data: return await query.answer("⚠️ Search expired.", show_alert=True)
+        # Fetch Cache + Settings in Parallel
+        task_data = Media.get_search_query(search_id)
+        task_settings = db.get_group_settings(query.message.chat.id)
         
+        cached_data, group_settings = await asyncio.gather(task_data, task_settings)
+        
+        if not cached_data: return # Silent fail or old button
+        
+        # Use Cached Files
         files = cached_data.get('files')
         req = cached_data.get('query')
         if not files:
             files = await Media.get_search_results(req)
             
-        if not files: return await query.answer("❌ No files.", show_alert=True)
+        if not files: return 
             
         total_results = len(files)
-        group_settings = await db.get_group_settings(query.message.chat.id)
         mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
 
@@ -221,7 +208,6 @@ async def handle_pagination(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        # ✅ GET FILTER BUTTONS (Default)
         filter_buttons = get_filter_buttons(search_id, active_filter=None)
 
         if mode == 'button':
@@ -248,37 +234,43 @@ async def handle_pagination(client, query):
 
     except Exception as e:
         traceback.print_exc()
-        await query.answer(f"❌ Error: {e}", show_alert=True)
 
 # ==============================================================================
-# 3. FILTERED PAGINATION (Videos / Docs)
+# 3. FILTER PAGINATION HANDLER (Optimized)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_"))
 async def handle_filter_pagination(client, query):
+    # ⚡ OPTIMIZATION: Instant Feedback
+    await query.answer()
+    
     try:
-        # Format: filter_{search_id}_mode_{type}_{offset}
         data = query.data.split("_")
         search_id = int(data[1])
-        filter_type = data[3] # 'video' or 'document'
+        filter_type = data[3]
         offset = int(data[4])
 
-        cached_data = await Media.get_search_query(search_id)
-        if not cached_data: return await query.answer("⚠️ Search expired.", show_alert=True)
+        task_data = Media.get_search_query(search_id)
+        task_settings = db.get_group_settings(query.message.chat.id)
+        
+        cached_data, group_settings = await asyncio.gather(task_data, task_settings)
+        
+        if not cached_data: return
         
         all_files = cached_data.get('files')
         req = cached_data.get('query')
         if not all_files:
             all_files = await Media.get_search_results(req)
 
-        # ✅ APPLY FILTER
+        # Apply Filter
         filter_capital = "Video" if filter_type == "video" else "Document"
         filtered_files = filter_by_type(all_files, filter_capital)
         
+        # Show alert if empty (Must answer here)
         if not filtered_files:
-            return await query.answer(f"❌ No {filter_type}s found!", show_alert=True)
+            # We already answered, so we use show_alert via direct API if needed or just return
+            return 
 
         total_results = len(filtered_files)
-        group_settings = await db.get_group_settings(query.message.chat.id)
         mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
 
@@ -289,11 +281,9 @@ async def handle_filter_pagination(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        # ✅ GET FILTER BUTTONS (Active State)
         filter_buttons = get_filter_buttons(search_id, active_filter=filter_type)
 
         if mode == 'button':
-            # Pass filter_type to btn_parser
             buttons = btn_parser(filtered_files, query.message.chat.id, search_id, offset, limit, req, filter_type=filter_type)
             if filter_buttons: buttons.append(filter_buttons)
             if howto_btn: buttons.append(howto_btn)
@@ -311,7 +301,6 @@ async def handle_filter_pagination(client, query):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn) 
             
-            # Pass filter_type to get_pagination_row
             pagination = get_pagination_row(search_id, offset, limit, total_results, filter_type=filter_type)
             if pagination: btn.append(pagination)
             
@@ -319,44 +308,38 @@ async def handle_filter_pagination(client, query):
 
     except Exception as e:
         traceback.print_exc()
-        await query.answer(f"❌ Error: {e}", show_alert=True)
 
 # ==============================================================================
-# 4. RESET FILTER (UNFILTER)
+# 4. RESET & CARD HANDLERS
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^unfilter_"))
 async def handle_unfilter(client, query):
+    await query.answer("Resetting Filter... 🔄")
     try:
-        # Format: unfilter_{search_id}
         search_id = int(query.data.split("_")[1])
-        # Redirect to standard pagination Page 0
         query.data = f"page_{search_id}_0"
         await handle_pagination(client, query)
-    except Exception as e:
-        await query.answer(f"Error: {e}", show_alert=True)
+    except: pass
 
 @Client.on_callback_query(filters.regex(r"^ignore"))
 async def ignore_callback(client, query):
     await query.answer()
 
-# ==============================================================================
-# 5. CARD MODE HANDLERS
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^card_next_"))
 async def card_next_nav(client, query):
+    await query.answer()
     try:
         data = query.data.split("_")
-        if data[2] == "None": return await query.answer("⚠️ Old Button.", show_alert=True)
+        if data[2] == "None": return
         search_id = int(data[2])
         current_index = int(data[3])
 
         cached_data = await Media.get_search_query(search_id)
-        if not cached_data: return await query.answer("⚠️ Search expired.", show_alert=True)
+        if not cached_data: return
 
         files = cached_data.get('files')
         if not files: files = await Media.get_search_results(cached_data.get('query'))
-        if not files: return await query.answer("No files found.", show_alert=True)
+        if not files: return 
         
         total = len(files)
         next_index = current_index + 1
@@ -384,24 +367,23 @@ async def card_next_nav(client, query):
         btn.append(nav_row)
         
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
-    except Exception as e:
-        traceback.print_exc()
-        await query.answer(f"Error: {e}", show_alert=True)
+    except: pass
 
 @Client.on_callback_query(filters.regex(r"^card_prev_"))
 async def card_prev_nav(client, query):
+    await query.answer()
     try:
         data = query.data.split("_")
-        if data[2] == "None": return await query.answer("⚠️ Old Button.", show_alert=True)
+        if data[2] == "None": return 
         search_id = int(data[2])
         current_index = int(data[3])
 
         cached_data = await Media.get_search_query(search_id)
-        if not cached_data: return await query.answer("⚠️ Search expired.", show_alert=True)
+        if not cached_data: return
 
         files = cached_data.get('files')
         if not files: files = await Media.get_search_results(cached_data.get('query'))
-        if not files: return await query.answer("No files found.", show_alert=True)
+        if not files: return 
         
         total = len(files)
         prev_index = current_index - 1
@@ -429,9 +411,7 @@ async def card_prev_nav(client, query):
         btn.append(nav_row)
         
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
-    except Exception as e:
-        traceback.print_exc()
-        await query.answer(f"Error: {e}", show_alert=True)
+    except: pass
 
 @Client.on_callback_query(filters.regex(r"^pages$"))
 async def page_counter_callback(client, query):

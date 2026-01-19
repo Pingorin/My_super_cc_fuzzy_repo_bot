@@ -6,7 +6,7 @@ import asyncio
 import traceback 
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import FloodWait, MessageNotModified, QueryIdInvalid
+from pyrogram.errors import FloodWait, MessageNotModified
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import SITE_URL
@@ -38,6 +38,42 @@ async def auto_delete_task(bot_message, user_message, delay, show_thanks, query=
             await asyncio.sleep(60)
             await temp_msg.delete()
     except: pass
+
+# ==============================================================================
+# 🛠️ HELPER: ARRANGE BUTTONS (New Layout Logic)
+# ==============================================================================
+def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn):
+    """
+    Rearranges buttons to:
+    1. Files
+    2. Filters
+    3. How To
+    4. Premium
+    5. Pagination (Bottom)
+    """
+    # 1. Extract Pagination if it exists (btn_parser puts it at the end)
+    pagination_row = []
+    if len(files) > limit:
+        # Remove the last row (which is pagination)
+        pagination_row = buttons.pop() 
+    
+    # 2. Add Filters
+    if filter_buttons:
+        buttons.append(filter_buttons)
+    
+    # 3. Add How To Download (Separate Row)
+    if howto_btn:
+        buttons.append(howto_btn)
+        
+    # 4. Add Premium (Separate Row)
+    if free_prem_btn:
+        buttons.append(free_prem_btn)
+    
+    # 5. Add Pagination Back (At the very bottom)
+    if pagination_row:
+        buttons.append(pagination_row)
+        
+    return buttons
 
 # ==============================================================================
 # 1. MAIN SEARCH HANDLER
@@ -89,6 +125,7 @@ async def auto_filter(client, message):
         sent_msg = None 
         time_taken = round(time.time() - start_time, 2)
         
+        # Prepare Extra Buttons
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         
@@ -97,19 +134,20 @@ async def auto_filter(client, message):
             except: temp.U_NAME = "Telegram"
             
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
-
-        # Get Default Filter Buttons
         filter_buttons = get_filter_buttons(search_id, active_filter=None)
 
+        # --- MODE A: BUTTON ---
         if mode == 'button':
+            # 1. Get List (Files + Pagination)
             buttons = btn_parser(files, message.chat.id, search_id, offset, limit, query)
-            if filter_buttons: buttons.append(filter_buttons)
-            if howto_btn: buttons.append(howto_btn)
-            buttons.append(free_prem_btn)
+            
+            # 2. Rearrange Buttons (Files -> Filters -> HowTo -> Premium -> Pagination)
+            buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn)
 
             msg_text = f"⚡ **Results for:** `{query}`\nfound {len(files)} files."
             sent_msg = await message.reply_text(text=msg_text, reply_markup=InlineKeyboardMarkup(buttons))
 
+        # --- MODE B/C: TEXT & DETAILED ---
         elif mode in ['text', 'detailed']:
             page_files = files[offset : offset + limit]
             
@@ -117,6 +155,7 @@ async def auto_filter(client, message):
             else: text = format_detailed_results(page_files, query, message.chat.id, time_taken)
             
             btn = []
+            # Order: Filter -> HowTo -> Premium -> Pagination
             if filter_buttons: btn.append(filter_buttons)
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
@@ -126,6 +165,7 @@ async def auto_filter(client, message):
             
             sent_msg = await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
 
+        # --- MODE D: SITE ---
         elif mode == 'site':
             web_id = await Media.save_search_results(query, files, message.chat.id)
             base_url = SITE_URL.rstrip('/') if (SITE_URL and SITE_URL.startswith("http")) else "http://127.0.0.1:8080"
@@ -141,6 +181,7 @@ async def auto_filter(client, message):
             
             sent_msg = await message.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
 
+        # --- MODE E: CARD ---
         elif mode == 'card':
             file = files[0]
             text = format_card_result(file, 0, total_results)
@@ -171,11 +212,10 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# 2. STANDARD PAGINATION (Handles Reset/Unfilter too)
+# 2. STANDARD PAGINATION
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^page_"))
 async def handle_pagination(client, query):
-    # ✅ Check Spam but allow navigation
     if is_spam(query.from_user.id):
         try: await query.answer("Slow down! ⏳", show_alert=False)
         except: pass
@@ -201,8 +241,6 @@ async def handle_pagination(client, query):
         
         files = cached_data.get('files')
         req = cached_data.get('query')
-        
-        # Fallback if cache lost
         if not files: files = await Media.get_search_results(req)
         if not files: return 
             
@@ -216,15 +254,15 @@ async def handle_pagination(client, query):
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
-
-        # ✅ SHOW DEFAULT FILTERS (Because this is standard/reset view)
+        
         filter_buttons = get_filter_buttons(search_id, active_filter=None)
 
         if mode == 'button':
+            # 1. Get List
             buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, req)
-            if filter_buttons: buttons.append(filter_buttons)
-            if howto_btn: buttons.append(howto_btn)
-            buttons.append(free_prem_btn)
+            # 2. Arrange
+            buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn)
+            
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
             
         elif mode in ['text', 'detailed']:
@@ -279,7 +317,6 @@ async def handle_filter_pagination(client, query):
         req = cached_data.get('query')
         if not all_files: all_files = await Media.get_search_results(req)
 
-        # Apply Filter
         filter_capital = "Video" if filter_type == "video" else "Document"
         filtered_files = filter_by_type(all_files, filter_capital)
         
@@ -297,14 +334,14 @@ async def handle_filter_pagination(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        # ✅ SHOW ACTIVE FILTER STATE
         filter_buttons = get_filter_buttons(search_id, active_filter=filter_type)
 
         if mode == 'button':
+            # 1. Get List (Using Filtered Files)
             buttons = btn_parser(filtered_files, query.message.chat.id, search_id, offset, limit, req, filter_type=filter_type)
-            if filter_buttons: buttons.append(filter_buttons)
-            if howto_btn: buttons.append(howto_btn)
-            buttons.append(free_prem_btn)
+            # 2. Arrange
+            buttons = arrange_buttons(buttons, filtered_files, limit, filter_buttons, howto_btn, free_prem_btn)
+            
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
             
         elif mode in ['text', 'detailed']:
@@ -331,20 +368,15 @@ async def handle_filter_pagination(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 4. RESET & CARD HANDLERS (FIXED)
+# 4. RESET & CARD HANDLERS
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^unfilter_"))
 async def handle_unfilter(client, query):
-    # ❌ Removed `is_spam` check from Reset (Reset should always work)
-    # ❌ Removed `query.answer` from here (Let handle_pagination do it)
-    
     try:
         search_id = int(query.data.split("_")[1])
-        # Manually create a redirect
         query.data = f"page_{search_id}_0"
         await handle_pagination(client, query)
     except: 
-        # Fallback if redirect fails
         try: await query.answer("Error Resetting", show_alert=True)
         except: pass
 

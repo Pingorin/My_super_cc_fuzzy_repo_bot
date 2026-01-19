@@ -3,8 +3,19 @@ import time
 import datetime
 from info import USER_DB_URI, DATABASE_NAME
 
+# ✅ Simple Cache Dictionary for RAM Caching
+SETTINGS_CACHE = {}
+
 class UserChatDB:
     def __init__(self, uri, database_name):
+        # ✅ Connection Pooling Optimization
+        # Checking if parameters are already present to avoid duplication
+        if "minPoolSize" not in uri:
+            if "?" in uri:
+                uri += "&minPoolSize=10&maxPoolSize=100"
+            else:
+                uri += "?minPoolSize=10&maxPoolSize=100"
+
         # Connects to the User Database Cluster
         self._client = motor.motor_asyncio.AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
@@ -22,7 +33,7 @@ class UserChatDB:
             await self.users.insert_one({'id': int(id)})
 
     # ==================================================================
-    # 💎 REFERRAL & PREMIUM SYSTEM METHODS (NEW)
+    # 💎 REFERRAL & PREMIUM SYSTEM METHODS
     # ==================================================================
 
     async def get_user_data(self, user_id):
@@ -92,7 +103,6 @@ class UserChatDB:
     # ⚙️ GROUP MANAGEMENT
     # ==================================================================
 
-    # ✅ MODIFIED: Added Defaults for ALL New Features + Referral Defaults
     async def add_group(self, id, title):
         group = await self.groups.find_one({'id': int(id)})
         
@@ -173,13 +183,36 @@ class UserChatDB:
             # Update Title if changed
             await self.groups.update_one({'id': int(id)}, {'$set': {'title': title}})
 
-    # --- ⚙️ GROUP SETTINGS HELPERS ---
+    # --- ⚙️ GROUP SETTINGS HELPERS (WITH CACHING) ---
     
     async def get_group_settings(self, id):
-        return await self.groups.find_one({'id': int(id)})
+        chat_id = int(id)
+        
+        # 1. Check RAM First (Instant)
+        if chat_id in SETTINGS_CACHE:
+            return SETTINGS_CACHE[chat_id]
+            
+        # 2. If not in RAM, Fetch from DB
+        settings = await self.groups.find_one({'id': chat_id})
+        
+        # 3. Save to RAM for next time
+        if settings:
+            SETTINGS_CACHE[chat_id] = settings
+            
+        return settings
 
     async def update_group_settings(self, id, settings):
-        await self.groups.update_one({'id': int(id)}, {'$set': settings})
+        chat_id = int(id)
+        
+        # 1. Update DB
+        await self.groups.update_one({'id': chat_id}, {'$set': settings})
+        
+        # 2. Update Cache
+        if chat_id in SETTINGS_CACHE:
+            SETTINGS_CACHE[chat_id].update(settings)
+        else:
+            # Refresh from DB if needed (though direct update is usually enough)
+            SETTINGS_CACHE[chat_id] = await self.groups.find_one({'id': chat_id})
 
     # --- 📊 DAILY STATS HELPERS ---
 
@@ -196,12 +229,8 @@ class UserChatDB:
         today = self.get_today_date()
         
         if domain:
-            # MongoDB doesn't like dots in keys, replace '.' with '_'
             safe_domain = domain.replace('.', '_')
-            
-            # Key format: stats.2025-12-30.shorteners.softurl_in.gen
             key = f"stats.{today}.shorteners.{safe_domain}.{field}"
-            
             await self.groups.update_one(
                 {'id': int(chat_id)},
                 {'$inc': {key: count}},
@@ -211,11 +240,13 @@ class UserChatDB:
             key = f"stats.{today}.{field}"
             await self.groups.update_one(
                 {'id': int(chat_id)},
-                {'$inc': {key: count}}, # Atomic increment
+                {'$inc': {key: count}},
                 upsert=True
             )
+        # Note: We typically don't cache stats as they change frequently and aren't critical for immediate display logic like settings.
 
     async def get_daily_stats(self, chat_id, date_str):
+        # Stats are fetched less frequently, usually OK to hit DB or implement separate cache if needed
         group = await self.groups.find_one({'id': int(chat_id)})
         if group and 'stats' in group:
             return group['stats'].get(date_str, {})
@@ -223,7 +254,6 @@ class UserChatDB:
 
     async def get_all_groups_stats(self, date_str):
         """Fetches stats for ALL groups for a specific date (For Admin Report)"""
-        # Find groups that have an entry for the specific date
         cursor = self.groups.find({f"stats.{date_str}": {"$exists": True}})
         results = []
         async for group in cursor:
@@ -241,6 +271,12 @@ class UserChatDB:
             {'id': int(chat_id)},
             {'$set': {key: {'text': text, 'url': url}}}
         )
+        # Invalidate/Update Cache
+        if int(chat_id) in SETTINGS_CACHE:
+             # Deep update for nested dictionaries can be tricky in cache. simpler to remove and let refetch or update if possible
+             # For simplicity, let's remove to force a fresh fetch next time
+             del SETTINGS_CACHE[int(chat_id)]
+
 
     async def remove_autopost_button(self, chat_id, slot):
         key = f"autopost_buttons.{slot}"
@@ -248,6 +284,7 @@ class UserChatDB:
             {'id': int(chat_id)},
             {'$unset': {key: ""}}
         )
+        if int(chat_id) in SETTINGS_CACHE: del SETTINGS_CACHE[int(chat_id)]
 
     async def reset_autopost_content(self, chat_id):
         await self.groups.update_one(
@@ -258,6 +295,7 @@ class UserChatDB:
                 'autopost_buttons': {}
             }}
         )
+        if int(chat_id) in SETTINGS_CACHE: del SETTINGS_CACHE[int(chat_id)]
 
     # --- 📣 AUTO MENTION HELPERS ---
 
@@ -309,6 +347,7 @@ class UserChatDB:
             {'id': int(chat_id)},
             {'$set': {key: {'site': site, 'api': api}}}
         )
+        if int(chat_id) in SETTINGS_CACHE: del SETTINGS_CACHE[int(chat_id)]
 
     async def remove_shortener(self, chat_id, slot):
         key = f"shorteners.{slot}"
@@ -316,10 +355,12 @@ class UserChatDB:
             {'id': int(chat_id)},
             {'$unset': {key: ""}}
         )
+        if int(chat_id) in SETTINGS_CACHE: del SETTINGS_CACHE[int(chat_id)]
 
     # --- 🔒 FSUB CHANNEL MANAGEMENT ---
     
     async def update_fsub_channel(self, chat_id, slot, channel_id):
+        # ... logic to clean potential bad data ...
         try:
             group = await self.groups.find_one({'id': int(chat_id)})
             if group:
@@ -330,7 +371,7 @@ class UserChatDB:
                         {'$set': {'fsub_channels': {}}}
                     )
         except Exception as e:
-            print(f"Auto-Fix Error: {e}")
+            pass
 
         val_to_save = channel_id
         if slot != '5':
@@ -343,6 +384,7 @@ class UserChatDB:
             {'$set': {key: val_to_save}},
             upsert=True
         )
+        if int(chat_id) in SETTINGS_CACHE: del SETTINGS_CACHE[int(chat_id)]
 
     async def remove_fsub_channel(self, chat_id, slot):
         key = f"fsub_channels.{slot}"
@@ -350,12 +392,14 @@ class UserChatDB:
             {'id': int(chat_id)},
             {'$unset': {key: ""}}
         )
+        if int(chat_id) in SETTINGS_CACHE: del SETTINGS_CACHE[int(chat_id)]
 
     async def remove_all_fsub_channels(self, chat_id):
         await self.groups.update_one(
             {'id': int(chat_id)},
             {'$unset': {'fsub_channels': ""}} 
         )
+        if int(chat_id) in SETTINGS_CACHE: del SETTINGS_CACHE[int(chat_id)]
 
     # --- 📊 STATS & BAN LOGIC ---
 
@@ -529,6 +573,9 @@ class UserChatDB:
             {'id': int(chat_id)},
             {'$set': default_settings}
         )
+        # Clear Cache
+        if int(chat_id) in SETTINGS_CACHE:
+            del SETTINGS_CACHE[int(chat_id)]
 
 # ✅ INITIALIZATION
 db = UserChatDB(USER_DB_URI, DATABASE_NAME)

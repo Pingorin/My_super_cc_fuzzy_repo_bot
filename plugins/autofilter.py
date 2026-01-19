@@ -6,6 +6,7 @@ import asyncio
 import traceback 
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.errors import FloodWait, MessageNotModified
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import SITE_URL
@@ -17,7 +18,26 @@ logger = logging.getLogger(__name__)
 REACTIONS = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🎉", "🤩"]
 DELETE_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg" 
 
-# ✅ HELPER: Auto-Delete Logic
+# ✅ SPAM CONTROL DICTIONARY
+# Ye user ki last click timing yaad rakhega
+BUTTON_LOCK = {}
+
+def is_spam(user_id):
+    """
+    Checks if user clicked too fast (within 1.5 seconds).
+    Returns True if Spam, False if Safe.
+    """
+    current_time = time.time()
+    last_time = BUTTON_LOCK.get(user_id, 0)
+    
+    # Update current time
+    BUTTON_LOCK[user_id] = current_time
+    
+    # Agar 1.2 second se kam time hua hai pichle click se
+    if current_time - last_time < 1.2:
+        return True
+    return False
+
 async def auto_delete_task(bot_message, user_message, delay, show_thanks, query="files"):
     if delay <= 0: return 
     await asyncio.sleep(delay)
@@ -31,7 +51,7 @@ async def auto_delete_task(bot_message, user_message, delay, show_thanks, query=
     except: pass
 
 # ==============================================================================
-# 1. MAIN SEARCH HANDLER (User Sends Text)
+# 1. MAIN SEARCH HANDLER
 # ==============================================================================
 @Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index", "set_shortner", "settings", "connect", "delreq"]))
 async def auto_filter(client, message):
@@ -48,7 +68,6 @@ async def auto_filter(client, message):
 
         start_time = time.time()
         
-        # ⚡ FASTEST METHOD: Fetch Files & Settings TOGETHER
         task_files = Media.get_search_results(query)
         task_settings = db.get_group_settings(message.chat.id)
         
@@ -56,7 +75,6 @@ async def auto_filter(client, message):
         
         if not files: return
 
-        # Stats Update (Background Task - Don't wait for it)
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'req'))
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'suc'))
 
@@ -71,7 +89,6 @@ async def auto_filter(client, message):
             try: await message.react(random.choice(REACTIONS))
             except: pass 
 
-        # Save Query & Files (Background Task not possible here as we need ID)
         search_id = await Media.save_search_query(query, message.from_user.id, files)
         if not search_id: search_id = 0
 
@@ -92,10 +109,8 @@ async def auto_filter(client, message):
             
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        # ✅ Get Filter Buttons
         filter_buttons = get_filter_buttons(search_id, active_filter=None)
 
-        # --- DISPLAY RESULTS ---
         if mode == 'button':
             buttons = btn_parser(files, message.chat.id, search_id, offset, limit, query)
             if filter_buttons: buttons.append(filter_buttons)
@@ -166,12 +181,16 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# 2. STANDARD PAGINATION (Optimized)
+# 2. STANDARD PAGINATION (with Anti-Spam)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^page_"))
 async def handle_pagination(client, query):
-    # ⚡ OPTIMIZATION: Instant Feedback
-    await query.answer() 
+    # ✅ 1. Check Spam
+    if is_spam(query.from_user.id):
+        return await query.answer("Please wait...", show_alert=False)
+
+    try: await query.answer()
+    except: pass
     
     try:
         data = query.data.split("_")
@@ -181,20 +200,16 @@ async def handle_pagination(client, query):
         search_id = int(data[1])
         offset = int(data[2])
         
-        # Fetch Cache + Settings in Parallel
         task_data = Media.get_search_query(search_id)
         task_settings = db.get_group_settings(query.message.chat.id)
         
         cached_data, group_settings = await asyncio.gather(task_data, task_settings)
         
-        if not cached_data: return # Silent fail or old button
+        if not cached_data: return 
         
-        # Use Cached Files
         files = cached_data.get('files')
         req = cached_data.get('query')
-        if not files:
-            files = await Media.get_search_results(req)
-            
+        if not files: files = await Media.get_search_results(req)
         if not files: return 
             
         total_results = len(files)
@@ -207,7 +222,7 @@ async def handle_pagination(client, query):
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
-
+        
         filter_buttons = get_filter_buttons(search_id, active_filter=None)
 
         if mode == 'button':
@@ -232,16 +247,24 @@ async def handle_pagination(client, query):
             
             await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
 
+    except FloodWait as e:
+        await query.answer(f"Wait {e.value}s ⏳", show_alert=True)
+    except MessageNotModified:
+        pass
     except Exception as e:
         traceback.print_exc()
 
 # ==============================================================================
-# 3. FILTER PAGINATION HANDLER (Optimized)
+# 3. FILTER PAGINATION HANDLER (with Anti-Spam)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_"))
 async def handle_filter_pagination(client, query):
-    # ⚡ OPTIMIZATION: Instant Feedback
-    await query.answer()
+    # ✅ 1. Check Spam
+    if is_spam(query.from_user.id):
+        return await query.answer("Please wait...", show_alert=False)
+
+    try: await query.answer()
+    except: pass
     
     try:
         data = query.data.split("_")
@@ -258,16 +281,13 @@ async def handle_filter_pagination(client, query):
         
         all_files = cached_data.get('files')
         req = cached_data.get('query')
-        if not all_files:
-            all_files = await Media.get_search_results(req)
+        if not all_files: all_files = await Media.get_search_results(req)
 
-        # Apply Filter
         filter_capital = "Video" if filter_type == "video" else "Document"
         filtered_files = filter_by_type(all_files, filter_capital)
         
-        # Show alert if empty (Must answer here)
         if not filtered_files:
-            return 
+            return await query.answer(f"❌ No {filter_type}s found!", show_alert=True)
 
         total_results = len(filtered_files)
         mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
@@ -305,6 +325,10 @@ async def handle_filter_pagination(client, query):
             
             await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
 
+    except FloodWait as e:
+        await query.answer(f"Wait {e.value}s ⏳", show_alert=True)
+    except MessageNotModified:
+        pass
     except Exception as e:
         traceback.print_exc()
 
@@ -313,7 +337,10 @@ async def handle_filter_pagination(client, query):
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^unfilter_"))
 async def handle_unfilter(client, query):
-    await query.answer("Resetting Filter... 🔄")
+    # Check Spam
+    if is_spam(query.from_user.id): return await query.answer()
+
+    await query.answer("Resetting... 🔄")
     try:
         search_id = int(query.data.split("_")[1])
         query.data = f"page_{search_id}_0"
@@ -326,7 +353,11 @@ async def ignore_callback(client, query):
 
 @Client.on_callback_query(filters.regex(r"^card_next_"))
 async def card_next_nav(client, query):
-    await query.answer()
+    if is_spam(query.from_user.id): return await query.answer()
+    
+    try: await query.answer()
+    except: pass
+    
     try:
         data = query.data.split("_")
         if data[2] == "None": return
@@ -366,11 +397,19 @@ async def card_next_nav(client, query):
         btn.append(nav_row)
         
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
+    except FloodWait as e:
+        await query.answer(f"Wait {e.value}s ⏳", show_alert=True)
+    except MessageNotModified:
+        pass
     except: pass
 
 @Client.on_callback_query(filters.regex(r"^card_prev_"))
 async def card_prev_nav(client, query):
-    await query.answer()
+    if is_spam(query.from_user.id): return await query.answer()
+
+    try: await query.answer()
+    except: pass
+    
     try:
         data = query.data.split("_")
         if data[2] == "None": return 
@@ -410,6 +449,10 @@ async def card_prev_nav(client, query):
         btn.append(nav_row)
         
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
+    except FloodWait as e:
+        await query.answer(f"Wait {e.value}s ⏳", show_alert=True)
+    except MessageNotModified:
+        pass
     except: pass
 
 @Client.on_callback_query(filters.regex(r"^pages$"))

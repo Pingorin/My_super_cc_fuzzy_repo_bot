@@ -6,7 +6,7 @@ import asyncio
 import traceback 
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import FloodWait, MessageNotModified
+from pyrogram.errors import FloodWait, MessageNotModified, QueryIdInvalid
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import SITE_URL
@@ -18,25 +18,14 @@ logger = logging.getLogger(__name__)
 REACTIONS = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🎉", "🤩"]
 DELETE_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg" 
 
-# ✅ SPAM CONTROL DICTIONARY
-# Ye user ki last click timing yaad rakhega
+# ✅ SPAM CONTROL
 BUTTON_LOCK = {}
 
 def is_spam(user_id):
-    """
-    Checks if user clicked too fast (within 1.5 seconds).
-    Returns True if Spam, False if Safe.
-    """
     current_time = time.time()
     last_time = BUTTON_LOCK.get(user_id, 0)
-    
-    # Update current time
     BUTTON_LOCK[user_id] = current_time
-    
-    # Agar 1.2 second se kam time hua hai pichle click se
-    if current_time - last_time < 1.2:
-        return True
-    return False
+    return (current_time - last_time < 1.0) # 1 second limit
 
 async def auto_delete_task(bot_message, user_message, delay, show_thanks, query="files"):
     if delay <= 0: return 
@@ -109,6 +98,7 @@ async def auto_filter(client, message):
             
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
+        # Get Default Filter Buttons
         filter_buttons = get_filter_buttons(search_id, active_filter=None)
 
         if mode == 'button':
@@ -181,13 +171,15 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# 2. STANDARD PAGINATION (with Anti-Spam)
+# 2. STANDARD PAGINATION (Handles Reset/Unfilter too)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^page_"))
 async def handle_pagination(client, query):
-    # ✅ 1. Check Spam
+    # ✅ Check Spam but allow navigation
     if is_spam(query.from_user.id):
-        return await query.answer("Please wait...", show_alert=False)
+        try: await query.answer("Slow down! ⏳", show_alert=False)
+        except: pass
+        return
 
     try: await query.answer()
     except: pass
@@ -209,6 +201,8 @@ async def handle_pagination(client, query):
         
         files = cached_data.get('files')
         req = cached_data.get('query')
+        
+        # Fallback if cache lost
         if not files: files = await Media.get_search_results(req)
         if not files: return 
             
@@ -222,7 +216,8 @@ async def handle_pagination(client, query):
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
-        
+
+        # ✅ SHOW DEFAULT FILTERS (Because this is standard/reset view)
         filter_buttons = get_filter_buttons(search_id, active_filter=None)
 
         if mode == 'button':
@@ -248,20 +243,21 @@ async def handle_pagination(client, query):
             await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
 
     except FloodWait as e:
-        await query.answer(f"Wait {e.value}s ⏳", show_alert=True)
+        await asyncio.sleep(e.value)
     except MessageNotModified:
         pass
     except Exception as e:
         traceback.print_exc()
 
 # ==============================================================================
-# 3. FILTER PAGINATION HANDLER (with Anti-Spam)
+# 3. FILTER PAGINATION HANDLER
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_"))
 async def handle_filter_pagination(client, query):
-    # ✅ 1. Check Spam
     if is_spam(query.from_user.id):
-        return await query.answer("Please wait...", show_alert=False)
+        try: await query.answer("Slow down! ⏳", show_alert=False)
+        except: pass
+        return
 
     try: await query.answer()
     except: pass
@@ -283,6 +279,7 @@ async def handle_filter_pagination(client, query):
         req = cached_data.get('query')
         if not all_files: all_files = await Media.get_search_results(req)
 
+        # Apply Filter
         filter_capital = "Video" if filter_type == "video" else "Document"
         filtered_files = filter_by_type(all_files, filter_capital)
         
@@ -300,6 +297,7 @@ async def handle_filter_pagination(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
+        # ✅ SHOW ACTIVE FILTER STATE
         filter_buttons = get_filter_buttons(search_id, active_filter=filter_type)
 
         if mode == 'button':
@@ -326,26 +324,29 @@ async def handle_filter_pagination(client, query):
             await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
 
     except FloodWait as e:
-        await query.answer(f"Wait {e.value}s ⏳", show_alert=True)
+        await asyncio.sleep(e.value)
     except MessageNotModified:
         pass
     except Exception as e:
         traceback.print_exc()
 
 # ==============================================================================
-# 4. RESET & CARD HANDLERS
+# 4. RESET & CARD HANDLERS (FIXED)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^unfilter_"))
 async def handle_unfilter(client, query):
-    # Check Spam
-    if is_spam(query.from_user.id): return await query.answer()
-
-    await query.answer("Resetting... 🔄")
+    # ❌ Removed `is_spam` check from Reset (Reset should always work)
+    # ❌ Removed `query.answer` from here (Let handle_pagination do it)
+    
     try:
         search_id = int(query.data.split("_")[1])
+        # Manually create a redirect
         query.data = f"page_{search_id}_0"
         await handle_pagination(client, query)
-    except: pass
+    except: 
+        # Fallback if redirect fails
+        try: await query.answer("Error Resetting", show_alert=True)
+        except: pass
 
 @Client.on_callback_query(filters.regex(r"^ignore"))
 async def ignore_callback(client, query):
@@ -353,8 +354,7 @@ async def ignore_callback(client, query):
 
 @Client.on_callback_query(filters.regex(r"^card_next_"))
 async def card_next_nav(client, query):
-    if is_spam(query.from_user.id): return await query.answer()
-    
+    if is_spam(query.from_user.id): return
     try: await query.answer()
     except: pass
     
@@ -398,15 +398,14 @@ async def card_next_nav(client, query):
         
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
     except FloodWait as e:
-        await query.answer(f"Wait {e.value}s ⏳", show_alert=True)
+        await asyncio.sleep(e.value)
     except MessageNotModified:
         pass
     except: pass
 
 @Client.on_callback_query(filters.regex(r"^card_prev_"))
 async def card_prev_nav(client, query):
-    if is_spam(query.from_user.id): return await query.answer()
-
+    if is_spam(query.from_user.id): return
     try: await query.answer()
     except: pass
     
@@ -450,7 +449,7 @@ async def card_prev_nav(client, query):
         
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
     except FloodWait as e:
-        await query.answer(f"Wait {e.value}s ⏳", show_alert=True)
+        await asyncio.sleep(e.value)
     except MessageNotModified:
         pass
     except: pass

@@ -267,7 +267,6 @@ async def handle_filter_pagination(client, query):
         
         # Show alert if empty (Must answer here)
         if not filtered_files:
-            # We already answered, so we use show_alert via direct API if needed or just return
             return 
 
         total_results = len(filtered_files)

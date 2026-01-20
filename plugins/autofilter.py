@@ -10,7 +10,7 @@ from pyrogram.errors import FloodWait, MessageNotModified
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import SITE_URL
-from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, filter_by_type, get_filter_buttons
+from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, filter_by_type, get_filter_buttons, get_language_buttons, filter_by_lang
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_
     """
     Rearranges buttons to:
     1. Files
-    2. Filters
+    2. Filters (Video/Docs + Language)
     3. How To
     4. Premium
     5. Pagination (Bottom)
@@ -59,7 +59,9 @@ def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_
     
     # 2. Add Filters
     if filter_buttons:
-        buttons.append(filter_buttons)
+        # filter_buttons is a list of rows, append them
+        for row in filter_buttons:
+            buttons.append(row)
     
     # 3. Add How To Download (Separate Row)
     if howto_btn:
@@ -125,7 +127,6 @@ async def auto_filter(client, message):
         sent_msg = None 
         time_taken = round(time.time() - start_time, 2)
         
-        # Prepare Extra Buttons
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         
@@ -134,16 +135,14 @@ async def auto_filter(client, message):
             except: temp.U_NAME = "Telegram"
             
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
-        filter_buttons = get_filter_buttons(search_id, active_filter=None)
+        
+        # ✅ Generate Buttons (Pass active_lang=None initially)
+        filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=None)
 
         # --- MODE A: BUTTON ---
         if mode == 'button':
-            # 1. Get List (Files + Pagination)
             buttons = btn_parser(files, message.chat.id, search_id, offset, limit, query)
-            
-            # 2. Rearrange Buttons (Files -> Filters -> HowTo -> Premium -> Pagination)
             buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn)
-
             msg_text = f"⚡ **Results for:** `{query}`\nfound {len(files)} files."
             sent_msg = await message.reply_text(text=msg_text, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -155,8 +154,8 @@ async def auto_filter(client, message):
             else: text = format_detailed_results(page_files, query, message.chat.id, time_taken)
             
             btn = []
-            # Order: Filter -> HowTo -> Premium -> Pagination
-            if filter_buttons: btn.append(filter_buttons)
+            if filter_buttons: 
+                for row in filter_buttons: btn.append(row)
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
             
@@ -226,15 +225,11 @@ async def handle_pagination(client, query):
     
     try:
         data = query.data.split("_")
-        if len(data) != 3: return 
-        if data[1] == "None": return 
-        
         search_id = int(data[1])
         offset = int(data[2])
         
         task_data = Media.get_search_query(search_id)
         task_settings = db.get_group_settings(query.message.chat.id)
-        
         cached_data, group_settings = await asyncio.gather(task_data, task_settings)
         
         if not cached_data: return 
@@ -255,24 +250,22 @@ async def handle_pagination(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
-        filter_buttons = get_filter_buttons(search_id, active_filter=None)
+        # Standard filter buttons (no language selected yet)
+        filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=None)
 
         if mode == 'button':
-            # 1. Get List
             buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, req)
-            # 2. Arrange
             buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn)
-            
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
             
         elif mode in ['text', 'detailed']:
             page_files = files[offset : offset + limit]
-            
             if mode == 'text': text = format_text_results(page_files, req, query.message.chat.id)
             else: text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
             
             btn = []
-            if filter_buttons: btn.append(filter_buttons)
+            if filter_buttons: 
+                for row in filter_buttons: btn.append(row)
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn) 
             pagination = get_pagination_row(search_id, offset, limit, total_results)
@@ -288,10 +281,16 @@ async def handle_pagination(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 3. FILTER PAGINATION HANDLER
+# 3. FILTER PAGINATION HANDLER (Type: Video/Doc)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_"))
 async def handle_filter_pagination(client, query):
+    # This handler matches "filter_" but NOT "filter_lang_" which is handled below.
+    # regex matches prefix, so we must be careful.
+    if "filter_lang_" in query.data:
+        # Pass control to language handler if mis-routed
+        return await handle_language_selection(client, query)
+
     if is_spam(query.from_user.id):
         try: await query.answer("Slow down! ⏳", show_alert=False)
         except: pass
@@ -308,7 +307,6 @@ async def handle_filter_pagination(client, query):
 
         task_data = Media.get_search_query(search_id)
         task_settings = db.get_group_settings(query.message.chat.id)
-        
         cached_data, group_settings = await asyncio.gather(task_data, task_settings)
         
         if not cached_data: return
@@ -334,14 +332,12 @@ async def handle_filter_pagination(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        filter_buttons = get_filter_buttons(search_id, active_filter=filter_type)
+        # ✅ Pass active_filter=filter_type, active_lang=None (Type selection resets Language)
+        filter_buttons = get_filter_buttons(search_id, active_filter=filter_type, active_lang=None)
 
         if mode == 'button':
-            # 1. Get List (Using Filtered Files)
-            buttons = btn_parser(filtered_files, query.message.chat.id, search_id, offset, limit, req, filter_type=filter_type)
-            # 2. Arrange
+            buttons = btn_parser(filtered_files, query.message.chat.id, search_id, offset, limit, req, filter_type=filter_type, active_lang=None)
             buttons = arrange_buttons(buttons, filtered_files, limit, filter_buttons, howto_btn, free_prem_btn)
-            
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
             
         elif mode in ['text', 'detailed']:
@@ -351,7 +347,8 @@ async def handle_filter_pagination(client, query):
             else: text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
             
             btn = []
-            if filter_buttons: btn.append(filter_buttons)
+            if filter_buttons: 
+                for row in filter_buttons: btn.append(row)
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn) 
             
@@ -368,12 +365,117 @@ async def handle_filter_pagination(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 4. RESET & CARD HANDLERS
+# ✅ 4. LANGUAGE MENU HANDLER (Opens "Select Language" list)
+# ==============================================================================
+@Client.on_callback_query(filters.regex(r"^lang_menu_"))
+async def handle_language_menu(client, query):
+    try: await query.answer()
+    except: pass
+
+    try:
+        search_id = int(query.data.split("_")[2])
+        cached_data = await Media.get_search_query(search_id)
+        if not cached_data: return await query.answer("Results expired.", show_alert=True)
+        
+        files = cached_data.get('files')
+        if not files: return
+        
+        # Generate Language Grid
+        lang_buttons = get_language_buttons(search_id, files)
+        
+        await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(lang_buttons))
+        
+    except Exception as e:
+        logger.error(f"Lang Menu Error: {e}")
+
+# ==============================================================================
+# ✅ 5. LANGUAGE FILTER HANDLER (When user clicks a Language)
+# ==============================================================================
+@Client.on_callback_query(filters.regex(r"^filter_lang_"))
+async def handle_language_selection(client, query):
+    if is_spam(query.from_user.id):
+        try: await query.answer("Slow down! ⏳", show_alert=False)
+        except: pass
+        return
+
+    try: await query.answer()
+    except: pass
+    
+    try:
+        # Data format: filter_lang_{search_id}_{lang}_{offset}
+        data = query.data.split("_")
+        search_id = int(data[2])
+        lang = data[3]
+        offset = int(data[4])
+
+        task_data = Media.get_search_query(search_id)
+        task_settings = db.get_group_settings(query.message.chat.id)
+        cached_data, group_settings = await asyncio.gather(task_data, task_settings)
+        
+        if not cached_data: return
+        
+        all_files = cached_data.get('files')
+        req = cached_data.get('query')
+        if not all_files: all_files = await Media.get_search_results(req)
+
+        # ✅ Filter Files by Language
+        filtered_files = filter_by_lang(all_files, lang)
+        
+        if not filtered_files:
+            return await query.answer(f"❌ No files found for {lang}!", show_alert=True)
+
+        total_results = len(filtered_files)
+        mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
+        limit = group_settings.get('result_page_limit', 10) if group_settings else 10
+
+        if mode == 'hybrid':
+            mode = 'button' if len(filtered_files) <= limit else 'text'
+
+        howto_url = group_settings.get('howto_url')
+        howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
+        free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
+
+        # ✅ Pass active_lang=lang, active_filter=None (Language resets Type)
+        filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=lang)
+
+        if mode == 'button':
+            # Generate buttons with lang-filtered list
+            buttons = btn_parser(filtered_files, query.message.chat.id, search_id, offset, limit, req, filter_type=None, active_lang=lang)
+            buttons = arrange_buttons(buttons, filtered_files, limit, filter_buttons, howto_btn, free_prem_btn)
+            await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+            
+        elif mode in ['text', 'detailed']:
+            page_files = filtered_files[offset : offset + limit]
+            
+            if mode == 'text': text = format_text_results(page_files, req, query.message.chat.id)
+            else: text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
+            
+            btn = []
+            if filter_buttons: 
+                for row in filter_buttons: btn.append(row)
+            if howto_btn: btn.append(howto_btn)
+            btn.append(free_prem_btn) 
+            
+            pagination = get_pagination_row(search_id, offset, limit, total_results, filter_type=None, active_lang=lang)
+            if pagination: btn.append(pagination)
+            
+            await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
+
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+    except MessageNotModified:
+        pass
+    except Exception as e:
+        traceback.print_exc()
+
+# ==============================================================================
+# 6. RESET & CARD HANDLERS
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^unfilter_"))
 async def handle_unfilter(client, query):
     try:
         search_id = int(query.data.split("_")[1])
+        # Reset to page_0 of original search
         query.data = f"page_{search_id}_0"
         await handle_pagination(client, query)
     except: 

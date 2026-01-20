@@ -17,7 +17,7 @@ except: AUTH_CHANNEL_4 = None
 
 logger = logging.getLogger(__name__)
 
-# ✅ Defined Languages for Detection
+# ✅ Defined Languages
 LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu"]
 
 class temp(object):
@@ -26,27 +26,27 @@ class temp(object):
     B_LINK = None
     ME = None
 
-# ✅ 1. FILTER FUNCTION (STRICT CHECK)
+# ==============================================================================
+# 1. FILTER FUNCTIONS
+# ==============================================================================
+
 def filter_by_type(files, f_type):
-    """
-    Filters files by their database 'file_type'.
-    f_type: 'Video' or 'Document'
-    """
+    """Filters files by Video or Document. Returns all if f_type is None/All."""
+    if not f_type or f_type.lower() == "none" or f_type.lower() == "all":
+        return files
+    
     filtered = []
     for f in files:
         db_type = f.get('file_type', 'document').lower()
-        if f_type == "Video" and db_type == "video":
+        if f_type.lower() == "video" and db_type == "video":
             filtered.append(f)
-        elif f_type == "Document" and db_type == "document":
+        elif f_type.lower() == "document" and db_type == "document":
             filtered.append(f)
     return filtered
 
-# ✅ NEW: FILTER BY LANGUAGE
 def filter_by_lang(files, lang):
-    """
-    Filters files based on language in file_name.
-    """
-    if not lang or lang == "All":
+    """Filters files by Language string in filename. Returns all if lang is None/All."""
+    if not lang or lang.lower() == "none" or lang.lower() == "all":
         return files
     
     filtered = []
@@ -56,43 +56,62 @@ def filter_by_lang(files, lang):
             filtered.append(f)
     return filtered
 
-# ✅ 2. FILTER BUTTONS GENERATOR (UPDATED)
+# ==============================================================================
+# 2. BUTTON GENERATORS (CUMULATIVE LOGIC)
+# ==============================================================================
+
 def get_filter_buttons(search_id, active_filter=None, active_lang=None):
+    """
+    Generates buttons. Crucially, passes 'active_lang' to Type buttons
+    and 'active_filter' to Language buttons to preserve state.
+    """
     buttons = []
     
-    # Row 1: Type Filters (Video / Docs)
+    # Safe Defaults for callback string (avoid 'None')
+    curr_type = active_filter if active_filter else "none"
+    curr_lang = active_lang if active_lang else "none"
+
+    # Row 1: Type Filters
     row1 = []
     if active_filter == "video":
         row1.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
-        row1.append(InlineKeyboardButton("All Files", callback_data=f"unfilter_{search_id}"))
+        # Unfilter Type (set to none), but KEEP curr_lang
+        row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_0"))
     elif active_filter == "document":
         row1.append(InlineKeyboardButton("Docs ✅", callback_data="ignore"))
-        row1.append(InlineKeyboardButton("All Files", callback_data=f"unfilter_{search_id}"))
+        # Unfilter Type (set to none), but KEEP curr_lang
+        row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_0"))
     else:
-        row1.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_mode_video_0"))
-        row1.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_mode_document_0"))
+        # Select Type, KEEP curr_lang
+        row1.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_video_{curr_lang}_0"))
+        row1.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_document_{curr_lang}_0"))
     buttons.append(row1)
 
-    # Row 2: Language Filter Button
+    # Row 2: Language Filter
     row2 = []
-    if active_lang:
-        row2.append(InlineKeyboardButton(f"{active_lang} ✅", callback_data=f"lang_menu_{search_id}"))
-        row2.append(InlineKeyboardButton("All Languages", callback_data=f"unfilter_{search_id}"))
+    if active_lang and active_lang != "none":
+        # Opens menu but remembers type so back button works
+        row2.append(InlineKeyboardButton(f"{active_lang} ✅", callback_data=f"lang_menu_{search_id}_{curr_type}"))
+        # Unfilter Lang (set to none), but KEEP curr_type
+        row2.append(InlineKeyboardButton("All Languages", callback_data=f"filter_{search_id}_{curr_type}_none_0"))
     else:
-        row2.append(InlineKeyboardButton("Select Language 🌐", callback_data=f"lang_menu_{search_id}"))
+        # Opens menu but remembers type
+        row2.append(InlineKeyboardButton("Select Language 🌐", callback_data=f"lang_menu_{search_id}_{curr_type}"))
     buttons.append(row2)
         
     return buttons
 
-# ✅ NEW: LANGUAGE MENU BUTTONS
-def get_language_buttons(search_id, files):
+def get_language_buttons(search_id, files, active_filter=None):
     """
-    Generates the grid of available languages with counts.
+    Generates the grid of languages. 
+    'active_filter' is passed so when a language is picked, we don't lose the Type.
     """
     buttons = []
     row = []
     
-    # Calculate Counts
+    curr_type = active_filter if active_filter else "none"
+
+    # Calculate Counts based on the files passed (which should already be type-filtered)
     stats = {lang: 0 for lang in LANGUAGES}
     for file in files:
         fname = file.get('file_name', '').lower()
@@ -100,10 +119,11 @@ def get_language_buttons(search_id, files):
             if lang.lower() in fname:
                 stats[lang] += 1
                 
-    # Create Buttons for languages with > 0 files
     for lang, count in stats.items():
         if count > 0:
-            row.append(InlineKeyboardButton(f"{lang} ({count})", callback_data=f"filter_lang_{search_id}_{lang}_0"))
+            # CALLBACK FORMAT: filter_lang_{id}_{lang}_{type}_{offset}
+            # This ensures Type is preserved when Language is selected
+            row.append(InlineKeyboardButton(f"{lang} ({count})", callback_data=f"filter_lang_{search_id}_{lang}_{curr_type}_0"))
         
         if len(row) == 2:
             buttons.append(row)
@@ -114,11 +134,15 @@ def get_language_buttons(search_id, files):
         
     # Navigation
     buttons.append([
-        InlineKeyboardButton("All Languages", callback_data=f"unfilter_{search_id}"),
-        InlineKeyboardButton("Back", callback_data=f"page_{search_id}_0")
+        InlineKeyboardButton("All Languages", callback_data=f"filter_{search_id}_{curr_type}_none_0"),
+        InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{curr_type}_none_0")
     ])
     
     return buttons
+
+# ==============================================================================
+# 3. FORMATTING & PAGINATION
+# ==============================================================================
 
 def get_size(size):
     if not size: return "0 B"
@@ -212,8 +236,10 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. PAGINATION HELPER (Updated for Language)
-def get_pagination_row(search_id, current_offset, limit, total_count, filter_type=None, active_lang=None):
+def get_pagination_row(search_id, current_offset, limit, total_count, active_filter=None, active_lang=None):
+    """
+    Generates pagination that remembers Active Filter and Active Lang.
+    """
     buttons = []
     current_page = int(current_offset / limit) + 1
     total_pages = math.ceil(total_count / limit)
@@ -221,13 +247,13 @@ def get_pagination_row(search_id, current_offset, limit, total_count, filter_typ
     if total_pages <= 1:
         return []
 
-    # Construct the callback prefix based on active filters
-    if active_lang:
-        cb_prefix = f"filter_lang_{search_id}_{active_lang}"
-    elif filter_type:
-        cb_prefix = f"filter_{search_id}_mode_{filter_type.lower()}"
-    else:
-        cb_prefix = f"page_{search_id}"
+    # Safe Strings
+    a_type = active_filter if active_filter else "none"
+    a_lang = active_lang if active_lang else "none"
+
+    # Use the Combined Filter Callback
+    # filter_{id}_{type}_{lang}_{offset}
+    cb_prefix = f"filter_{search_id}_{a_type}_{a_lang}"
 
     if current_offset >= limit:
         buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"{cb_prefix}_{current_offset - limit}"))
@@ -239,8 +265,8 @@ def get_pagination_row(search_id, current_offset, limit, total_count, filter_typ
 
     return buttons
 
-# ✅ 5. BUTTON PARSER (Updated)
-def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, filter_type=None, active_lang=None):
+# ✅ 5. BUTTON PARSER (Combined Logic)
+def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active_filter=None, active_lang=None):
     current_files = files[offset : offset + limit]
     buttons = []
     
@@ -267,13 +293,17 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, filter
                 url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
                 buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
-    pagination = get_pagination_row(search_id, offset, limit, len(files), filter_type, active_lang)
+    # Pagination must receive the active states
+    pagination = get_pagination_row(search_id, offset, limit, len(files), active_filter, active_lang)
     if pagination:
         buttons.append(pagination)
             
     return buttons
 
-# ... (Rest of utils.py including shortlink, fsub, etc. remains unchanged) ...
+# ==============================================================================
+# 4. OTHER HELPERS
+# ==============================================================================
+
 async def get_shortlink(site, api, link):
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}

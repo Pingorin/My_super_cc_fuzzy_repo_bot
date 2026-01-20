@@ -58,7 +58,7 @@ class MediaDB:
                 {"$set": {
                     "query": query,
                     "user_id": int(user_id),
-                    "files": files,
+                    "files": files, # Saves files list with 'file_type' inside
                     "created_at": datetime.datetime.utcnow()
                 }},
                 upsert=True
@@ -76,34 +76,7 @@ class MediaDB:
             return None
 
     # ==================================================================
-    # 🗣️ LANGUAGE DETECTION HELPER
-    # ==================================================================
-    @staticmethod
-    def detect_languages(text):
-        if not text: return []
-        lang_map = {
-            'hindi': 'Hindi', 'hin': 'Hindi',
-            'english': 'English', 'eng': 'English',
-            'tamil': 'Tamil', 'tam': 'Tamil',
-            'telugu': 'Telugu', 'tel': 'Telugu',
-            'kannada': 'Kannada', 'kan': 'Kannada',
-            'malayalam': 'Malayalam', 'mal': 'Malayalam',
-            'bengali': 'Bengali', 'ben': 'Bengali',
-            'punjabi': 'Punjabi', 'pun': 'Punjabi',
-            'marathi': 'Marathi', 'mar': 'Marathi',
-            'gujarati': 'Gujarati', 'guj': 'Gujarati',
-            'urdu': 'Urdu'
-        }
-        
-        found = set()
-        # Regex to find whole words matching languages
-        matches = re.findall(r"\b(hindi|hin|english|eng|tamil|tam|telugu|tel|kannada|kan|malayalam|mal|bengali|ben|punjabi|pun|marathi|mar|gujarati|guj|urdu)\b", text, re.IGNORECASE)
-        
-        for m in matches:
-            found.add(lang_map.get(m.lower(), 'Unknown'))
-            
-        return list(found)
-
+    
     @staticmethod
     def clean_text(text):
         if not text: return ""
@@ -154,15 +127,13 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
 
-            # ✅ 1. Detect File Type
-            file_type = "document"
-            if message.video: file_type = "video"
-            elif message.document: file_type = "document"
-
-            # ✅ 2. Detect Languages
-            languages = self.detect_languages(file_name)
-            if not languages and caption:
-                languages = self.detect_languages(caption)
+            # ✅ STRICT TYPE DETECTION (Video vs Document)
+            file_type = "document" # Default
+            if message.video:
+                file_type = "video"
+            elif message.document:
+                file_type = "document"
+            # Note: Audio/Photos are ignored or treated as per handler, assuming Video/Doc context here.
 
             data_docs.append({
                 '_id': current_id,
@@ -170,8 +141,7 @@ class MediaDB:
                 'chat_id': message.chat.id,
                 'file_id': media.file_id,
                 'file_unique_id': media.file_unique_id,
-                'file_type': file_type,
-                'languages': languages
+                'file_type': file_type # Saved for reference
             })
             
             search_docs.append({
@@ -180,8 +150,7 @@ class MediaDB:
                 'caption': caption,
                 'link_id': current_id,
                 'chat_id': message.chat.id,
-                'file_type': file_type,
-                'languages': languages # ✅ Store for Filtering
+                'file_type': file_type # ✅ Saved for Filtering
             })
             current_id += 1
 
@@ -267,8 +236,7 @@ class MediaDB:
                 "file_size": file['file_size'],
                 "link_id": file['link_id'],
                 "file_chat_id": file.get('chat_id'),
-                "file_type": file.get('file_type', 'document'),
-                "languages": file.get('languages', [])
+                "file_type": file.get('file_type', 'document') # Cache Type
             })
         await self.search_cache.insert_one({
             "_id": unique_id,

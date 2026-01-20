@@ -170,17 +170,10 @@ async def auto_filter(client, message):
             if mode == 'text': text = format_text_results(page_files, query, message.chat.id)
             else: text = format_detailed_results(page_files, query, message.chat.id, time_taken)
             
-            # For Text mode, manually construct filter buttons
-            filter_rows = arrange_buttons([], files, limit, search_id, active_type, active_lang, [], []) 
+            # ✅ FIX: Properly arrange buttons for Text Mode
+            full_markup = arrange_buttons([], files, limit, search_id, active_type, active_lang, howto_btn, free_prem_btn)
             
-            # Extra buttons row
-            btn = []
-            if howto_btn: btn.append(howto_btn)
-            btn.append(free_prem_btn)
-            
-            full_markup = filter_rows + [btn] if btn else filter_rows
-            
-            # Pagination is separate for Text mode (added below)
+            # Manually append pagination since text mode doesn't have file buttons to pop from
             pagination = get_pagination_row(search_id, offset, limit, total_results, active_type, active_lang)
             if pagination: full_markup.append(pagination)
             
@@ -290,11 +283,8 @@ async def handle_unified_pagination(client, query):
             if mode == 'text': text = format_text_results(page_files, req, query.message.chat.id)
             else: text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
             
-            filter_rows = arrange_buttons([], filtered_files, limit, search_id, active_type, active_lang, [], [])
-            btn = []
-            if howto_btn: btn.append(howto_btn)
-            btn.append(free_prem_btn)
-            full_markup = filter_rows + [btn] if btn else filter_rows
+            # ✅ FIX: Correct layout for Text Mode
+            full_markup = arrange_buttons([], filtered_files, limit, search_id, active_type, active_lang, howto_btn, free_prem_btn)
             
             pagination = get_pagination_row(search_id, offset, limit, total_results, active_type, active_lang)
             if pagination: full_markup.append(pagination)

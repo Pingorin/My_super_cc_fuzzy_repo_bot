@@ -23,71 +23,25 @@ class temp(object):
     B_LINK = None
     ME = None
 
-# ✅ 1. UNIFIED FILTER FUNCTION (Type + Language)
-def filter_files(files, f_type=None, f_lang=None):
+# ✅ 1. FILTER FUNCTION (STRICT CHECK)
+def filter_by_type(files, f_type):
     """
-    Filters files based on Type AND Language.
+    Filters files by their database 'file_type'.
+    f_type: 'Video' or 'Document'
     """
     filtered = []
     for f in files:
-        # Check Type (Video/Document)
-        if f_type:
-            db_type = f.get('file_type', 'document').lower()
-            if f_type.lower() != db_type:
-                continue # Skip if type doesn't match
+        # Default to 'document' if missing (for old files)
+        db_type = f.get('file_type', 'document').lower()
         
-        # Check Language
-        if f_lang:
-            db_langs = f.get('languages', [])
-            # If DB has no languages, skip. If lang not in list, skip.
-            if not db_langs or f_lang not in db_langs:
-                continue 
-        
-        filtered.append(f)
+        if f_type == "Video" and db_type == "video":
+            filtered.append(f)
+        elif f_type == "Document" and db_type == "document":
+            filtered.append(f)
+            
     return filtered
 
-# ✅ 2. LANGUAGE BUTTONS GENERATOR
-def get_language_buttons(search_id, files, active_type=None):
-    """
-    Generates the Grid of Languages with Counts.
-    """
-    lang_counts = {}
-    
-    # Calculate counts based on currently filtered files (by type)
-    # If active_type is 'video', only count languages in videos
-    subset = filter_files(files, f_type=active_type)
-    
-    for f in subset:
-        langs = f.get('languages', [])
-        for l in langs:
-            lang_counts[l] = lang_counts.get(l, 0) + 1
-            
-    # Sort by count (descending)
-    sorted_langs = sorted(lang_counts.items(), key=lambda x: x[1], reverse=True)
-    
-    buttons = []
-    row = []
-    for lang, count in sorted_langs:
-        # Callback: spage_{search_id}_{type}_{lang}_{offset}
-        t_code = active_type if active_type else "all"
-        cb_data = f"spage_{search_id}_{t_code}_{lang}_0"
-        
-        row.append(InlineKeyboardButton(f"{lang} ({count})", callback_data=cb_data))
-        
-        if len(row) == 2:
-            buttons.append(row)
-            row = []
-            
-    if row:
-        buttons.append(row)
-        
-    # Back Button
-    t_code = active_type if active_type else "all"
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"spage_{search_id}_{t_code}_all_0")])
-    
-    return buttons
-
-# ✅ 3. FILTER BUTTONS (Video/Docs)
+# ✅ 2. FILTER BUTTONS GENERATOR
 def get_filter_buttons(search_id, active_filter=None):
     row = []
     if active_filter == "video":
@@ -195,8 +149,8 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-# ✅ 4. UNIFIED PAGINATION HELPER (Type + Language)
-def get_pagination_row(search_id, current_offset, limit, total_count, active_type=None, active_lang=None):
+# ✅ 4. PAGINATION HELPER (Updated)
+def get_pagination_row(search_id, current_offset, limit, total_count, filter_type=None):
     buttons = []
     current_page = int(current_offset / limit) + 1
     total_pages = math.ceil(total_count / limit)
@@ -204,12 +158,11 @@ def get_pagination_row(search_id, current_offset, limit, total_count, active_typ
     if total_pages <= 1:
         return []
 
-    # Use short codes for callback to save bytes
-    # Schema: spage_{id}_{type}_{lang}_{offset}
-    t_code = active_type if active_type else "all"
-    l_code = active_lang if active_lang else "all"
-
-    cb_prefix = f"spage_{search_id}_{t_code}_{l_code}"
+    # Use 'filter_' callback if filtered, else 'page_'
+    if filter_type:
+        cb_prefix = f"filter_{search_id}_mode_{filter_type.lower()}"
+    else:
+        cb_prefix = f"page_{search_id}"
 
     if current_offset >= limit:
         buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"{cb_prefix}_{current_offset - limit}"))
@@ -221,8 +174,8 @@ def get_pagination_row(search_id, current_offset, limit, total_count, active_typ
 
     return buttons
 
-# ✅ 5. BUTTON PARSER (Modified for Unified Pagination)
-def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active_type=None, active_lang=None):
+# ✅ 5. BUTTON PARSER (Updated)
+def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, filter_type=None):
     current_files = files[offset : offset + limit]
     buttons = []
     
@@ -249,14 +202,13 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active
                 url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
                 buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
-    # Add Pagination with Type & Language Awareness
-    pagination = get_pagination_row(search_id, offset, limit, len(files), active_type, active_lang)
+    pagination = get_pagination_row(search_id, offset, limit, len(files), filter_type)
     if pagination:
         buttons.append(pagination)
             
     return buttons
 
-# ... (Keep get_shortlink, check_fsub_status, etc. same as before) ...
+# ... (Keep get_shortlink, fsub status, etc. same as they were) ...
 async def get_shortlink(site, api, link):
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}

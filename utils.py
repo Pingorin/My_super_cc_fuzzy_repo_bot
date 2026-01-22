@@ -91,7 +91,7 @@ def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_q
     Row 1: Type (Video/Docs)
     Row 2: Language | Quality
     Row 3: Year
-    Row 4: Reset
+    Row 4+: Resets (All Lang, All Qual, All Year)
     """
     buttons = []
     
@@ -117,34 +117,41 @@ def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_q
     # ROW 2: Language | Quality
     row2 = []
     
-    # Language
-    if active_lang and active_lang != "none":
+    # Language Button
+    if active_lang and active_lang.lower() != "none":
         row2.append(InlineKeyboardButton(f"{active_lang} ✅", callback_data=f"lang_menu_{search_id}_{c_type}_{c_qual}_{c_year}"))
     else:
         row2.append(InlineKeyboardButton("Select Language 🌐", callback_data=f"lang_menu_{search_id}_{c_type}_{c_qual}_{c_year}"))
         
-    # Quality
-    if active_qual and active_qual != "none":
+    # Quality Button
+    if active_qual and active_qual.lower() != "none":
         row2.append(InlineKeyboardButton(f"{active_qual} ✅", callback_data=f"qual_menu_{search_id}_{c_type}_{c_lang}_{c_year}"))
     else:
         row2.append(InlineKeyboardButton("Select Quality 📀", callback_data=f"qual_menu_{search_id}_{c_type}_{c_lang}_{c_year}"))
     buttons.append(row2)
 
-    # ROW 3: Year (New)
+    # ROW 3: Year
     row3 = []
-    if active_year and active_year != "none":
+    if active_year and active_year.lower() != "none":
         row3.append(InlineKeyboardButton(f"{active_year} ✅", callback_data=f"year_menu_{search_id}_{c_type}_{c_lang}_{c_qual}"))
     else:
         row3.append(InlineKeyboardButton("Select Year 🗓", callback_data=f"year_menu_{search_id}_{c_type}_{c_lang}_{c_qual}"))
     buttons.append(row3)
 
-    # ROW 4: Resets
+    # ROW 4: Resets (Specific)
     row4 = []
-    if active_lang != "none" or active_qual != "none" or active_year != "none":
-        # Global Reset
-        row4.append(InlineKeyboardButton("Reset All Filters 🔄", callback_data=f"filter_{search_id}_{c_type}_none_none_none_0"))
+    if active_lang and active_lang.lower() != "none":
+        row4.append(InlineKeyboardButton("All Languages", callback_data=f"filter_{search_id}_{c_type}_none_{c_qual}_{c_year}_0"))
+    if active_qual and active_qual.lower() != "none":
+        row4.append(InlineKeyboardButton("All Qualities", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_none_{c_year}_0"))
+    if active_year and active_year.lower() != "none":
+        row4.append(InlineKeyboardButton("All Years", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{c_qual}_none_0"))
     
     if row4: buttons.append(row4)
+    
+    # Global Reset (Only if more than 1 filter active to save space, or just use specific resets)
+    # if len(row4) > 1:
+    #    buttons.append([InlineKeyboardButton("Reset All Filters 🔄", callback_data=f"filter_{search_id}_none_none_none_none_0")])
         
     return buttons
 
@@ -169,7 +176,12 @@ def get_language_buttons(search_id, files, c_type="none", c_qual="none", c_year=
             row = []
     if row: buttons.append(row)
     
-    buttons.append([InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{c_type}_none_{c_qual}_{c_year}_0")])
+    # Navigation
+    nav = []
+    nav.append(InlineKeyboardButton("All Languages", callback_data=f"filter_{search_id}_{c_type}_none_{c_qual}_{c_year}_0"))
+    nav.append(InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{c_type}_none_{c_qual}_{c_year}_0"))
+    buttons.append(nav)
+    
     return buttons
 
 def get_quality_buttons(search_id, files, c_type="none", c_lang="none", c_year="none"):
@@ -191,7 +203,12 @@ def get_quality_buttons(search_id, files, c_type="none", c_lang="none", c_year="
             row = []
     if row: buttons.append(row)
     
-    buttons.append([InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_none_{c_year}_0")])
+    # Navigation
+    nav = []
+    nav.append(InlineKeyboardButton("All Qualities", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_none_{c_year}_0"))
+    nav.append(InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_none_{c_year}_0"))
+    buttons.append(nav)
+    
     return buttons
 
 def get_year_buttons(search_id, files, c_type="none", c_lang="none", c_qual="none"):
@@ -219,7 +236,12 @@ def get_year_buttons(search_id, files, c_type="none", c_lang="none", c_qual="non
             row = []
     if row: buttons.append(row)
     
-    buttons.append([InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{c_qual}_none_0")])
+    # Navigation
+    nav = []
+    nav.append(InlineKeyboardButton("All Years", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{c_qual}_none_0"))
+    nav.append(InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{c_qual}_none_0"))
+    buttons.append(nav)
+    
     return buttons
 
 # ==============================================================================

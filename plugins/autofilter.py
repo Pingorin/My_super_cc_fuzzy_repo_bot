@@ -10,7 +10,7 @@ from pyrogram.errors import FloodWait, MessageNotModified
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import SITE_URL
-from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, filter_by_type, get_filter_buttons, get_language_buttons, filter_by_lang
+from utils import temp, btn_parser, format_text_results, format_detailed_results, format_card_result, get_pagination_row, filter_by_type, get_filter_buttons, get_language_buttons, get_quality_buttons, filter_by_lang, filter_by_quality
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +47,15 @@ def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_
     if len(files) > limit:
         pagination_row = buttons.pop() 
     
+    # Add Filter Buttons (Rows)
     if filter_buttons:
         for row in filter_buttons:
             buttons.append(row)
     
     if howto_btn: buttons.append(howto_btn)
     if free_prem_btn: buttons.append(free_prem_btn)
+    
+    # Add Pagination at the very bottom
     if pagination_row: buttons.append(pagination_row)
         
     return buttons
@@ -116,8 +119,8 @@ async def auto_filter(client, message):
             
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
-        # ✅ INITIAL STATE: No Filters
-        filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=None)
+        # ✅ INITIAL STATE: All filters None
+        filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None)
 
         # --- MODE A: BUTTON ---
         if mode == 'button':
@@ -230,8 +233,8 @@ async def handle_pagination(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
-        # Standard filter buttons (no language selected yet)
-        filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=None)
+        # Initial Filter State
+        filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None)
 
         if mode == 'button':
             buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, req)
@@ -261,18 +264,15 @@ async def handle_pagination(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 3. MASTER FILTER HANDLER (Combines Type & Language)
+# 3. MASTER FILTER HANDLER (Combines Type, Language & Quality)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_"))
 async def handle_combined_filter(client, query):
-    # This handler manages BOTH Type and Language filters simultaneously.
-    # It catches:
-    # 1. filter_{id}_{type}_{lang}_{offset}  (Main Filter Click)
-    # 2. filter_lang_{id}_{lang}_{type}_{offset} (Specific Language Click)
-
-    if "filter_lang_" in query.data:
-        # Redirect specific lang clicks to the logic below
-        return await handle_language_selection(client, query)
+    # This handler manages ALL filters simultaneously.
+    
+    # Redirect specific menu clicks to their handlers
+    if "filter_lang_" in query.data: return await handle_language_selection(client, query)
+    if "filter_qual_" in query.data: return await handle_quality_selection(client, query)
 
     if is_spam(query.from_user.id):
         try: await query.answer("Slow down! ⏳", show_alert=False)
@@ -283,12 +283,13 @@ async def handle_combined_filter(client, query):
     except: pass
     
     try:
-        # DATA FORMAT: filter_{id}_{type}_{lang}_{offset}
+        # DATA FORMAT: filter_{id}_{type}_{lang}_{qual}_{offset}
         data = query.data.split("_")
         search_id = int(data[1])
         filter_type = data[2] # video, document, none
         filter_lang = data[3] # English, Hindi, none
-        offset = int(data[4])
+        filter_qual = data[4] # 720p, 1080p, none
+        offset = int(data[5])
 
         task_data = Media.get_search_query(search_id)
         task_settings = db.get_group_settings(query.message.chat.id)
@@ -309,9 +310,15 @@ async def handle_combined_filter(client, query):
 
         # 2. APPLY LANGUAGE FILTER
         if filter_lang != "none":
-            final_files = filter_by_lang(files_step_1, filter_lang)
+            files_step_2 = filter_by_lang(files_step_1, filter_lang)
         else:
-            final_files = files_step_1
+            files_step_2 = files_step_1
+            
+        # 3. APPLY QUALITY FILTER
+        if filter_qual != "none":
+            final_files = filter_by_quality(files_step_2, filter_qual)
+        else:
+            final_files = files_step_2
 
         if not final_files:
             return await query.answer("❌ No files match these filters!", show_alert=True)
@@ -330,12 +337,13 @@ async def handle_combined_filter(client, query):
         # ✅ PREPARE STATES FOR NEXT BUTTONS
         pass_type = filter_type if filter_type != "none" else None
         pass_lang = filter_lang if filter_lang != "none" else None
+        pass_qual = filter_qual if filter_qual != "none" else None
 
-        # Generate Buttons (Passing BOTH states)
-        filter_buttons = get_filter_buttons(search_id, active_filter=pass_type, active_lang=pass_lang)
+        # Generate Buttons (Passing ALL states)
+        filter_buttons = get_filter_buttons(search_id, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual)
 
         if mode == 'button':
-            buttons = btn_parser(final_files, query.message.chat.id, search_id, offset, limit, req, active_filter=pass_type, active_lang=pass_lang)
+            buttons = btn_parser(final_files, query.message.chat.id, search_id, offset, limit, req, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual)
             buttons = arrange_buttons(buttons, final_files, limit, filter_buttons, howto_btn, free_prem_btn)
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
             
@@ -352,7 +360,7 @@ async def handle_combined_filter(client, query):
             btn.append(free_prem_btn) 
             
             # Manual Pagination Construction
-            pagination = get_pagination_row(search_id, offset, limit, total_results, active_filter=pass_type, active_lang=pass_lang)
+            pagination = get_pagination_row(search_id, offset, limit, total_results, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual)
             if pagination: btn.append(pagination)
             
             await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
@@ -369,98 +377,41 @@ async def handle_combined_filter(client, query):
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_lang_"))
 async def handle_language_selection(client, query):
-    if is_spam(query.from_user.id):
-        try: await query.answer("Slow down! ⏳", show_alert=False)
-        except: pass
-        return
-
-    try: await query.answer()
-    except: pass
-    
     try:
-        # DATA: filter_lang_{id}_{lang}_{type}_{offset}
+        # DATA: filter_lang_{id}_{lang}_{type}_{qual}_{offset}
         data = query.data.split("_")
-        search_id = int(data[2])
+        search_id = data[2]
         lang = data[3]
-        filter_type = data[4]
-        offset = int(data[5])
-
-        # We reuse the logic in handle_combined_filter by manually fetching and processing
-        # This duplicates code slightly but ensures isolation from regex quirks
+        f_type = data[4]
+        qual = data[5]
+        offset = data[6]
         
-        task_data = Media.get_search_query(search_id)
-        task_settings = db.get_group_settings(query.message.chat.id)
-        cached_data, group_settings = await asyncio.gather(task_data, task_settings)
-        
-        if not cached_data: return
-        
-        all_files = cached_data.get('files')
-        req = cached_data.get('query')
-        if not all_files: all_files = await Media.get_search_results(req)
-
-        # 1. Type Filter
-        if filter_type != "none":
-            capital_type = "Video" if filter_type == "video" else "Document"
-            files_step_1 = filter_by_type(all_files, capital_type)
-        else:
-            files_step_1 = all_files
-            
-        # 2. Lang Filter
-        if lang != "none":
-            final_files = filter_by_lang(files_step_1, lang)
-        else:
-            final_files = files_step_1
-
-        if not final_files:
-            return await query.answer(f"❌ No files found for {lang}!", show_alert=True)
-
-        total_results = len(final_files)
-        mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
-        limit = group_settings.get('result_page_limit', 10) if group_settings else 10
-
-        if mode == 'hybrid':
-            mode = 'button' if len(final_files) <= limit else 'text'
-
-        howto_url = group_settings.get('howto_url')
-        howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
-        free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
-
-        pass_type = filter_type if filter_type != "none" else None
-        pass_lang = lang if lang != "none" else None
-
-        filter_buttons = get_filter_buttons(search_id, active_filter=pass_type, active_lang=pass_lang)
-
-        if mode == 'button':
-            buttons = btn_parser(final_files, query.message.chat.id, search_id, offset, limit, req, active_filter=pass_type, active_lang=pass_lang)
-            buttons = arrange_buttons(buttons, final_files, limit, filter_buttons, howto_btn, free_prem_btn)
-            await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
-            
-        elif mode in ['text', 'detailed']:
-            page_files = final_files[offset : offset + limit]
-            
-            if mode == 'text': text = format_text_results(page_files, req, query.message.chat.id)
-            else: text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
-            
-            btn = []
-            if filter_buttons: 
-                for row in filter_buttons: btn.append(row)
-            if howto_btn: btn.append(howto_btn)
-            btn.append(free_prem_btn) 
-            
-            pagination = get_pagination_row(search_id, offset, limit, total_results, active_filter=pass_type, active_lang=pass_lang)
-            if pagination: btn.append(pagination)
-            
-            await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
-
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-    except MessageNotModified:
-        pass
-    except Exception as e:
-        traceback.print_exc()
+        # Route to Master Filter: filter_{id}_{type}_{lang}_{qual}_{offset}
+        query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{offset}"
+        await handle_combined_filter(client, query)
+    except: pass
 
 # ==============================================================================
-# 5. LANGUAGE MENU OPENER
+# 5. QUALITY SELECTION HANDLER (Redirects to Combined Filter)
+# ==============================================================================
+@Client.on_callback_query(filters.regex(r"^filter_qual_"))
+async def handle_quality_selection(client, query):
+    try:
+        # DATA: filter_qual_{id}_{qual}_{type}_{lang}_{offset}
+        data = query.data.split("_")
+        search_id = data[2]
+        qual = data[3]
+        f_type = data[4]
+        lang = data[5]
+        offset = data[6]
+        
+        # Route to Master Filter: filter_{id}_{type}_{lang}_{qual}_{offset}
+        query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{offset}"
+        await handle_combined_filter(client, query)
+    except: pass
+
+# ==============================================================================
+# 6. LANGUAGE MENU OPENER
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^lang_menu_"))
 async def handle_language_menu(client, query):
@@ -468,27 +419,30 @@ async def handle_language_menu(client, query):
     except: pass
 
     try:
-        # DATA: lang_menu_{id}_{type}
+        # DATA: lang_menu_{id}_{type}_{qual}
         data = query.data.split("_")
         search_id = int(data[2])
-        curr_type = data[3] # Preserves current type filter!
+        curr_type = data[3] 
+        curr_qual = data[4]
 
         cached_data = await Media.get_search_query(search_id)
         if not cached_data: return await query.answer("Results expired.", show_alert=True)
         
         files = cached_data.get('files')
         
-        # If type is selected, filter files first so language counts are relevant
+        # Filter first by Type & Qual to get accurate counts
         if curr_type != "none":
-            capital_type = "Video" if curr_type == "video" else "Document"
-            files = filter_by_type(files, capital_type)
+            files = filter_by_type(files, "Video" if curr_type == "video" else "Document")
+        if curr_qual != "none":
+            files = filter_by_quality(files, curr_qual)
 
         if not files: return await query.answer("No files to filter.", show_alert=True)
         
-        pass_type = curr_type if curr_type != "none" else None
+        pt = curr_type if curr_type != "none" else None
+        pq = curr_qual if curr_qual != "none" else None
         
         # Generate Grid
-        lang_buttons = get_language_buttons(search_id, files, active_filter=pass_type)
+        lang_buttons = get_language_buttons(search_id, files, active_type=pt, active_qual=pq)
         
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(lang_buttons))
         
@@ -496,14 +450,53 @@ async def handle_language_menu(client, query):
         logger.error(f"Lang Menu Error: {e}")
 
 # ==============================================================================
-# 6. RESET HANDLER
+# 7. QUALITY MENU OPENER (NEW)
+# ==============================================================================
+@Client.on_callback_query(filters.regex(r"^qual_menu_"))
+async def handle_quality_menu(client, query):
+    try: await query.answer()
+    except: pass
+
+    try:
+        # DATA: qual_menu_{id}_{type}_{lang}
+        data = query.data.split("_")
+        search_id = int(data[2])
+        curr_type = data[3]
+        curr_lang = data[4]
+
+        cached_data = await Media.get_search_query(search_id)
+        if not cached_data: return await query.answer("Results expired.", show_alert=True)
+        
+        files = cached_data.get('files')
+        
+        # Filter first by Type & Lang to get accurate counts
+        if curr_type != "none":
+            files = filter_by_type(files, "Video" if curr_type == "video" else "Document")
+        if curr_lang != "none":
+            files = filter_by_lang(files, curr_lang)
+
+        if not files: return await query.answer("No files to filter.", show_alert=True)
+        
+        pt = curr_type if curr_type != "none" else None
+        pl = curr_lang if curr_lang != "none" else None
+        
+        # Generate Grid
+        qual_buttons = get_quality_buttons(search_id, files, active_type=pt, active_lang=pl)
+        
+        await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(qual_buttons))
+        
+    except Exception as e:
+        logger.error(f"Qual Menu Error: {e}")
+
+# ==============================================================================
+# 8. RESET HANDLER
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^unfilter_"))
 async def handle_unfilter(client, query):
     try:
         search_id = int(query.data.split("_")[1])
-        # Reset everything to 0
-        query.data = f"filter_{search_id}_none_none_0"
+        # Reset everything to 0: filter_{id}_none_none_none_0
+        query.data = f"filter_{search_id}_none_none_none_0"
         await handle_combined_filter(client, query)
     except: 
         try: await query.answer("Error Resetting", show_alert=True)

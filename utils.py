@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 # ✅ CONSTANTS
 LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu"]
-# Common qualities to detect
 QUALITIES = ["4k", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
 
 class temp(object):
@@ -229,7 +228,10 @@ def format_text_results(files, query, chat_id):
 
 def format_detailed_results(files, query, chat_id, time_taken=0):
     text = (
-        f"⚡ **Results for {query}**\nFound {len(files)} files.\n\n"
+        f"⚡ **Hey {query} lovers!**\n"
+        f"👻 **Here are your results....**\n"
+        f"⌛ **Time taken:** {time_taken} seconds\n"
+        f"code: {len(files)}\n\n"
     )
     for file in files:
         f_name = file['file_name']
@@ -238,7 +240,23 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         f_chat_id = chat_id
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
-        text += f"📂 <a href='{link}'>{f_name}</a> [{f_size}]\n\n"
+        
+        # ✅ EXTRACT QUALITY
+        q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
+        quality = q_match.group(0) if q_match else "N/A"
+        
+        # ✅ EXTRACT LANGUAGE
+        l_matches = re.findall(r"\b(Hindi|Eng|English|Tam|Tamil|Tel|Telugu|Mal|Malayalam|Kan|Kannada|Ben|Bengali|Pun|Punjabi|Mar|Marathi)\b", f_name, re.IGNORECASE)
+        if l_matches:
+            lang = ", ".join(sorted(set([l.capitalize() for l in l_matches])))
+        else:
+            lang = "N/A"
+
+        text += f"📂 <a href='{link}'>Click to get this file 📥</a>\n"
+        text += f"🖥 Name: {f_name}\n"
+        text += f"📀 Quality: {quality}\n"
+        text += f"🌍 Language: {lang}\n"
+        text += f"📦 Size: [{f_size}]\n\n"
     return text
 
 def format_card_result(file, current_index, total_count):

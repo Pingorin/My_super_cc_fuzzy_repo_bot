@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 # ✅ CONSTANTS
 LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu"]
 QUALITIES = ["4k", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
+# Year Regex: Matches 19xx or 20xx (e.g., 1999, 2023)
+YEAR_REGEX = r"(?P<year>(19|20)\d{2})"
 
 class temp(object):
     U_NAME = None
@@ -63,8 +65,19 @@ def filter_by_quality(files, quality):
     q_clean = re.escape(quality.lower())
     for f in files:
         fname = f.get('file_name', '').lower()
-        # Use Regex to avoid matching "720" inside "1720" etc.
         if re.search(rf"\b{q_clean}\b", fname) or quality.lower() in fname:
+            filtered.append(f)
+    return filtered
+
+def filter_by_year(files, year):
+    if not year or year.lower() == "none" or year.lower() == "all":
+        return files
+    
+    filtered = []
+    for f in files:
+        fname = f.get('file_name', '')
+        # Check if specific year exists in filename
+        if str(year) in fname:
             filtered.append(f)
     return filtered
 
@@ -72,124 +85,141 @@ def filter_by_quality(files, quality):
 # 2. BUTTON GENERATORS
 # ==============================================================================
 
-def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None):
+def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None, active_year=None):
     """
-    Generates the Main Filter Menu.
+    Generates Main Filter Menu.
     Row 1: Type (Video/Docs)
     Row 2: Language | Quality
-    Row 3: Reset Buttons (if active)
+    Row 3: Year
+    Row 4: Reset
     """
     buttons = []
     
-    curr_type = active_filter if active_filter else "none"
-    curr_lang = active_lang if active_lang else "none"
-    curr_qual = active_qual if active_qual else "none"
+    # Safe Defaults
+    c_type = active_filter if active_filter else "none"
+    c_lang = active_lang if active_lang else "none"
+    c_qual = active_qual if active_qual else "none"
+    c_year = active_year if active_year else "none"
 
-    # ROW 1: Type Filters
+    # ROW 1: Type
     row1 = []
     if active_filter == "video":
         row1.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
-        row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_0"))
+        row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{c_lang}_{c_qual}_{c_year}_0"))
     elif active_filter == "document":
         row1.append(InlineKeyboardButton("Docs ✅", callback_data="ignore"))
-        row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_0"))
+        row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{c_lang}_{c_qual}_{c_year}_0"))
     else:
-        row1.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_video_{curr_lang}_{curr_qual}_0"))
-        row1.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_document_{curr_lang}_{curr_qual}_0"))
+        row1.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_video_{c_lang}_{c_qual}_{c_year}_0"))
+        row1.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_document_{c_lang}_{c_qual}_{c_year}_0"))
     buttons.append(row1)
 
     # ROW 2: Language | Quality
     row2 = []
     
-    # Language Button
+    # Language
     if active_lang and active_lang != "none":
-        # Opens Lang Menu, Remembers Type & Qual
-        row2.append(InlineKeyboardButton(f"{active_lang} ✅", callback_data=f"lang_menu_{search_id}_{curr_type}_{curr_qual}"))
+        row2.append(InlineKeyboardButton(f"{active_lang} ✅", callback_data=f"lang_menu_{search_id}_{c_type}_{c_qual}_{c_year}"))
     else:
-        row2.append(InlineKeyboardButton("Select Language 🌐", callback_data=f"lang_menu_{search_id}_{curr_type}_{curr_qual}"))
+        row2.append(InlineKeyboardButton("Select Language 🌐", callback_data=f"lang_menu_{search_id}_{c_type}_{c_qual}_{c_year}"))
         
-    # Quality Button
+    # Quality
     if active_qual and active_qual != "none":
-        # Opens Qual Menu, Remembers Type & Lang
-        row2.append(InlineKeyboardButton(f"{active_qual} ✅", callback_data=f"qual_menu_{search_id}_{curr_type}_{curr_lang}"))
+        row2.append(InlineKeyboardButton(f"{active_qual} ✅", callback_data=f"qual_menu_{search_id}_{c_type}_{c_lang}_{c_year}"))
     else:
-        row2.append(InlineKeyboardButton("Select Quality 📀", callback_data=f"qual_menu_{search_id}_{curr_type}_{curr_lang}"))
-        
+        row2.append(InlineKeyboardButton("Select Quality 📀", callback_data=f"qual_menu_{search_id}_{c_type}_{c_lang}_{c_year}"))
     buttons.append(row2)
 
-    # ROW 3: Reset Buttons (Only show if a filter is active)
+    # ROW 3: Year (New)
     row3 = []
-    if active_lang and active_lang != "none":
-        row3.append(InlineKeyboardButton("All Languages", callback_data=f"filter_{search_id}_{curr_type}_none_{curr_qual}_0"))
-    if active_qual and active_qual != "none":
-        row3.append(InlineKeyboardButton("All Qualities", callback_data=f"filter_{search_id}_{curr_type}_{curr_lang}_none_0"))
+    if active_year and active_year != "none":
+        row3.append(InlineKeyboardButton(f"{active_year} ✅", callback_data=f"year_menu_{search_id}_{c_type}_{c_lang}_{c_qual}"))
+    else:
+        row3.append(InlineKeyboardButton("Select Year 🗓", callback_data=f"year_menu_{search_id}_{c_type}_{c_lang}_{c_qual}"))
+    buttons.append(row3)
+
+    # ROW 4: Resets
+    row4 = []
+    if active_lang != "none" or active_qual != "none" or active_year != "none":
+        # Global Reset
+        row4.append(InlineKeyboardButton("Reset All Filters 🔄", callback_data=f"filter_{search_id}_{c_type}_none_none_none_0"))
     
-    if row3:
-        buttons.append(row3)
+    if row4: buttons.append(row4)
         
     return buttons
 
-def get_language_buttons(search_id, files, active_type=None, active_qual=None):
-    """Generates the Language Grid."""
+# --- SUB MENUS ---
+
+def get_language_buttons(search_id, files, c_type="none", c_qual="none", c_year="none"):
     buttons = []
     row = []
     
-    curr_type = active_type if active_type else "none"
-    curr_qual = active_qual if active_qual else "none"
-
     stats = {lang: 0 for lang in LANGUAGES}
-    for file in files:
-        fname = file.get('file_name', '').lower()
+    for f in files:
+        fname = f.get('file_name', '').lower()
         for lang in LANGUAGES:
-            if lang.lower() in fname:
-                stats[lang] += 1
+            if lang.lower() in fname: stats[lang] += 1
                 
     for lang, count in stats.items():
         if count > 0:
-            # Pass Type & Qual forward
-            row.append(InlineKeyboardButton(f"{lang} ({count})", callback_data=f"filter_lang_{search_id}_{lang}_{curr_type}_{curr_qual}_0"))
-        
+            # Callback: filter_lang_{id}_{lang}_{type}_{qual}_{year}_{offset}
+            row.append(InlineKeyboardButton(f"{lang} ({count})", callback_data=f"filter_lang_{search_id}_{lang}_{c_type}_{c_qual}_{c_year}_0"))
         if len(row) == 2:
             buttons.append(row)
             row = []
-            
     if row: buttons.append(row)
-        
-    buttons.append([
-        InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{curr_type}_none_{curr_qual}_0")
-    ])
+    
+    buttons.append([InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{c_type}_none_{c_qual}_{c_year}_0")])
     return buttons
 
-def get_quality_buttons(search_id, files, active_type=None, active_lang=None):
-    """Generates the Quality Grid."""
+def get_quality_buttons(search_id, files, c_type="none", c_lang="none", c_year="none"):
     buttons = []
     row = []
     
-    curr_type = active_type if active_type else "none"
-    curr_lang = active_lang if active_lang else "none"
-
     stats = {qual: 0 for qual in QUALITIES}
-    for file in files:
-        fname = file.get('file_name', '').lower()
+    for f in files:
+        fname = f.get('file_name', '').lower()
         for qual in QUALITIES:
-            # Check for exact word match or substring
             if re.search(rf"\b{re.escape(qual.lower())}\b", fname) or qual.lower() in fname:
                 stats[qual] += 1
                 
     for qual, count in stats.items():
         if count > 0:
-            # Pass Type & Lang forward
-            row.append(InlineKeyboardButton(f"{qual} ({count})", callback_data=f"filter_qual_{search_id}_{qual}_{curr_type}_{curr_lang}_0"))
-        
-        if len(row) == 3: # 3 buttons per row for qualities
+            row.append(InlineKeyboardButton(f"{qual} ({count})", callback_data=f"filter_qual_{search_id}_{qual}_{c_type}_{c_lang}_{c_year}_0"))
+        if len(row) == 3:
             buttons.append(row)
             row = []
-            
     if row: buttons.append(row)
-        
-    buttons.append([
-        InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{curr_type}_{curr_lang}_none_0")
-    ])
+    
+    buttons.append([InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_none_{c_year}_0")])
+    return buttons
+
+def get_year_buttons(search_id, files, c_type="none", c_lang="none", c_qual="none"):
+    buttons = []
+    row = []
+    
+    # Extract years dynamically from current files
+    years_found = {}
+    
+    for f in files:
+        fname = f.get('file_name', '')
+        # Regex search for 4 digit years starting with 19 or 20
+        match = re.search(YEAR_REGEX, fname)
+        if match:
+            y = match.group('year')
+            years_found[y] = years_found.get(y, 0) + 1
+
+    # Sort years descending (2025, 2024, ...)
+    sorted_years = sorted(years_found.items(), key=lambda x: x[0], reverse=True)
+
+    for year, count in sorted_years:
+        row.append(InlineKeyboardButton(f"{year} ({count})", callback_data=f"filter_year_{search_id}_{year}_{c_type}_{c_lang}_{c_qual}_0"))
+        if len(row) == 3:
+            buttons.append(row)
+            row = []
+    if row: buttons.append(row)
+    
+    buttons.append([InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{c_qual}_none_0")])
     return buttons
 
 # ==============================================================================
@@ -228,10 +258,7 @@ def format_text_results(files, query, chat_id):
 
 def format_detailed_results(files, query, chat_id, time_taken=0):
     text = (
-        f"⚡ **Hey {query} lovers!**\n"
-        f"👻 **Here are your results....**\n"
-        f"⌛ **Time taken:** {time_taken} seconds\n"
-        f"code: {len(files)}\n\n"
+        f"⚡ **Results for {query}**\nFound {len(files)} files.\n\n"
     )
     for file in files:
         f_name = file['file_name']
@@ -241,20 +268,24 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         
-        # ✅ EXTRACT QUALITY
+        # Extract Quality
         q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
         quality = q_match.group(0) if q_match else "N/A"
         
-        # ✅ EXTRACT LANGUAGE
+        # Extract Language
         l_matches = re.findall(r"\b(Hindi|Eng|English|Tam|Tamil|Tel|Telugu|Mal|Malayalam|Kan|Kannada|Ben|Bengali|Pun|Punjabi|Mar|Marathi)\b", f_name, re.IGNORECASE)
         if l_matches:
             lang = ", ".join(sorted(set([l.capitalize() for l in l_matches])))
         else:
             lang = "N/A"
+            
+        # Extract Year
+        y_match = re.search(YEAR_REGEX, f_name)
+        year = y_match.group('year') if y_match else "N/A"
 
         text += f"📂 <a href='{link}'>Click to get this file 📥</a>\n"
         text += f"🖥 Name: {f_name}\n"
-        text += f"📀 Quality: {quality}\n"
+        text += f"📀 Quality: {quality} | 🗓 Year: {year}\n"
         text += f"🌍 Language: {lang}\n"
         text += f"📦 Size: [{f_size}]\n\n"
     return text
@@ -281,7 +312,7 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-def get_pagination_row(search_id, current_offset, limit, total_count, active_filter=None, active_lang=None, active_qual=None):
+def get_pagination_row(search_id, current_offset, limit, total_count, active_filter=None, active_lang=None, active_qual=None, active_year=None):
     buttons = []
     current_page = int(current_offset / limit) + 1
     total_pages = math.ceil(total_count / limit)
@@ -289,13 +320,13 @@ def get_pagination_row(search_id, current_offset, limit, total_count, active_fil
     if total_pages <= 1:
         return []
 
-    # Safe Strings
-    a_type = active_filter if active_filter else "none"
-    a_lang = active_lang if active_lang else "none"
-    a_qual = active_qual if active_qual else "none"
+    c_type = active_filter if active_filter else "none"
+    c_lang = active_lang if active_lang else "none"
+    c_qual = active_qual if active_qual else "none"
+    c_year = active_year if active_year else "none"
 
-    # Master Callback: filter_{id}_{type}_{lang}_{qual}_{offset}
-    cb_prefix = f"filter_{search_id}_{a_type}_{a_lang}_{a_qual}"
+    # Master Callback: filter_{id}_{type}_{lang}_{qual}_{year}_{offset}
+    cb_prefix = f"filter_{search_id}_{c_type}_{c_lang}_{c_qual}_{c_year}"
 
     if current_offset >= limit:
         buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"{cb_prefix}_{current_offset - limit}"))
@@ -307,8 +338,7 @@ def get_pagination_row(search_id, current_offset, limit, total_count, active_fil
 
     return buttons
 
-# ✅ 4. BUTTON PARSER (Combined Logic)
-def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active_filter=None, active_lang=None, active_qual=None):
+def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active_filter=None, active_lang=None, active_qual=None, active_year=None):
     current_files = files[offset : offset + limit]
     buttons = []
     
@@ -336,7 +366,7 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active
                 buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     # Pagination must receive the active states
-    pagination = get_pagination_row(search_id, offset, limit, len(files), active_filter, active_lang, active_qual)
+    pagination = get_pagination_row(search_id, offset, limit, len(files), active_filter, active_lang, active_qual, active_year)
     if pagination:
         buttons.append(pagination)
             

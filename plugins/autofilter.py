@@ -125,7 +125,7 @@ async def auto_filter(client, message):
             
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
-        # ✅ INITIAL STATE: All filters None
+        # ✅ INITIAL STATE: All filters None (Passing Year and Size as None)
         filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
 
         if mode == 'button':
@@ -146,7 +146,7 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
             
-            pagination = get_pagination_row(search_id, offset, limit, total_results, active_size=None)
+            pagination = get_pagination_row(search_id, offset, limit, total_results, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
             if pagination: btn.append(pagination)
             
             sent_msg = await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
@@ -161,7 +161,7 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
 
-            pagination = get_pagination_row(search_id, offset, limit, total_results, active_size=None)
+            pagination = get_pagination_row(search_id, offset, limit, total_results, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
             if pagination: btn.append(pagination)
             
             sent_msg = await message.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
@@ -235,6 +235,7 @@ async def handle_pagination(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
+        # Reset filters for generic pagination if not passed (Future improvement: Pass filters in pagination)
         filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
 
         if mode == 'button':

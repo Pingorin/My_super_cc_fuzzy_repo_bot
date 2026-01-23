@@ -21,10 +21,10 @@ logger = logging.getLogger(__name__)
 LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu"]
 QUALITIES = ["4k", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
 
-# ✅ STRICTER YEAR REGEX 
-# Matches 19xx or 20xx only if surrounded by word boundaries.
-# Excludes numbers followed by 'x' (like 1920x1080) or 'p' (like 1080p)
-YEAR_REGEX = r"\b(?P<year>(19|20)\d{2})\b(?![xXpP])"
+# ✅ STRICTER YEAR REGEX (UPDATED)
+# Matches 19xx or 20xx surrounded by non-digit separators (dots, underscores, brackets, etc.)
+# Excludes numbers followed by 'x' (like 1920x1080) or 'p' (like 1080p) or other digits.
+YEAR_REGEX = r"(?<!\d)(?P<year>(19|20)\d{2})(?![xXpP\d])"
 
 class temp(object):
     U_NAME = None
@@ -80,8 +80,10 @@ def filter_by_year(files, year):
     for f in files:
         fname = f.get('file_name', '')
         # Use strictly matching regex for filtering
-        if re.search(rf"\b{year}\b", fname):
-            filtered.append(f)
+        if re.search(YEAR_REGEX, fname):
+            match = re.search(YEAR_REGEX, fname)
+            if match and match.group('year') == year:
+                filtered.append(f)
     return filtered
 
 # ==============================================================================

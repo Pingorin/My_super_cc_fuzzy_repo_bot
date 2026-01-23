@@ -20,8 +20,9 @@ logger = logging.getLogger(__name__)
 # ✅ CONSTANTS
 LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu"]
 QUALITIES = ["4k", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
-# Year Regex: Matches 19xx or 20xx (e.g., 1999, 2023)
-YEAR_REGEX = r"(?P<year>(19|20)\d{2})"
+
+# ✅ STRICTER YEAR REGEX (Prevents "2048mb" or junk numbers)
+YEAR_REGEX = r"\b(?P<year>(19|20)\d{2})\b"
 
 class temp(object):
     U_NAME = None
@@ -91,7 +92,7 @@ def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_q
     Row 1: Type (Video/Docs)
     Row 2: Language | Quality
     Row 3: Year
-    Row 4+: Resets (All Lang, All Qual, All Year)
+    Row 4+: Resets
     """
     buttons = []
     
@@ -138,7 +139,7 @@ def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_q
         row3.append(InlineKeyboardButton("Select Year 🗓", callback_data=f"year_menu_{search_id}_{c_type}_{c_lang}_{c_qual}"))
     buttons.append(row3)
 
-    # ROW 4: Resets (Specific)
+    # ROW 4: Resets
     row4 = []
     if active_lang and active_lang.lower() != "none":
         row4.append(InlineKeyboardButton("All Languages", callback_data=f"filter_{search_id}_{c_type}_none_{c_qual}_{c_year}_0"))
@@ -148,10 +149,6 @@ def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_q
         row4.append(InlineKeyboardButton("All Years", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{c_qual}_none_0"))
     
     if row4: buttons.append(row4)
-    
-    # Global Reset (Only if more than 1 filter active to save space, or just use specific resets)
-    # if len(row4) > 1:
-    #    buttons.append([InlineKeyboardButton("Reset All Filters 🔄", callback_data=f"filter_{search_id}_none_none_none_none_0")])
         
     return buttons
 
@@ -169,7 +166,6 @@ def get_language_buttons(search_id, files, c_type="none", c_qual="none", c_year=
                 
     for lang, count in stats.items():
         if count > 0:
-            # Callback: filter_lang_{id}_{lang}_{type}_{qual}_{year}_{offset}
             row.append(InlineKeyboardButton(f"{lang} ({count})", callback_data=f"filter_lang_{search_id}_{lang}_{c_type}_{c_qual}_{c_year}_0"))
         if len(row) == 2:
             buttons.append(row)
@@ -215,12 +211,12 @@ def get_year_buttons(search_id, files, c_type="none", c_lang="none", c_qual="non
     buttons = []
     row = []
     
-    # Extract years dynamically from current files
+    # Extract years dynamically
     years_found = {}
     
     for f in files:
         fname = f.get('file_name', '')
-        # Regex search for 4 digit years starting with 19 or 20
+        # Regex search for 4 digit years starting with 19 or 20, strictly bordered
         match = re.search(YEAR_REGEX, fname)
         if match:
             y = match.group('year')
@@ -230,8 +226,11 @@ def get_year_buttons(search_id, files, c_type="none", c_lang="none", c_qual="non
     sorted_years = sorted(years_found.items(), key=lambda x: x[0], reverse=True)
 
     for year, count in sorted_years:
-        row.append(InlineKeyboardButton(f"{year} ({count})", callback_data=f"filter_year_{search_id}_{year}_{c_type}_{c_lang}_{c_qual}_0"))
-        if len(row) == 3:
+        if count > 0:
+            # ✅ REMOVED COUNT FROM DISPLAY: f"{year}"
+            row.append(InlineKeyboardButton(f"{year}", callback_data=f"filter_year_{search_id}_{year}_{c_type}_{c_lang}_{c_qual}_0"))
+        
+        if len(row) == 3: # 3 years per row
             buttons.append(row)
             row = []
     if row: buttons.append(row)

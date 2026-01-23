@@ -21,9 +21,8 @@ logger = logging.getLogger(__name__)
 LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu"]
 QUALITIES = ["4k", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
 
-# ✅ STRICTER YEAR REGEX (UPDATED)
-# Matches 19xx or 20xx surrounded by non-digit separators (dots, underscores, brackets, etc.)
-# Excludes numbers followed by 'x' (like 1920x1080) or 'p' (like 1080p) or other digits.
+# ✅ STRICTER YEAR REGEX (For Button Generation)
+# Matches 19xx or 20xx surrounded by non-digit separators
 YEAR_REGEX = r"(?<!\d)(?P<year>(19|20)\d{2})(?![xXpP\d])"
 
 class temp(object):
@@ -79,11 +78,11 @@ def filter_by_year(files, year):
     filtered = []
     for f in files:
         fname = f.get('file_name', '')
-        # Use strictly matching regex for filtering
-        if re.search(YEAR_REGEX, fname):
-            match = re.search(YEAR_REGEX, fname)
-            if match and match.group('year') == year:
-                filtered.append(f)
+        # ✅ FIX: Simple Check
+        # Check if the specific selected year exists in the filename as a standalone number.
+        # This fixes the issue where clicking a valid year button returned 0 results.
+        if re.search(rf"(?<!\d){re.escape(year)}(?!\d)", fname):
+            filtered.append(f)
     return filtered
 
 # ==============================================================================
@@ -211,6 +210,7 @@ def get_year_buttons(search_id, files, c_type="none", c_lang="none", c_qual="non
     
     for f in files:
         fname = f.get('file_name', '')
+        # Use strict regex to FIND the years
         match = re.search(YEAR_REGEX, fname)
         if match:
             y = match.group('year')
@@ -223,7 +223,6 @@ def get_year_buttons(search_id, files, c_type="none", c_lang="none", c_qual="non
 
     for year, count in sorted_years:
         if count > 0:
-            # ✅ COUNT REMOVED: Just showing the Year
             row.append(InlineKeyboardButton(f"{year}", callback_data=f"filter_year_{search_id}_{year}_{c_type}_{c_lang}_{c_qual}_0"))
         
         if len(row) == 3: 

@@ -562,7 +562,7 @@ async def handle_quality_menu(client, query):
         logger.error(f"Qual Menu Error: {e}")
 
 # ==============================================================================
-# 10. YEAR MENU OPENER
+# 10. YEAR MENU OPENER (FIXED)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^year_menu_"))
 async def handle_year_menu(client, query):
@@ -601,7 +601,7 @@ async def handle_year_menu(client, query):
         # Generate Grid (Sub-menu)
         year_buttons = get_year_buttons(search_id, files, active_type=pt, active_lang=pl, active_qual=pq)
         
-        # ✅ Inline Navigation: Edit the existing message markup
+        # ✅ FIX: edit_reply_markup ensures menu updates in place (no new message)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(year_buttons))
         
     except Exception as e:

@@ -10,12 +10,13 @@ from pyrogram.errors import FloodWait, MessageNotModified
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import SITE_URL
+# ✅ FIX: Removed 'arrange_buttons' from this import list
 from utils import (
     temp, btn_parser, format_text_results, format_detailed_results, 
     format_card_result, get_pagination_row, filter_by_type, 
     get_filter_buttons, get_language_buttons, get_quality_buttons, 
     filter_by_lang, filter_by_quality, filter_by_year, get_year_buttons,
-    filter_by_size, get_size_buttons, arrange_buttons
+    filter_by_size, get_size_buttons
 )
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,28 @@ async def auto_delete_task(bot_message, user_message, delay, show_thanks, query=
             await asyncio.sleep(60)
             await temp_msg.delete()
     except: pass
+
+# ==============================================================================
+# 🛠️ HELPER: ARRANGE BUTTONS
+# ==============================================================================
+# This function is defined here locally, so we don't need to import it.
+def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn):
+    pagination_row = []
+    if len(files) > limit:
+        pagination_row = buttons.pop() 
+    
+    # Add Filter Buttons (Rows)
+    if filter_buttons:
+        for row in filter_buttons:
+            buttons.append(row)
+    
+    if howto_btn: buttons.append(howto_btn)
+    if free_prem_btn: buttons.append(free_prem_btn)
+    
+    # Add Pagination at the very bottom
+    if pagination_row: buttons.append(pagination_row)
+        
+    return buttons
 
 # ==============================================================================
 # 1. MAIN SEARCH HANDLER

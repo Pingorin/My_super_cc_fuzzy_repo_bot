@@ -125,15 +125,17 @@ async def auto_filter(client, message):
             
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
-        # ✅ INITIAL STATE: All filters None (Passing Year and Size as None)
+        # ✅ INITIAL STATE: All filters None (Year & Size included)
         filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
 
+        # --- MODE A: BUTTON ---
         if mode == 'button':
             buttons = btn_parser(files, message.chat.id, search_id, offset, limit, query, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
             buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn)
             msg_text = f"⚡ **Results for:** `{query}`\nfound {len(files)} files."
             sent_msg = await message.reply_text(text=msg_text, reply_markup=InlineKeyboardMarkup(buttons))
 
+        # --- MODE B/C: TEXT & DETAILED ---
         elif mode in ['text', 'detailed']:
             page_files = files[offset : offset + limit]
             
@@ -146,11 +148,12 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
             
-            pagination = get_pagination_row(search_id, offset, limit, total_results, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
+            pagination = get_pagination_row(search_id, offset, limit, total_results, active_size=None)
             if pagination: btn.append(pagination)
             
             sent_msg = await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
 
+        # --- MODE D: SITE ---
         elif mode == 'site':
             web_id = await Media.save_search_results(query, files, message.chat.id)
             base_url = SITE_URL.rstrip('/') if (SITE_URL and SITE_URL.startswith("http")) else "http://127.0.0.1:8080"
@@ -161,11 +164,12 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
 
-            pagination = get_pagination_row(search_id, offset, limit, total_results, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
+            pagination = get_pagination_row(search_id, offset, limit, total_results, active_size=None)
             if pagination: btn.append(pagination)
             
             sent_msg = await message.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
 
+        # --- MODE E: CARD ---
         elif mode == 'card':
             file = files[0]
             text = format_card_result(file, 0, total_results)
@@ -196,7 +200,7 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# 2. PAGINATION
+# 2. STANDARD PAGINATION
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^page_"))
 async def handle_pagination(client, query):
@@ -235,7 +239,7 @@ async def handle_pagination(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
-        # Reset filters for generic pagination if not passed (Future improvement: Pass filters in pagination)
+        # Initial Filter State
         filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
 
         if mode == 'button':
@@ -266,11 +270,11 @@ async def handle_pagination(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 3. MASTER FILTER HANDLER
+# 3. MASTER FILTER HANDLER (Combines Type, Language, Quality, Year & Size)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_"))
 async def handle_combined_filter(client, query):
-    # This acts as the "Main Menu" or "Result View"
+    # This handler manages ALL filters simultaneously.
     
     # Redirect specific menu clicks to their handlers
     if "filter_lang_" in query.data: return await handle_language_selection(client, query)
@@ -294,13 +298,14 @@ async def handle_combined_filter(client, query):
         filter_lang = data[3]
         filter_qual = data[4]
         
+        # ✅ BACKWARD COMPATIBILITY & PARSING
         if len(data) >= 8:
             filter_year = data[5]
             filter_size = data[6]
             offset = int(data[7])
         elif len(data) >= 7:
             filter_year = data[5]
-            filter_size = "none"
+            filter_size = "none" # Default if not present
             offset = int(data[6])
         else:
             filter_year = "none"
@@ -317,12 +322,36 @@ async def handle_combined_filter(client, query):
         req = cached_data.get('query')
         if not all_files: all_files = await Media.get_search_results(req)
 
-        # APPLY ALL FILTERS
-        files_1 = filter_by_type(all_files, "Video" if filter_type == "video" else "Document") if filter_type != "none" else all_files
-        files_2 = filter_by_lang(files_1, filter_lang) if filter_lang != "none" else files_1
-        files_3 = filter_by_quality(files_2, filter_qual) if filter_qual != "none" else files_2
-        files_4 = filter_by_year(files_3, filter_year) if filter_year != "none" else files_3
-        final_files = filter_by_size(files_4, filter_size) if filter_size != "none" else files_4
+        # 1. APPLY TYPE FILTER
+        if filter_type != "none":
+            capital_type = "Video" if filter_type == "video" else "Document"
+            files_step_1 = filter_by_type(all_files, capital_type)
+        else:
+            files_step_1 = all_files
+
+        # 2. APPLY LANGUAGE FILTER
+        if filter_lang != "none":
+            files_step_2 = filter_by_lang(files_step_1, filter_lang)
+        else:
+            files_step_2 = files_step_1
+            
+        # 3. APPLY QUALITY FILTER
+        if filter_qual != "none":
+            files_step_3 = filter_by_quality(files_step_2, filter_qual)
+        else:
+            files_step_3 = files_step_2
+
+        # 4. APPLY YEAR FILTER
+        if filter_year != "none":
+            files_step_4 = filter_by_year(files_step_3, filter_year)
+        else:
+            files_step_4 = files_step_3
+            
+        # 5. APPLY SIZE FILTER
+        if filter_size != "none":
+            final_files = filter_by_size(files_step_4, filter_size)
+        else:
+            final_files = files_step_4
 
         if not final_files:
             return await query.answer("❌ No files match these filters!", show_alert=True)
@@ -338,14 +367,14 @@ async def handle_combined_filter(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        # PREPARE STATES
+        # ✅ PREPARE STATES FOR NEXT BUTTONS
         pass_type = filter_type if filter_type != "none" else None
         pass_lang = filter_lang if filter_lang != "none" else None
         pass_qual = filter_qual if filter_qual != "none" else None
         pass_year = filter_year if filter_year != "none" else None
         pass_size = filter_size if filter_size != "none" else None
 
-        # Main Menu Buttons (Filter Row)
+        # Generate Buttons (Passing ALL states including size)
         filter_buttons = get_filter_buttons(search_id, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
 
         if mode == 'button':
@@ -355,6 +384,7 @@ async def handle_combined_filter(client, query):
             
         elif mode in ['text', 'detailed']:
             page_files = final_files[offset : offset + limit]
+            
             if mode == 'text': text = format_text_results(page_files, req, query.message.chat.id)
             else: text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
             
@@ -364,6 +394,7 @@ async def handle_combined_filter(client, query):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn) 
             
+            # Manual Pagination Construction
             pagination = get_pagination_row(search_id, offset, limit, total_results, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
             if pagination: btn.append(pagination)
             
@@ -377,23 +408,28 @@ async def handle_combined_filter(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 4. SELECTION HANDLERS (Redirects to Combined Filter)
+# 4. LANGUAGE SELECTION HANDLER
 # ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^filter_lang_"))
 async def handle_language_selection(client, query):
     try:
+        # DATA: filter_lang_{id}_{lang}_{type}_{qual}_{year}_{size}_{offset}
         data = query.data.split("_")
-        # Ensure we capture all data
+        
+        # Check params length
         if len(data) >= 9:
             search_id, lang, f_type, qual, year, size, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8]
         else:
+            # Fallback/Older data
             search_id, lang, f_type, qual, year, size, offset = data[2], data[3], data[4], data[5], "none", "none", data[6]
 
         query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{offset}"
         await handle_combined_filter(client, query)
     except: pass
 
+# ==============================================================================
+# 5. QUALITY SELECTION HANDLER
+# ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_qual_"))
 async def handle_quality_selection(client, query):
     try:
@@ -407,6 +443,9 @@ async def handle_quality_selection(client, query):
         await handle_combined_filter(client, query)
     except: pass
 
+# ==============================================================================
+# 6. YEAR SELECTION HANDLER
+# ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_year_"))
 async def handle_year_selection(client, query):
     try:
@@ -420,9 +459,13 @@ async def handle_year_selection(client, query):
         await handle_combined_filter(client, query)
     except: pass
 
+# ==============================================================================
+# 7. SIZE SELECTION HANDLER
+# ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_size_"))
 async def handle_size_selection(client, query):
     try:
+        # DATA: filter_size_{id}_{size}_{type}_{lang}_{qual}_{year}_{offset}
         data = query.data.split("_")
         if len(data) >= 9:
             search_id, size, f_type, lang, qual, year, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8]
@@ -432,16 +475,15 @@ async def handle_size_selection(client, query):
     except: pass
 
 # ==============================================================================
-# 5. MENU HANDLERS (The Navigation System)
+# 8. LANGUAGE MENU OPENER
 # ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^lang_menu_"))
 async def handle_language_menu(client, query):
     try: await query.answer()
     except: pass
 
     try:
-        # Parsing All States
+        # DATA: lang_menu_{id}_{type}_{qual}_{year}_{size}
         data = query.data.split("_")
         search_id = int(data[2])
         curr_type = data[3] 
@@ -451,28 +493,35 @@ async def handle_language_menu(client, query):
 
         cached_data = await Media.get_search_query(search_id)
         if not cached_data: return await query.answer("Results expired.", show_alert=True)
+        
         files = cached_data.get('files')
         
-        # Filtering for Count Accuracy
-        if curr_type != "none": files = filter_by_type(files, "Video" if curr_type == "video" else "Document")
-        if curr_qual != "none": files = filter_by_quality(files, curr_qual)
-        if curr_year != "none": files = filter_by_year(files, curr_year)
-        if curr_size != "none": files = filter_by_size(files, curr_size)
+        # Filter first by other attributes
+        if curr_type != "none":
+            files = filter_by_type(files, "Video" if curr_type == "video" else "Document")
+        if curr_qual != "none":
+            files = filter_by_quality(files, curr_qual)
+        if curr_year != "none":
+            files = filter_by_year(files, curr_year)
+        if curr_size != "none":
+            files = filter_by_size(files, curr_size)
 
         if not files: return await query.answer("No files to filter.", show_alert=True)
         
         pt = curr_type if curr_type != "none" else None
         pq = curr_qual if curr_qual != "none" else None
-        py = curr_year if curr_year != "none" else None
-        ps = curr_size if curr_size != "none" else None
         
-        # PASSING ALL STATES to utils.py
-        lang_buttons = get_language_buttons(search_id, files, active_type=pt, active_qual=pq, active_year=py, active_size=ps)
+        # Generate Grid
+        lang_buttons = get_language_buttons(search_id, files, active_type=pt, active_qual=pq) 
+        
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(lang_buttons))
         
     except Exception as e:
         logger.error(f"Lang Menu Error: {e}")
 
+# ==============================================================================
+# 9. QUALITY MENU OPENER
+# ==============================================================================
 @Client.on_callback_query(filters.regex(r"^qual_menu_"))
 async def handle_quality_menu(client, query):
     try: await query.answer()
@@ -488,32 +537,40 @@ async def handle_quality_menu(client, query):
 
         cached_data = await Media.get_search_query(search_id)
         if not cached_data: return await query.answer("Results expired.", show_alert=True)
+        
         files = cached_data.get('files')
         
-        if curr_type != "none": files = filter_by_type(files, "Video" if curr_type == "video" else "Document")
-        if curr_lang != "none": files = filter_by_lang(files, curr_lang)
-        if curr_year != "none": files = filter_by_year(files, curr_year)
-        if curr_size != "none": files = filter_by_size(files, curr_size)
+        if curr_type != "none":
+            files = filter_by_type(files, "Video" if curr_type == "video" else "Document")
+        if curr_lang != "none":
+            files = filter_by_lang(files, curr_lang)
+        if curr_year != "none":
+            files = filter_by_year(files, curr_year)
+        if curr_size != "none":
+            files = filter_by_size(files, curr_size)
 
         if not files: return await query.answer("No files to filter.", show_alert=True)
         
         pt = curr_type if curr_type != "none" else None
         pl = curr_lang if curr_lang != "none" else None
-        py = curr_year if curr_year != "none" else None
-        ps = curr_size if curr_size != "none" else None
         
-        qual_buttons = get_quality_buttons(search_id, files, active_type=pt, active_lang=pl, active_year=py, active_size=ps)
+        qual_buttons = get_quality_buttons(search_id, files, active_type=pt, active_lang=pl)
+        
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(qual_buttons))
         
     except Exception as e:
         logger.error(f"Qual Menu Error: {e}")
 
+# ==============================================================================
+# 10. YEAR MENU OPENER
+# ==============================================================================
 @Client.on_callback_query(filters.regex(r"^year_menu_"))
 async def handle_year_menu(client, query):
     try: await query.answer()
     except: pass
 
     try:
+        # DATA: year_menu_{id}_{type}_{lang}_{qual}_{size}
         data = query.data.split("_")
         search_id = int(data[2])
         curr_type = data[3]
@@ -523,32 +580,43 @@ async def handle_year_menu(client, query):
 
         cached_data = await Media.get_search_query(search_id)
         if not cached_data: return await query.answer("Results expired.", show_alert=True)
+        
         files = cached_data.get('files')
         
-        if curr_type != "none": files = filter_by_type(files, "Video" if curr_type == "video" else "Document")
-        if curr_lang != "none": files = filter_by_lang(files, curr_lang)
-        if curr_qual != "none": files = filter_by_quality(files, curr_qual)
-        if curr_size != "none": files = filter_by_size(files, curr_size)
+        if curr_type != "none":
+            files = filter_by_type(files, "Video" if curr_type == "video" else "Document")
+        if curr_lang != "none":
+            files = filter_by_lang(files, curr_lang)
+        if curr_qual != "none":
+            files = filter_by_quality(files, curr_qual)
+        if curr_size != "none":
+            files = filter_by_size(files, curr_size)
 
         if not files: return await query.answer("No files to filter.", show_alert=True)
         
         pt = curr_type if curr_type != "none" else None
         pl = curr_lang if curr_lang != "none" else None
         pq = curr_qual if curr_qual != "none" else None
-        ps = curr_size if curr_size != "none" else None
         
-        year_buttons = get_year_buttons(search_id, files, active_type=pt, active_lang=pl, active_qual=pq, active_size=ps)
+        # Generate Grid (Sub-menu)
+        year_buttons = get_year_buttons(search_id, files, active_type=pt, active_lang=pl, active_qual=pq)
+        
+        # ✅ Inline Navigation: Edit the existing message markup
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(year_buttons))
         
     except Exception as e:
         logger.error(f"Year Menu Error: {e}")
 
+# ==============================================================================
+# 11. SIZE MENU OPENER (NEW)
+# ==============================================================================
 @Client.on_callback_query(filters.regex(r"^size_menu_"))
 async def handle_size_menu(client, query):
     try: await query.answer()
     except: pass
 
     try:
+        # DATA: size_menu_{id}_{type}_{lang}_{qual}_{year}
         data = query.data.split("_")
         search_id = int(data[2])
         curr_type = data[3]
@@ -558,16 +626,20 @@ async def handle_size_menu(client, query):
 
         cached_data = await Media.get_search_query(search_id)
         if not cached_data: return await query.answer("Results expired.", show_alert=True)
+        
         files = cached_data.get('files')
 
+        # Generate Buttons
         size_buttons = get_size_buttons(search_id, active_type=curr_type, active_lang=curr_lang, active_qual=curr_qual, active_year=curr_year)
+        
+        # ✅ Inline Navigation for Size Menu
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(size_buttons))
         
     except Exception as e:
         logger.error(f"Size Menu Error: {e}")
 
 # ==============================================================================
-# 6. RESET & OTHERS
+# 12. RESET HANDLER
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^unfilter_"))
 async def handle_unfilter(client, query):

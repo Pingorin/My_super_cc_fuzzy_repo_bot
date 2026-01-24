@@ -78,7 +78,7 @@ def filter_by_year(files, year):
             filtered.append(f)
     return filtered
 
-# ✅ NEW: SIZE FILTER FUNCTION
+# ✅ SIZE FILTER FUNCTION
 def filter_by_size(files, size_range):
     if not size_range or size_range.lower() == "none" or size_range.lower() == "all":
         return files
@@ -109,10 +109,6 @@ def filter_by_size(files, size_range):
 def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
     """
     Generates the Main Filter Menu.
-    Row 1: Type (Video/Docs)
-    Row 2: Language | Quality
-    Row 3: Year | Size
-    Row 4: Reset Buttons
     """
     buttons = []
     
@@ -148,7 +144,7 @@ def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_q
         row2.append(InlineKeyboardButton("Select Quality 📀", callback_data=f"qual_menu_{search_id}_{curr_type}_{curr_lang}_{curr_year}_{curr_size}"))
     buttons.append(row2)
 
-    # ROW 3: YEAR | SIZE (New)
+    # ROW 3: YEAR | SIZE
     row3 = []
     
     # -- Year Button --
@@ -281,7 +277,7 @@ def get_year_buttons(search_id, files, active_type=None, active_lang=None, activ
     ])
     return buttons
 
-# ✅ NEW: SIZE BUTTON GENERATOR
+# ✅ SIZE BUTTON GENERATOR
 def get_size_buttons(search_id, active_type=None, active_lang=None, active_qual=None, active_year=None):
     curr_type = active_type if active_type else "none"
     curr_lang = active_lang if active_lang else "none"
@@ -298,7 +294,6 @@ def get_size_buttons(search_id, active_type=None, active_lang=None, active_qual=
 
     buttons = []
     for text, key in ranges:
-        # Pass Type, Lang, Qual, Year forward. Size (key) is the new selection.
         buttons.append([InlineKeyboardButton(text, callback_data=f"filter_size_{search_id}_{key}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}_0")])
             
     buttons.append([
@@ -414,7 +409,7 @@ def get_pagination_row(search_id, current_offset, limit, total_count, active_fil
 
     return buttons
 
-# ✅ 4. BUTTON PARSER (Combined Logic with Size)
+# ✅ 4. BUTTON PARSER
 def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
     current_files = files[offset : offset + limit]
     buttons = []

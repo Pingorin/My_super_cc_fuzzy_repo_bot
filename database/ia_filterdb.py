@@ -1,7 +1,7 @@
 import logging
 import re
-import uuid
 import datetime
+import uuid
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError
 from pymongo import ReturnDocument
@@ -58,7 +58,7 @@ class MediaDB:
                 {"$set": {
                     "query": query,
                     "user_id": int(user_id),
-                    "files": files, # Saves files list with 'file_type' inside
+                    "files": files,
                     "created_at": datetime.datetime.utcnow()
                 }},
                 upsert=True
@@ -67,6 +67,16 @@ class MediaDB:
         except Exception as e:
             print(f"❌ CRITICAL DB ERROR (Save): {e}")
             return None
+
+    # ✅ NEW: Update Cache (Needed for Pagination on Filtered Results)
+    async def update_search_cache(self, search_id, files):
+        try:
+            await self.temp_searches.update_one(
+                {"_id": int(search_id)},
+                {"$set": {"files": files}}
+            )
+        except Exception as e:
+            print(f"❌ Cache Update Error: {e}")
 
     async def get_search_query(self, search_id):
         try:
@@ -127,13 +137,12 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
 
-            # ✅ STRICT TYPE DETECTION (Video vs Document)
-            file_type = "document" # Default
+            # ✅ STRICT TYPE DETECTION
+            file_type = "document" 
             if message.video:
                 file_type = "video"
             elif message.document:
                 file_type = "document"
-            # Note: Audio/Photos are ignored or treated as per handler, assuming Video/Doc context here.
 
             data_docs.append({
                 '_id': current_id,
@@ -141,7 +150,7 @@ class MediaDB:
                 'chat_id': message.chat.id,
                 'file_id': media.file_id,
                 'file_unique_id': media.file_unique_id,
-                'file_type': file_type # Saved for reference
+                'file_type': file_type 
             })
             
             search_docs.append({
@@ -150,7 +159,7 @@ class MediaDB:
                 'caption': caption,
                 'link_id': current_id,
                 'chat_id': message.chat.id,
-                'file_type': file_type # ✅ Saved for Filtering
+                'file_type': file_type # Saved for Filtering
             })
             current_id += 1
 
@@ -176,47 +185,107 @@ class MediaDB:
     async def get_file_details(self, link_id):
         return await self.data_col.find_one({'_id': int(link_id)})
 
-    async def get_search_results(self, query):
+    # ==================================================================
+    # ⚡ OPTIMIZED SEARCH WITH DB FILTERING
+    # ==================================================================
+    async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None):
         try:
+            # Stage 1: Search ($search with Index)
+            # Ensure "default" index exists on Atlas
+            must_clauses = []
             words = query.split()
-            if len(words) <= 1:
-                search_stage = {
-                    "$search": {
-                        "index": "default",
-                        "text": {
-                            "query": query,
-                            "path": ["file_name", "caption"],
-                            "fuzzy": {"maxEdits": 2, "prefixLength": 0, "maxExpansions": 50}
-                        }
+            for word in words:
+                must_clauses.append({
+                    "text": {
+                        "query": word,
+                        "path": ["file_name", "caption"],
+                        "fuzzy": {"maxEdits": 1}
                     }
-                }
-            else:
-                must_clauses = []
-                for word in words:
-                    must_clauses.append({
-                        "text": {
-                            "query": word,
-                            "path": ["file_name", "caption"],
-                            "fuzzy": {"maxEdits": 1}
-                        }
-                    })
-                search_stage = {
-                    "$search": {
-                        "index": "default",
-                        "compound": {"must": must_clauses}
-                    }
-                }
+                })
 
-            pipeline = [search_stage, {"$limit": 50}]
+            pipeline = []
+            pipeline.append({
+                "$search": {
+                    "index": "default", 
+                    "compound": {"must": must_clauses}
+                }
+            })
+
+            # Stage 2: Filter ($match)
+            match_filters = {}
+            
+            if file_type and file_type != "none":
+                # Convert to match DB storage (lowercase usually)
+                capital_type = "video" if file_type.lower() == "video" else "document"
+                match_filters["file_type"] = capital_type
+
+            if lang and lang != "none":
+                match_filters["file_name"] = {"$regex": lang, "$options": "i"}
+
+            if quality and quality != "none":
+                match_filters["file_name"] = {"$regex": quality, "$options": "i"}
+            
+            if year and year != "none":
+                match_filters["file_name"] = {"$regex": str(year)}
+
+            if size_range and size_range != "none":
+                MB_500 = 500 * 1024 * 1024
+                GB_1 = 1024 * 1024 * 1024
+                GB_2 = 2 * 1024 * 1024 * 1024
+                
+                if size_range == "min500":
+                    match_filters["file_size"] = {"$lt": MB_500}
+                elif size_range == "500-1gb":
+                    match_filters["file_size"] = {"$gte": MB_500, "$lt": GB_1}
+                elif size_range == "1gb-2gb":
+                    match_filters["file_size"] = {"$gte": GB_1, "$lt": GB_2}
+                elif size_range == "max2gb":
+                    match_filters["file_size"] = {"$gte": GB_2}
+
+            if match_filters:
+                pipeline.append({"$match": match_filters})
+
+            pipeline.append({"$limit": 100}) 
+
             cursor = self.search_col.aggregate(pipeline)
-            files = await cursor.to_list(length=50)
+            files = await cursor.to_list(length=100)
             return files
+            
         except Exception as e:
+            # Fallback: Regex Search (Slower but works without Atlas Search Index)
+            # Useful for local testing or if index is missing
+            print(f"⚠️ Index Search Failed: {e}. Switching to Fallback.")
             safe_query = re.escape(query)
             regex = re.compile(safe_query, re.IGNORECASE)
-            cursor = self.search_col.find({"$or": [{"file_name": regex}, {"caption": regex}]})
+            
+            fallback_filter = {"$or": [{"file_name": regex}, {"caption": regex}]}
+            
+            # Apply basic DB filters where possible
+            if file_type and file_type != "none": 
+                fallback_filter["file_type"] = "video" if file_type.lower() == "video" else "document"
+
+            cursor = self.search_col.find(fallback_filter)
             cursor.sort('$natural', -1)
-            return await cursor.to_list(length=50)
+            files = await cursor.to_list(length=100)
+            
+            # Manually filter the rest in Python
+            final_files = []
+            for f in files:
+                fname = f.get('file_name', '').lower()
+                fsize = f.get('file_size', 0)
+                
+                if lang and lang != "none" and lang.lower() not in fname: continue
+                if quality and quality != "none" and quality.lower() not in fname: continue
+                if year and year != "none" and str(year) not in fname: continue
+                
+                if size_range == "min500" and fsize >= 500*1024*1024: continue
+                elif size_range == "500-1gb" and not (500*1024*1024 <= fsize < 1024*1024*1024): continue
+                elif size_range == "1gb-2gb" and not (1024*1024*1024 <= fsize < 2*1024*1024*1024): continue
+                elif size_range == "max2gb" and fsize < 2*1024*1024*1024: continue
+                
+                final_files.append(f)
+                
+            return final_files
 
     async def total_files_count(self):
         return await self.data_col.count_documents({})
@@ -236,7 +305,7 @@ class MediaDB:
                 "file_size": file['file_size'],
                 "link_id": file['link_id'],
                 "file_chat_id": file.get('chat_id'),
-                "file_type": file.get('file_type', 'document') # Cache Type
+                "file_type": file.get('file_type', 'document')
             })
         await self.search_cache.insert_one({
             "_id": unique_id,

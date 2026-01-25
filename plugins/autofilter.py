@@ -10,7 +10,7 @@ from pyrogram.errors import FloodWait, MessageNotModified
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import SITE_URL
-# ✅ FIX: 'arrange_buttons' and 'get_type_row' are defined locally
+# ✅ FIX: 'arrange_buttons' is defined locally below
 from utils import (
     temp, btn_parser, format_text_results, format_detailed_results, 
     format_card_result, get_pagination_row, filter_by_type, 
@@ -69,8 +69,19 @@ def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_
         
     return buttons
 
-# ✅ HELPER: Get "Video | Docs" Row
-def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_size):
+# ✅ UPDATED HELPER: Get "Video | Docs" Row (Smart Logic)
+def get_type_row(files, search_id, curr_type, curr_lang, curr_qual, curr_year, curr_size):
+    # Only show buttons if BOTH types exist in the result list
+    has_video = False
+    has_docs = False
+    for f in files:
+        if f.get('file_type', 'document') == 'video': has_video = True
+        elif f.get('file_type', 'document') == 'document': has_docs = True
+    
+    # If one type is missing, don't show the toggle buttons
+    if not (has_video and has_docs):
+        return []
+
     row = []
     if curr_type == "video":
         row.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
@@ -142,8 +153,8 @@ async def auto_filter(client, message):
             
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
-        # ✅ INITIAL STATE
-        filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
+        # ✅ PASS 'files' so utils.py can hide empty categories
+        filter_buttons = get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
 
         # --- MODE A: BUTTON ---
         if mode == 'button':
@@ -251,7 +262,7 @@ async def handle_pagination(client, query):
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
         # Initial Filter State
-        filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
+        filter_buttons = get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
 
         # BUTTON MODE
         buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, req)
@@ -359,8 +370,8 @@ async def handle_combined_filter(client, query):
         pass_year = filter_year if filter_year != "none" else None
         pass_size = filter_size if filter_size != "none" else None
 
-        # MAIN MENU BUTTONS
-        filter_buttons = get_filter_buttons(search_id, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
+        # MAIN MENU BUTTONS (SMART)
+        filter_buttons = get_filter_buttons(search_id, final_files, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
 
         if mode == 'button':
             buttons = btn_parser(final_files, query.message.chat.id, search_id, offset, limit, req, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
@@ -442,7 +453,7 @@ async def handle_size_selection(client, query):
     except: pass
 
 # ==============================================================================
-# 8. LANGUAGE MENU OPENER (Fixed Mode Logic)
+# 8. LANGUAGE MENU OPENER (Fixed Mode Logic & Smart Types)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^lang_menu_"))
 async def handle_language_menu(client, query):
@@ -486,8 +497,8 @@ async def handle_language_menu(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        # Buttons Building
-        type_buttons = get_type_row(search_id, curr_type, "none", curr_qual, curr_year, curr_size)
+        # Buttons Building (Using Smart Type Helper)
+        type_buttons = get_type_row(files, search_id, curr_type, "none", curr_qual, curr_year, curr_size)
         lang_buttons = get_language_buttons(search_id, files, active_type=pt, active_qual=pq) 
         middle_buttons = type_buttons + lang_buttons
         
@@ -511,7 +522,7 @@ async def handle_language_menu(client, query):
         logger.error(f"Lang Menu Error: {e}")
 
 # ==============================================================================
-# 9. QUALITY MENU OPENER (Fixed Mode Logic)
+# 9. QUALITY MENU OPENER (Fixed Mode Logic & Smart Types)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^qual_menu_"))
 async def handle_quality_menu(client, query):
@@ -553,7 +564,7 @@ async def handle_quality_menu(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        type_buttons = get_type_row(search_id, curr_type, curr_lang, "none", curr_year, curr_size)
+        type_buttons = get_type_row(files, search_id, curr_type, curr_lang, "none", curr_year, curr_size)
         qual_buttons = get_quality_buttons(search_id, files, active_type=pt, active_lang=pl)
         middle_buttons = type_buttons + qual_buttons
         
@@ -574,7 +585,7 @@ async def handle_quality_menu(client, query):
         logger.error(f"Qual Menu Error: {e}")
 
 # ==============================================================================
-# 10. YEAR MENU OPENER (Fixed Mode Logic)
+# 10. YEAR MENU OPENER (Fixed Mode Logic & Smart Types)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^year_menu_"))
 async def handle_year_menu(client, query):
@@ -617,7 +628,7 @@ async def handle_year_menu(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        type_buttons = get_type_row(search_id, curr_type, curr_lang, curr_qual, "none", curr_size)
+        type_buttons = get_type_row(files, search_id, curr_type, curr_lang, curr_qual, "none", curr_size)
         year_buttons = get_year_buttons(search_id, files, active_type=pt, active_lang=pl, active_qual=pq)
         middle_buttons = type_buttons + year_buttons
         
@@ -638,7 +649,7 @@ async def handle_year_menu(client, query):
         logger.error(f"Year Menu Error: {e}")
 
 # ==============================================================================
-# 11. SIZE MENU OPENER (Fixed Mode Logic)
+# 11. SIZE MENU OPENER (Fixed Mode Logic & Smart Types)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^size_menu_"))
 async def handle_size_menu(client, query):
@@ -670,7 +681,7 @@ async def handle_size_menu(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        type_buttons = get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, "none")
+        type_buttons = get_type_row(files, search_id, curr_type, curr_lang, curr_qual, curr_year, "none")
         size_buttons = get_size_buttons(search_id, active_type=curr_type, active_lang=curr_lang, active_qual=curr_qual, active_year=curr_year)
         middle_buttons = type_buttons + size_buttons
         

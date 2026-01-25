@@ -10,7 +10,7 @@ from pyrogram.errors import FloodWait, MessageNotModified
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import SITE_URL
-# ✅ FIX: 'arrange_buttons' is defined locally below, so removed from import
+# ✅ FIX: 'arrange_buttons' and 'get_type_row' are defined locally
 from utils import (
     temp, btn_parser, format_text_results, format_detailed_results, 
     format_card_result, get_pagination_row, filter_by_type, 
@@ -69,7 +69,7 @@ def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_
         
     return buttons
 
-# ✅ NEW HELPER: Get "Video | Docs" Row
+# ✅ HELPER: Get "Video | Docs" Row
 def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_size):
     row = []
     if curr_type == "video":
@@ -343,7 +343,12 @@ async def handle_combined_filter(client, query):
         if not final_files:
             return await query.answer("❌ No files match these filters!", show_alert=True)
 
+        # DETERMINE MODE
+        mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
+        if mode == 'hybrid':
+            mode = 'button' if len(final_files) <= limit else 'text'
+
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
@@ -357,12 +362,29 @@ async def handle_combined_filter(client, query):
         # MAIN MENU BUTTONS
         filter_buttons = get_filter_buttons(search_id, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
 
-        # RE-ARRANGE
-        buttons = btn_parser(final_files, query.message.chat.id, search_id, offset, limit, req, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
-        buttons = arrange_buttons(buttons, final_files, limit, filter_buttons, howto_btn, free_prem_btn)
-        
-        await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+        if mode == 'button':
+            buttons = btn_parser(final_files, query.message.chat.id, search_id, offset, limit, req, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
+            buttons = arrange_buttons(buttons, final_files, limit, filter_buttons, howto_btn, free_prem_btn)
+            await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
             
+        elif mode in ['text', 'detailed']:
+            # In Text Mode: Update Text + Show Filters + Pagination
+            page_files = final_files[offset : offset + limit]
+            
+            if mode == 'text': text = format_text_results(page_files, req, query.message.chat.id)
+            else: text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
+            
+            btn = []
+            if filter_buttons: 
+                for row in filter_buttons: btn.append(row)
+            if howto_btn: btn.append(howto_btn)
+            btn.append(free_prem_btn) 
+            
+            pagination = get_pagination_row(search_id, offset, limit, len(final_files), active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
+            if pagination: btn.append(pagination)
+            
+            await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
+
     except FloodWait as e:
         await asyncio.sleep(e.value)
     except MessageNotModified:
@@ -420,7 +442,7 @@ async def handle_size_selection(client, query):
     except: pass
 
 # ==============================================================================
-# 8. LANGUAGE MENU OPENER (Layout: Files + Type + Langs + Footer)
+# 8. LANGUAGE MENU OPENER (Fixed Mode Logic)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^lang_menu_"))
 async def handle_language_menu(client, query):
@@ -454,25 +476,34 @@ async def handle_language_menu(client, query):
         pt = curr_type if curr_type != "none" else None
         pq = curr_qual if curr_qual != "none" else None
         
+        # ✅ DETERMINE MODE
+        mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
+        if mode == 'hybrid':
+            mode = 'button' if len(files) <= limit else 'text'
+
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        # 1. File Buttons (Page 0)
-        buttons = btn_parser(files, query.message.chat.id, search_id, 0, limit, req)
-        
-        # 2. Get Type Buttons (Video | Docs)
+        # Buttons Building
         type_buttons = get_type_row(search_id, curr_type, "none", curr_qual, curr_year, curr_size)
-        
-        # 3. Get Language Buttons
         lang_buttons = get_language_buttons(search_id, files, active_type=pt, active_qual=pq) 
-        
-        # 4. Combine: Type + Langs
         middle_buttons = type_buttons + lang_buttons
         
-        # 5. Arrange Layout
-        final_buttons = arrange_buttons(buttons, files, limit, middle_buttons, howto_btn, free_prem_btn)
+        if mode == 'button':
+             # Button Mode: Files + Menu
+             buttons = btn_parser(files, query.message.chat.id, search_id, 0, limit, req)
+             final_buttons = arrange_buttons(buttons, files, limit, middle_buttons, howto_btn, free_prem_btn)
+        else:
+             # Text Mode: NO File Buttons. Just Menu + Footer + Pagination
+             final_buttons = []
+             for row in middle_buttons: final_buttons.append(row)
+             if howto_btn: final_buttons.append(howto_btn)
+             if free_prem_btn: final_buttons.append(free_prem_btn)
+             # Add Pagination Row manually for text mode
+             pagination = get_pagination_row(search_id, 0, limit, len(files), active_filter=pt, active_qual=pq)
+             if pagination: final_buttons.append(pagination)
 
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(final_buttons))
         
@@ -480,7 +511,7 @@ async def handle_language_menu(client, query):
         logger.error(f"Lang Menu Error: {e}")
 
 # ==============================================================================
-# 9. QUALITY MENU OPENER (Layout: Files + Type + Quals + Footer)
+# 9. QUALITY MENU OPENER (Fixed Mode Logic)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^qual_menu_"))
 async def handle_quality_menu(client, query):
@@ -513,27 +544,37 @@ async def handle_quality_menu(client, query):
         pt = curr_type if curr_type != "none" else None
         pl = curr_lang if curr_lang != "none" else None
         
+        mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
+        if mode == 'hybrid':
+            mode = 'button' if len(files) <= limit else 'text'
+
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        buttons = btn_parser(files, query.message.chat.id, search_id, 0, limit, req)
-        
         type_buttons = get_type_row(search_id, curr_type, curr_lang, "none", curr_year, curr_size)
         qual_buttons = get_quality_buttons(search_id, files, active_type=pt, active_lang=pl)
-        
         middle_buttons = type_buttons + qual_buttons
         
-        final_buttons = arrange_buttons(buttons, files, limit, middle_buttons, howto_btn, free_prem_btn)
-        
+        if mode == 'button':
+             buttons = btn_parser(files, query.message.chat.id, search_id, 0, limit, req)
+             final_buttons = arrange_buttons(buttons, files, limit, middle_buttons, howto_btn, free_prem_btn)
+        else:
+             final_buttons = []
+             for row in middle_buttons: final_buttons.append(row)
+             if howto_btn: final_buttons.append(howto_btn)
+             if free_prem_btn: final_buttons.append(free_prem_btn)
+             pagination = get_pagination_row(search_id, 0, limit, len(files), active_filter=pt, active_lang=pl)
+             if pagination: final_buttons.append(pagination)
+
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(final_buttons))
         
     except Exception as e:
         logger.error(f"Qual Menu Error: {e}")
 
 # ==============================================================================
-# 10. YEAR MENU OPENER (Layout: Files + Type + Years + Footer)
+# 10. YEAR MENU OPENER (Fixed Mode Logic)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^year_menu_"))
 async def handle_year_menu(client, query):
@@ -567,19 +608,29 @@ async def handle_year_menu(client, query):
         pl = curr_lang if curr_lang != "none" else None
         pq = curr_qual if curr_qual != "none" else None
         
+        mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
+        if mode == 'hybrid':
+            mode = 'button' if len(files) <= limit else 'text'
+
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        buttons = btn_parser(files, query.message.chat.id, search_id, 0, limit, req)
-        
         type_buttons = get_type_row(search_id, curr_type, curr_lang, curr_qual, "none", curr_size)
         year_buttons = get_year_buttons(search_id, files, active_type=pt, active_lang=pl, active_qual=pq)
-        
         middle_buttons = type_buttons + year_buttons
         
-        final_buttons = arrange_buttons(buttons, files, limit, middle_buttons, howto_btn, free_prem_btn)
+        if mode == 'button':
+             buttons = btn_parser(files, query.message.chat.id, search_id, 0, limit, req)
+             final_buttons = arrange_buttons(buttons, files, limit, middle_buttons, howto_btn, free_prem_btn)
+        else:
+             final_buttons = []
+             for row in middle_buttons: final_buttons.append(row)
+             if howto_btn: final_buttons.append(howto_btn)
+             if free_prem_btn: final_buttons.append(free_prem_btn)
+             pagination = get_pagination_row(search_id, 0, limit, len(files), active_filter=pt, active_lang=pl, active_qual=pq)
+             if pagination: final_buttons.append(pagination)
         
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(final_buttons))
         
@@ -587,7 +638,7 @@ async def handle_year_menu(client, query):
         logger.error(f"Year Menu Error: {e}")
 
 # ==============================================================================
-# 11. SIZE MENU OPENER (Layout: Files + Type + Sizes + Footer)
+# 11. SIZE MENU OPENER (Fixed Mode Logic)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^size_menu_"))
 async def handle_size_menu(client, query):
@@ -610,19 +661,29 @@ async def handle_size_menu(client, query):
         files = cached_data.get('files')
         req = cached_data.get('query')
 
+        mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
+        if mode == 'hybrid':
+            mode = 'button' if len(files) <= limit else 'text'
+
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        buttons = btn_parser(files, query.message.chat.id, search_id, 0, limit, req)
-        
         type_buttons = get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, "none")
         size_buttons = get_size_buttons(search_id, active_type=curr_type, active_lang=curr_lang, active_qual=curr_qual, active_year=curr_year)
-        
         middle_buttons = type_buttons + size_buttons
         
-        final_buttons = arrange_buttons(buttons, files, limit, middle_buttons, howto_btn, free_prem_btn)
+        if mode == 'button':
+             buttons = btn_parser(files, query.message.chat.id, search_id, 0, limit, req)
+             final_buttons = arrange_buttons(buttons, files, limit, middle_buttons, howto_btn, free_prem_btn)
+        else:
+             final_buttons = []
+             for row in middle_buttons: final_buttons.append(row)
+             if howto_btn: final_buttons.append(howto_btn)
+             if free_prem_btn: final_buttons.append(free_prem_btn)
+             pagination = get_pagination_row(search_id, 0, limit, len(files), active_filter=curr_type, active_lang=curr_lang, active_qual=curr_qual, active_year=curr_year)
+             if pagination: final_buttons.append(pagination)
 
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(final_buttons))
         

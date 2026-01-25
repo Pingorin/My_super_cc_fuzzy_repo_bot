@@ -10,7 +10,7 @@ from pyrogram.errors import FloodWait, MessageNotModified
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import SITE_URL
-# ✅ FIX: Removed 'arrange_buttons' from imports (it is defined locally below)
+# ✅ FIX: 'arrange_buttons' is defined locally below, so removed from import
 from utils import (
     temp, btn_parser, format_text_results, format_detailed_results, 
     format_card_result, get_pagination_row, filter_by_type, 
@@ -68,6 +68,20 @@ def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_
     if pagination_row: buttons.append(pagination_row)
         
     return buttons
+
+# ✅ NEW HELPER: Get "Video | Docs" Row
+def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_size):
+    row = []
+    if curr_type == "video":
+        row.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
+        row.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+    elif curr_type == "document":
+        row.append(InlineKeyboardButton("Docs ✅", callback_data="ignore"))
+        row.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+    else:
+        row.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_video_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+        row.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_document_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+    return [row]
 
 # ==============================================================================
 # 1. MAIN SEARCH HANDLER
@@ -406,7 +420,7 @@ async def handle_size_selection(client, query):
     except: pass
 
 # ==============================================================================
-# 8. LANGUAGE MENU OPENER (Layout Fixed)
+# 8. LANGUAGE MENU OPENER (Layout: Files + Type + Langs + Footer)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^lang_menu_"))
 async def handle_language_menu(client, query):
@@ -448,11 +462,17 @@ async def handle_language_menu(client, query):
         # 1. File Buttons (Page 0)
         buttons = btn_parser(files, query.message.chat.id, search_id, 0, limit, req)
         
-        # 2. Language Menu Buttons (Replaces Main Filters)
+        # 2. Get Type Buttons (Video | Docs)
+        type_buttons = get_type_row(search_id, curr_type, "none", curr_qual, curr_year, curr_size)
+        
+        # 3. Get Language Buttons
         lang_buttons = get_language_buttons(search_id, files, active_type=pt, active_qual=pq) 
         
-        # 3. Assemble: Files + Lang Menu + Footer
-        final_buttons = arrange_buttons(buttons, files, limit, lang_buttons, howto_btn, free_prem_btn)
+        # 4. Combine: Type + Langs
+        middle_buttons = type_buttons + lang_buttons
+        
+        # 5. Arrange Layout
+        final_buttons = arrange_buttons(buttons, files, limit, middle_buttons, howto_btn, free_prem_btn)
 
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(final_buttons))
         
@@ -460,7 +480,7 @@ async def handle_language_menu(client, query):
         logger.error(f"Lang Menu Error: {e}")
 
 # ==============================================================================
-# 9. QUALITY MENU OPENER (Layout Fixed)
+# 9. QUALITY MENU OPENER (Layout: Files + Type + Quals + Footer)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^qual_menu_"))
 async def handle_quality_menu(client, query):
@@ -499,9 +519,13 @@ async def handle_quality_menu(client, query):
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
         buttons = btn_parser(files, query.message.chat.id, search_id, 0, limit, req)
+        
+        type_buttons = get_type_row(search_id, curr_type, curr_lang, "none", curr_year, curr_size)
         qual_buttons = get_quality_buttons(search_id, files, active_type=pt, active_lang=pl)
         
-        final_buttons = arrange_buttons(buttons, files, limit, qual_buttons, howto_btn, free_prem_btn)
+        middle_buttons = type_buttons + qual_buttons
+        
+        final_buttons = arrange_buttons(buttons, files, limit, middle_buttons, howto_btn, free_prem_btn)
         
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(final_buttons))
         
@@ -509,7 +533,7 @@ async def handle_quality_menu(client, query):
         logger.error(f"Qual Menu Error: {e}")
 
 # ==============================================================================
-# 10. YEAR MENU OPENER (Layout Fixed)
+# 10. YEAR MENU OPENER (Layout: Files + Type + Years + Footer)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^year_menu_"))
 async def handle_year_menu(client, query):
@@ -549,9 +573,13 @@ async def handle_year_menu(client, query):
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
         buttons = btn_parser(files, query.message.chat.id, search_id, 0, limit, req)
+        
+        type_buttons = get_type_row(search_id, curr_type, curr_lang, curr_qual, "none", curr_size)
         year_buttons = get_year_buttons(search_id, files, active_type=pt, active_lang=pl, active_qual=pq)
         
-        final_buttons = arrange_buttons(buttons, files, limit, year_buttons, howto_btn, free_prem_btn)
+        middle_buttons = type_buttons + year_buttons
+        
+        final_buttons = arrange_buttons(buttons, files, limit, middle_buttons, howto_btn, free_prem_btn)
         
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(final_buttons))
         
@@ -559,7 +587,7 @@ async def handle_year_menu(client, query):
         logger.error(f"Year Menu Error: {e}")
 
 # ==============================================================================
-# 11. SIZE MENU OPENER (Layout Fixed)
+# 11. SIZE MENU OPENER (Layout: Files + Type + Sizes + Footer)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^size_menu_"))
 async def handle_size_menu(client, query):
@@ -588,9 +616,13 @@ async def handle_size_menu(client, query):
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
         buttons = btn_parser(files, query.message.chat.id, search_id, 0, limit, req)
+        
+        type_buttons = get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, "none")
         size_buttons = get_size_buttons(search_id, active_type=curr_type, active_lang=curr_lang, active_qual=curr_qual, active_year=curr_year)
         
-        final_buttons = arrange_buttons(buttons, files, limit, size_buttons, howto_btn, free_prem_btn)
+        middle_buttons = type_buttons + size_buttons
+        
+        final_buttons = arrange_buttons(buttons, files, limit, middle_buttons, howto_btn, free_prem_btn)
 
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(final_buttons))
         
@@ -619,7 +651,7 @@ async def page_counter_callback(client, query):
     await query.answer(f"Current Page Indicator", show_alert=False)
 
 # ==============================================================================
-# 13. CARD NAV HANDLERS (Restored)
+# 13. CARD NAV HANDLERS
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^card_next_"))
 async def card_next_nav(client, query):

@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu"]
 QUALITIES = ["4k", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
 
+# ✅ OPTIMIZATION: Pre-compiled Regex (Significantly Faster)
+# Used for extracting Years and Qualities without recompiling every time
+YEAR_REGEX = re.compile(r"\b(?:19|20)\d{2}\b")
+QUALITY_REGEXES = {q: re.compile(rf"\b{re.escape(q)}\b", re.IGNORECASE) for q in QUALITIES}
+
 class temp(object):
     U_NAME = None
     B_NAME = None
@@ -28,7 +33,7 @@ class temp(object):
     ME = None
 
 # ==============================================================================
-# 1. FILTER FUNCTIONS
+# 1. FILTER FUNCTIONS (Optimized)
 # ==============================================================================
 
 def filter_by_type(files, f_type):
@@ -36,11 +41,13 @@ def filter_by_type(files, f_type):
         return files
     
     filtered = []
+    target_type = f_type.lower()
     for f in files:
+        # Check cache 'file_type' or fallback to DB Check if needed
         db_type = f.get('file_type', 'document').lower()
-        if f_type.lower() == "video" and db_type == "video":
+        if target_type == "video" and db_type == "video":
             filtered.append(f)
-        elif f_type.lower() == "document" and db_type == "document":
+        elif target_type == "document" and db_type == "document":
             filtered.append(f)
     return filtered
 
@@ -49,9 +56,10 @@ def filter_by_lang(files, lang):
         return files
     
     filtered = []
+    target_lang = lang.lower()
     for f in files:
         fname = f.get('file_name', '').lower()
-        if lang.lower() in fname:
+        if target_lang in fname:
             filtered.append(f)
     return filtered
 
@@ -60,10 +68,16 @@ def filter_by_quality(files, quality):
         return files
     
     filtered = []
-    q_clean = re.escape(quality.lower())
+    # Use pre-compiled regex if available, else fallback to string check
+    regex = QUALITY_REGEXES.get(quality)
+    target_qual = quality.lower()
+    
     for f in files:
-        fname = f.get('file_name', '').lower()
-        if re.search(rf"\b{q_clean}\b", fname) or quality.lower() in fname:
+        fname = f.get('file_name', '')
+        if regex:
+            if regex.search(fname):
+                filtered.append(f)
+        elif target_qual in fname.lower():
             filtered.append(f)
     return filtered
 
@@ -72,9 +86,10 @@ def filter_by_year(files, year):
         return files
     
     filtered = []
+    target_year = str(year)
     for f in files:
-        fname = f.get('file_name', '').lower()
-        if re.search(rf"\b{year}\b", fname):
+        fname = f.get('file_name', '')
+        if target_year in fname:
             filtered.append(f)
     return filtered
 
@@ -84,32 +99,28 @@ def filter_by_size(files, size_range):
         return files
     
     filtered = []
-    # Size Constants (Bytes)
     MB_500 = 500 * 1024 * 1024
     GB_1 = 1024 * 1024 * 1024
     GB_2 = 2 * 1024 * 1024 * 1024
 
     for f in files:
         size = f.get('file_size', 0)
-        if size_range == "min500": # <500MB
+        if size_range == "min500":
             if size < MB_500: filtered.append(f)
-        elif size_range == "500-1gb": # 500MB - 1GB
+        elif size_range == "500-1gb":
             if MB_500 <= size < GB_1: filtered.append(f)
-        elif size_range == "1gb-2gb": # 1GB - 2GB
+        elif size_range == "1gb-2gb":
             if GB_1 <= size < GB_2: filtered.append(f)
-        elif size_range == "max2gb": # >2GB
+        elif size_range == "max2gb":
             if size >= GB_2: filtered.append(f)
             
     return filtered
 
 # ==============================================================================
-# 2. BUTTON GENERATORS
+# 2. BUTTON GENERATORS (Optimized)
 # ==============================================================================
 
 def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
-    """
-    Generates the Main Filter Menu.
-    """
     buttons = []
     
     curr_type = active_filter if active_filter else "none"
@@ -146,14 +157,11 @@ def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_q
 
     # ROW 3: YEAR | SIZE
     row3 = []
-    
-    # -- Year Button --
     if active_year and active_year != "none":
         row3.append(InlineKeyboardButton(f"{active_year} ✅", callback_data=f"year_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_size}"))
     else:
         row3.append(InlineKeyboardButton("Select Year 🗓", callback_data=f"year_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_size}"))
     
-    # -- Size Button --
     size_label = "Select File Size 📦"
     if active_size == "min500": size_label = "<500MB ✅"
     elif active_size == "500-1gb": size_label = "500MB-1GB ✅"
@@ -206,18 +214,13 @@ def get_language_buttons(search_id, files, active_type=None, active_qual=None, a
         if len(row) == 2:
             buttons.append(row)
             row = []
-            
     if row: buttons.append(row)
-        
-    buttons.append([
-        InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{curr_type}_none_{curr_qual}_{curr_year}_{curr_size}_0")
-    ])
+    buttons.append([InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{curr_type}_none_{curr_qual}_{curr_year}_{curr_size}_0")])
     return buttons
 
 def get_quality_buttons(search_id, files, active_type=None, active_lang=None, active_year=None, active_size=None):
     buttons = []
     row = []
-    
     curr_type = active_type if active_type else "none"
     curr_lang = active_lang if active_lang else "none"
     curr_year = active_year if active_year else "none"
@@ -225,30 +228,24 @@ def get_quality_buttons(search_id, files, active_type=None, active_lang=None, ac
 
     stats = {qual: 0 for qual in QUALITIES}
     for file in files:
-        fname = file.get('file_name', '').lower()
-        for qual in QUALITIES:
-            if re.search(rf"\b{re.escape(qual.lower())}\b", fname) or qual.lower() in fname:
+        fname = file.get('file_name', '')
+        for qual, regex in QUALITY_REGEXES.items():
+            if regex.search(fname):
                 stats[qual] += 1
                 
     for qual, count in stats.items():
         if count > 0:
             row.append(InlineKeyboardButton(f"{qual} ({count})", callback_data=f"filter_qual_{search_id}_{qual}_{curr_type}_{curr_lang}_{curr_year}_{curr_size}_0"))
-        
         if len(row) == 3:
             buttons.append(row)
             row = []
-            
     if row: buttons.append(row)
-        
-    buttons.append([
-        InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{curr_type}_{curr_lang}_none_{curr_year}_{curr_size}_0")
-    ])
+    buttons.append([InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{curr_type}_{curr_lang}_none_{curr_year}_{curr_size}_0")])
     return buttons
 
 def get_year_buttons(search_id, files, active_type=None, active_lang=None, active_qual=None, active_size=None):
     buttons = []
     row = []
-    
     curr_type = active_type if active_type else "none"
     curr_lang = active_lang if active_lang else "none"
     curr_qual = active_qual if active_qual else "none"
@@ -257,7 +254,8 @@ def get_year_buttons(search_id, files, active_type=None, active_lang=None, activ
     years = set()
     for file in files:
         fname = file.get('file_name', '')
-        matches = re.findall(r"\b(?:19|20)\d{2}\b", fname)
+        # ✅ Using Pre-compiled Regex for Speed
+        matches = YEAR_REGEX.findall(fname)
         for year in matches:
             years.add(year)
 
@@ -265,26 +263,19 @@ def get_year_buttons(search_id, files, active_type=None, active_lang=None, activ
 
     for year in sorted_years:
         row.append(InlineKeyboardButton(f"{year}", callback_data=f"filter_year_{search_id}_{year}_{curr_type}_{curr_lang}_{curr_qual}_{curr_size}_0"))
-        
         if len(row) == 4:
             buttons.append(row)
             row = []
-            
     if row: buttons.append(row)
-        
-    buttons.append([
-        InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_none_{curr_size}_0")
-    ])
+    buttons.append([InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_none_{curr_size}_0")])
     return buttons
 
-# ✅ SIZE BUTTON GENERATOR
 def get_size_buttons(search_id, active_type=None, active_lang=None, active_qual=None, active_year=None):
     curr_type = active_type if active_type else "none"
     curr_lang = active_lang if active_lang else "none"
     curr_qual = active_qual if active_qual else "none"
     curr_year = active_year if active_year else "none"
 
-    # Define Size Ranges
     ranges = [
         ("<500MB", "min500"),
         ("500MB - 1GB", "500-1gb"),
@@ -296,9 +287,7 @@ def get_size_buttons(search_id, active_type=None, active_lang=None, active_qual=
     for text, key in ranges:
         buttons.append([InlineKeyboardButton(text, callback_data=f"filter_size_{search_id}_{key}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}_0")])
             
-    buttons.append([
-        InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}_none_0")
-    ])
+    buttons.append([InlineKeyboardButton("Back", callback_data=f"filter_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}_none_0")])
     return buttons
 
 # ==============================================================================
@@ -409,7 +398,6 @@ def get_pagination_row(search_id, current_offset, limit, total_count, active_fil
 
     return buttons
 
-# ✅ 4. BUTTON PARSER
 def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
     current_files = files[offset : offset + limit]
     buttons = []

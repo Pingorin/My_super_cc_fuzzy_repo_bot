@@ -10,7 +10,7 @@ from pyrogram.errors import FloodWait, MessageNotModified
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import SITE_URL
-# ✅ FIX: 'arrange_buttons' and 'get_type_row' are defined locally
+# ✅ FIX: 'arrange_buttons' locally defined hai, isliye import se hata diya
 from utils import (
     temp, btn_parser, format_text_results, format_detailed_results, 
     format_card_result, get_pagination_row, filter_by_type, 
@@ -21,9 +21,14 @@ from utils import (
 
 logger = logging.getLogger(__name__)
 
-# ✅ CONSTANTS
+# ✅ CONSTANTS & OPTIMIZATIONS
 REACTIONS = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🎉", "🤩"]
 DELETE_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg" 
+
+# Pre-compiled Regex for Speed (High Load Optimization)
+URL_REGEX = re.compile(r"(https?://|www\.|t\.me/|@\w+)")
+CLEAN_REGEX = re.compile(r"\b(please|pls|plz|ples|send(\s+me)?|give|gib|find|chahiye|movie|new|latest|full\s+movie|file|link|hello|hi|bro|bhai|sir|bruh|hindi|tamil|malayalam|eng|with\s+subtitles|hd)\b", re.IGNORECASE)
+WHITESPACE_REGEX = re.compile(r"\s+")
 
 # ✅ SPAM CONTROL
 BUTTON_LOCK = {}
@@ -32,7 +37,7 @@ def is_spam(user_id):
     current_time = time.time()
     last_time = BUTTON_LOCK.get(user_id, 0)
     BUTTON_LOCK[user_id] = current_time
-    return (current_time - last_time < 1.0) # 1 second limit
+    return (current_time - last_time < 1.0) # 1 second spam limit
 
 async def auto_delete_task(bot_message, user_message, delay, show_thanks, query="files"):
     if delay <= 0: return 
@@ -47,24 +52,24 @@ async def auto_delete_task(bot_message, user_message, delay, show_thanks, query=
     except: pass
 
 # ==============================================================================
-# 🛠️ HELPER: ARRANGE BUTTONS (The Layout Manager)
+# 🛠️ HELPER: ARRANGE BUTTONS (Layout Manager)
 # ==============================================================================
 def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn):
-    # 1. Extract Pagination (Next/Prev) from the file buttons
+    # 1. Extract Pagination (Next/Prev)
     pagination_row = []
     if len(files) > limit:
         pagination_row = buttons.pop() 
     
-    # 2. Add The Middle Menu (Main Filters OR Sub-Menu)
+    # 2. Add The Middle Menu (Filters / Sub-Menu)
     if filter_buttons:
         for row in filter_buttons:
             buttons.append(row)
     
-    # 3. Add Footer Buttons (How To, Premium)
+    # 3. Add Footer Buttons
     if howto_btn: buttons.append(howto_btn)
     if free_prem_btn: buttons.append(free_prem_btn)
     
-    # 4. Put Pagination back at the very bottom
+    # 4. Put Pagination back at bottom
     if pagination_row: buttons.append(pagination_row)
         
     return buttons
@@ -72,6 +77,7 @@ def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_
 # ✅ HELPER: Get "Video | Docs" Row
 def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_size):
     row = []
+    # Logic to keep the selected type checked ✅
     if curr_type == "video":
         row.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
         row.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
@@ -91,23 +97,25 @@ async def auto_filter(client, message):
     try:
         raw_query = message.text
         if message.forward_from or message.forward_from_chat or message.via_bot: return
-        if re.search(r"(https?://|www\.|t\.me/|@\w+)", raw_query): return
+        
+        # Optimization: Use pre-compiled regex
+        if URL_REGEX.search(raw_query): return
         if len(raw_query) < 2: return
 
-        clean_regex = r"\b(please|pls|plz|ples|send(\s+me)?|give|gib|find|chahiye|movie|new|latest|full\s+movie|file|link|hello|hi|bro|bhai|sir|bruh|hindi|tamil|malayalam|eng|with\s+subtitles|hd)\b"
-        query = re.sub(clean_regex, "", raw_query, flags=re.IGNORECASE)
-        query = re.sub(r"\s+", " ", query).strip()
+        query = CLEAN_REGEX.sub("", raw_query)
+        query = WHITESPACE_REGEX.sub(" ", query).strip()
         if len(query) < 2: query = raw_query
 
         start_time = time.time()
         
+        # Parallel Database Calls for Speed
         task_files = Media.get_search_results(query)
         task_settings = db.get_group_settings(message.chat.id)
-        
         files, group_settings = await asyncio.gather(task_files, task_settings)
         
         if not files: return
 
+        # Async Stats Update (Fire and Forget)
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'req'))
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'suc'))
 
@@ -131,7 +139,6 @@ async def auto_filter(client, message):
         offset = 0 
         total_results = len(files)
         sent_msg = None 
-        time_taken = round(time.time() - start_time, 2)
         
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
@@ -142,7 +149,7 @@ async def auto_filter(client, message):
             
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
-        # ✅ INITIAL STATE
+        # Initial Filter State
         filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
 
         # --- MODE A: BUTTON ---
@@ -155,6 +162,7 @@ async def auto_filter(client, message):
         # --- MODE B/C: TEXT & DETAILED ---
         elif mode in ['text', 'detailed']:
             page_files = files[offset : offset + limit]
+            time_taken = round(time.time() - start_time, 2)
             
             if mode == 'text': text = format_text_results(page_files, query, message.chat.id)
             else: text = format_detailed_results(page_files, query, message.chat.id, time_taken)
@@ -250,7 +258,6 @@ async def handle_pagination(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
-        # Initial Filter State
         filter_buttons = get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
 
         # BUTTON MODE
@@ -343,7 +350,6 @@ async def handle_combined_filter(client, query):
         if not final_files:
             return await query.answer("❌ No files match these filters!", show_alert=True)
 
-        # DETERMINE MODE
         mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
         if mode == 'hybrid':
@@ -359,7 +365,6 @@ async def handle_combined_filter(client, query):
         pass_year = filter_year if filter_year != "none" else None
         pass_size = filter_size if filter_size != "none" else None
 
-        # MAIN MENU BUTTONS
         filter_buttons = get_filter_buttons(search_id, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
 
         if mode == 'button':
@@ -426,7 +431,7 @@ async def handle_year_selection(client, query):
         if len(data) >= 9:
             search_id, year, f_type, lang, qual, size, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8]
         else:
-            search_id, year, f_type, lang, qual, size, offset = data[2], data[3], data[4], data[5], data[6], "none", data[7]
+            search_id, year, f_type, lang, qual, size, offset = data[2], data[3], data[4], data[5], "none", "none", data[6]
         query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{offset}"
         await handle_combined_filter(client, query)
     except: pass
@@ -476,7 +481,6 @@ async def handle_language_menu(client, query):
         pt = curr_type if curr_type != "none" else None
         pq = curr_qual if curr_qual != "none" else None
         
-        # ✅ DETERMINE MODE
         mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
         if mode == 'hybrid':
@@ -492,16 +496,13 @@ async def handle_language_menu(client, query):
         middle_buttons = type_buttons + lang_buttons
         
         if mode == 'button':
-             # Button Mode: Files + Menu
              buttons = btn_parser(files, query.message.chat.id, search_id, 0, limit, req)
              final_buttons = arrange_buttons(buttons, files, limit, middle_buttons, howto_btn, free_prem_btn)
         else:
-             # Text Mode: NO File Buttons. Just Menu + Footer + Pagination
              final_buttons = []
              for row in middle_buttons: final_buttons.append(row)
              if howto_btn: final_buttons.append(howto_btn)
              if free_prem_btn: final_buttons.append(free_prem_btn)
-             # Add Pagination Row manually for text mode
              pagination = get_pagination_row(search_id, 0, limit, len(files), active_filter=pt, active_qual=pq)
              if pagination: final_buttons.append(pagination)
 

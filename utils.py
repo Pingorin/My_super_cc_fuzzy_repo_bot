@@ -78,7 +78,6 @@ def filter_by_year(files, year):
             filtered.append(f)
     return filtered
 
-# ✅ SIZE FILTER FUNCTION
 def filter_by_size(files, size_range):
     if not size_range or size_range.lower() == "none" or size_range.lower() == "all":
         return files
@@ -103,12 +102,13 @@ def filter_by_size(files, size_range):
     return filtered
 
 # ==============================================================================
-# 2. BUTTON GENERATORS
+# 2. BUTTON GENERATORS (Updated with Smart Logic)
 # ==============================================================================
 
-def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
+def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
     """
-    Generates the Main Filter Menu.
+    Generates the Main Filter Menu dynamically.
+    It scans 'files' to see if buttons (Lang, Year, etc.) are actually needed.
     """
     buttons = []
     
@@ -118,52 +118,93 @@ def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_q
     curr_year = active_year if active_year else "none"
     curr_size = active_size if active_size else "none"
 
-    # ROW 1: Type Filters
-    row1 = []
-    if active_filter == "video":
-        row1.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
-        row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
-    elif active_filter == "document":
-        row1.append(InlineKeyboardButton("Docs ✅", callback_data="ignore"))
-        row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
-    else:
-        row1.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_video_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
-        row1.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_document_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
-    buttons.append(row1)
-
-    # ROW 2: Language | Quality
-    row2 = []
-    if active_lang and active_lang != "none":
-        row2.append(InlineKeyboardButton(f"{active_lang} ✅", callback_data=f"lang_menu_{search_id}_{curr_type}_{curr_qual}_{curr_year}_{curr_size}"))
-    else:
-        row2.append(InlineKeyboardButton("Select Language 🌐", callback_data=f"lang_menu_{search_id}_{curr_type}_{curr_qual}_{curr_year}_{curr_size}"))
+    # --- 1. SCAN FILES FOR METADATA ---
+    has_video = False
+    has_docs = False
+    has_lang = False
+    has_qual = False
+    has_year = False
+    
+    for f in files:
+        # Type Check
+        f_type = f.get('file_type', 'document').lower()
+        if f_type == 'video': has_video = True
+        if f_type == 'document': has_docs = True
         
-    if active_qual and active_qual != "none":
-        row2.append(InlineKeyboardButton(f"{active_qual} ✅", callback_data=f"qual_menu_{search_id}_{curr_type}_{curr_lang}_{curr_year}_{curr_size}"))
-    else:
-        row2.append(InlineKeyboardButton("Select Quality 📀", callback_data=f"qual_menu_{search_id}_{curr_type}_{curr_lang}_{curr_year}_{curr_size}"))
-    buttons.append(row2)
+        fname = f.get('file_name', '').lower()
+        
+        # Lang Check
+        if not has_lang:
+            for l in LANGUAGES:
+                if l.lower() in fname:
+                    has_lang = True
+                    break
+        
+        # Qual Check
+        if not has_qual:
+            for q in QUALITIES:
+                if re.search(rf"\b{re.escape(q.lower())}\b", fname) or q.lower() in fname:
+                    has_qual = True
+                    break
+                    
+        # Year Check
+        if not has_year:
+            if re.search(r"\b(?:19|20)\d{2}\b", fname):
+                has_year = True
 
-    # ROW 3: YEAR | SIZE
+    # --- ROW 1: Type Filters (Only if BOTH Video & Docs exist) ---
+    row1 = []
+    if has_video and has_docs:
+        if active_filter == "video":
+            row1.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
+            row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+        elif active_filter == "document":
+            row1.append(InlineKeyboardButton("Docs ✅", callback_data="ignore"))
+            row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+        else:
+            row1.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_video_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+            row1.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_document_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+    if row1: buttons.append(row1)
+
+    # --- ROW 2: Language | Quality (Conditional) ---
+    row2 = []
+    
+    # Language Button
+    if has_lang or (active_lang and active_lang != "none"):
+        if active_lang and active_lang != "none":
+            row2.append(InlineKeyboardButton(f"{active_lang} ✅", callback_data=f"lang_menu_{search_id}_{curr_type}_{curr_qual}_{curr_year}_{curr_size}"))
+        else:
+            row2.append(InlineKeyboardButton("Select Language 🌐", callback_data=f"lang_menu_{search_id}_{curr_type}_{curr_qual}_{curr_year}_{curr_size}"))
+    
+    # Quality Button
+    if has_qual or (active_qual and active_qual != "none"):
+        if active_qual and active_qual != "none":
+            row2.append(InlineKeyboardButton(f"{active_qual} ✅", callback_data=f"qual_menu_{search_id}_{curr_type}_{curr_lang}_{curr_year}_{curr_size}"))
+        else:
+            row2.append(InlineKeyboardButton("Select Quality 📀", callback_data=f"qual_menu_{search_id}_{curr_type}_{curr_lang}_{curr_year}_{curr_size}"))
+    if row2: buttons.append(row2)
+
+    # --- ROW 3: Year | Size (Conditional) ---
     row3 = []
     
-    # -- Year Button --
-    if active_year and active_year != "none":
-        row3.append(InlineKeyboardButton(f"{active_year} ✅", callback_data=f"year_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_size}"))
-    else:
-        row3.append(InlineKeyboardButton("Select Year 🗓", callback_data=f"year_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_size}"))
+    # Year Button
+    if has_year or (active_year and active_year != "none"):
+        if active_year and active_year != "none":
+            row3.append(InlineKeyboardButton(f"{active_year} ✅", callback_data=f"year_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_size}"))
+        else:
+            row3.append(InlineKeyboardButton("Select Year 🗓", callback_data=f"year_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_size}"))
     
-    # -- Size Button --
+    # Size Button (Always show Size as every file has size)
     size_label = "Select File Size 📦"
     if active_size == "min500": size_label = "<500MB ✅"
     elif active_size == "500-1gb": size_label = "500MB-1GB ✅"
     elif active_size == "1gb-2gb": size_label = "1GB-2GB ✅"
     elif active_size == "max2gb": size_label = ">2GB ✅"
-
     row3.append(InlineKeyboardButton(size_label, callback_data=f"size_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}"))
-    buttons.append(row3)
+    
+    if row3: buttons.append(row3)
 
-    # ROW 4: Reset Buttons
+    # --- ROW 4: Reset Buttons (Conditional) ---
     row4 = []
     if active_lang and active_lang != "none":
         row4.append(InlineKeyboardButton("All Langs", callback_data=f"filter_{search_id}_{curr_type}_none_{curr_qual}_{curr_year}_{curr_size}_0"))
@@ -277,14 +318,12 @@ def get_year_buttons(search_id, files, active_type=None, active_lang=None, activ
     ])
     return buttons
 
-# ✅ SIZE BUTTON GENERATOR
 def get_size_buttons(search_id, active_type=None, active_lang=None, active_qual=None, active_year=None):
     curr_type = active_type if active_type else "none"
     curr_lang = active_lang if active_lang else "none"
     curr_qual = active_qual if active_qual else "none"
     curr_year = active_year if active_year else "none"
 
-    # Define Size Ranges
     ranges = [
         ("<500MB", "min500"),
         ("500MB - 1GB", "500-1gb"),
@@ -444,7 +483,30 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active
     return buttons
 
 # ==============================================================================
-# 5. OTHER HELPERS
+# 5. LAYOUT ARRANGE
+# ==============================================================================
+def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn):
+    # 1. Extract Pagination
+    pagination_row = []
+    if len(files) > limit:
+        pagination_row = buttons.pop() 
+    
+    # 2. Add Filter Buttons
+    if filter_buttons:
+        for row in filter_buttons:
+            buttons.append(row)
+    
+    # 3. Add Footer
+    if howto_btn: buttons.append(howto_btn)
+    if free_prem_btn: buttons.append(free_prem_btn)
+    
+    # 4. Add Pagination Back
+    if pagination_row: buttons.append(pagination_row)
+        
+    return buttons
+
+# ==============================================================================
+# 6. OTHER HELPERS
 # ==============================================================================
 
 async def get_shortlink(site, api, link):

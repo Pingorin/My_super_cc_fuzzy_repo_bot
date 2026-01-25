@@ -1,9 +1,9 @@
 Pyrofork
 tgcrypto
-pymongo[srv]==3.12.3
-motor==2.5.1
-marshmallow==3.14.1
-umongo==3.0.1
+pymongo[srv]
+motor
+marshmallow
+umongo
 git+https://github.com/Joelkb/cinemagoer
 Heroku3
 search_engine_parser
@@ -12,16 +12,17 @@ aiofiles
 ffmpeg-python
 ffmpeg
 requests
-aiohttp==3.8.5
+aiohttp
 telegraph
 ujson
 pyshorteners
 pytz
-dnspython==2.3.0
+dnspython
 Pillow
 speedtest-cli
 psutil
 shortzy
-# ✅ Added for Web View (Site Mode)
 aiohttp_jinja2
 jinja2
+# ✅ Added for Memory Leak Fix (Spam Control)
+cachetools

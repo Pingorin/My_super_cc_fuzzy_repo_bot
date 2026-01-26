@@ -9,6 +9,22 @@ from info import DATABASE_URI, DATABASE_NAME
 
 logger = logging.getLogger(__name__)
 
+# ✅ SMART LANGUAGE MAPPING (Database ke liye)
+# Jab user "Hindi" select kare, toh DB "Hindi" aur "Hin" dono dhunde.
+LANG_MAP = {
+    "English": "English|Eng",
+    "Hindi": "Hindi|Hin",
+    "Tamil": "Tamil|Tam",
+    "Telugu": "Telugu|Tel",
+    "Malayalam": "Malayalam|Mal",
+    "Kannada": "Kannada|Kan",
+    "Bengali": "Bengali|Ben",
+    "Punjabi": "Punjabi|Pun",
+    "Marathi": "Marathi|Mar",
+    "Gujarati": "Gujarati|Guj",
+    "Urdu": "Urdu"
+}
+
 class MediaDB:
     def __init__(self, uri, database_name):
         self._client = AsyncIOMotorClient(uri)
@@ -68,7 +84,6 @@ class MediaDB:
             print(f"❌ CRITICAL DB ERROR (Save): {e}")
             return None
 
-    # ✅ NEW: Update Cache (Needed for Pagination on Filtered Results)
     async def update_search_cache(self, search_id, files):
         try:
             await self.temp_searches.update_one(
@@ -137,7 +152,6 @@ class MediaDB:
                 if match:
                     caption = match.group(1) + match.group(2)
 
-            # ✅ STRICT TYPE DETECTION
             file_type = "document" 
             if message.video:
                 file_type = "video"
@@ -159,7 +173,7 @@ class MediaDB:
                 'caption': caption,
                 'link_id': current_id,
                 'chat_id': message.chat.id,
-                'file_type': file_type # Saved for Filtering
+                'file_type': file_type 
             })
             current_id += 1
 
@@ -186,12 +200,10 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ OPTIMIZED SEARCH WITH DB FILTERING
+    # ⚡ OPTIMIZED SEARCH WITH SMART REGEX
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None):
         try:
-            # Stage 1: Search ($search with Index)
-            # Ensure "default" index exists on Atlas
             must_clauses = []
             words = query.split()
             for word in words:
@@ -215,15 +227,25 @@ class MediaDB:
             match_filters = {}
             
             if file_type and file_type != "none":
-                # Convert to match DB storage (lowercase usually)
                 capital_type = "video" if file_type.lower() == "video" else "document"
                 match_filters["file_type"] = capital_type
 
+            # ✅ SMART LANGUAGE FILTER
             if lang and lang != "none":
-                match_filters["file_name"] = {"$regex": lang, "$options": "i"}
+                # User se "Hindi" aaya, hum DB mein "Hindi|Hin" dhundenge
+                pattern = LANG_MAP.get(lang, lang)
+                # Check BOTH file_name AND caption
+                match_filters["$or"] = [
+                    {"file_name": {"$regex": pattern, "$options": "i"}},
+                    {"caption": {"$regex": pattern, "$options": "i"}}
+                ]
 
             if quality and quality != "none":
-                match_filters["file_name"] = {"$regex": quality, "$options": "i"}
+                # Quality bhi Caption aur Name dono mein check karein
+                match_filters["$or"] = [
+                    {"file_name": {"$regex": quality, "$options": "i"}},
+                    {"caption": {"$regex": quality, "$options": "i"}}
+                ]
             
             if year and year != "none":
                 match_filters["file_name"] = {"$regex": str(year)}
@@ -252,15 +274,13 @@ class MediaDB:
             return files
             
         except Exception as e:
-            # Fallback: Regex Search (Slower but works without Atlas Search Index)
-            # Useful for local testing or if index is missing
+            # Fallback for when Index is not ready
             print(f"⚠️ Index Search Failed: {e}. Switching to Fallback.")
             safe_query = re.escape(query)
             regex = re.compile(safe_query, re.IGNORECASE)
             
             fallback_filter = {"$or": [{"file_name": regex}, {"caption": regex}]}
             
-            # Apply basic DB filters where possible
             if file_type and file_type != "none": 
                 fallback_filter["file_type"] = "video" if file_type.lower() == "video" else "document"
 
@@ -268,14 +288,19 @@ class MediaDB:
             cursor.sort('$natural', -1)
             files = await cursor.to_list(length=100)
             
-            # Manually filter the rest in Python
+            # Manual Filter Logic
             final_files = []
             for f in files:
                 fname = f.get('file_name', '').lower()
+                caption = (f.get('caption') or "").lower()
+                full_text = fname + " " + caption
                 fsize = f.get('file_size', 0)
                 
-                if lang and lang != "none" and lang.lower() not in fname: continue
-                if quality and quality != "none" and quality.lower() not in fname: continue
+                if lang and lang != "none":
+                    pattern = LANG_MAP.get(lang, lang).lower()
+                    if not re.search(pattern, full_text): continue
+
+                if quality and quality != "none" and quality.lower() not in full_text: continue
                 if year and year != "none" and str(year) not in fname: continue
                 
                 if size_range == "min500" and fsize >= 500*1024*1024: continue

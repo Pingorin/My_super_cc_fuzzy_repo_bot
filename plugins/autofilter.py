@@ -310,7 +310,7 @@ async def handle_size_selection(client, query):
     except: pass
 
 # ==============================================================================
-# 4. MASTER FILTER HANDLER (FIXED REGEX to match only filter_ID)
+# 4. MASTER FILTER HANDLER (FIXED FOR ZERO RESULTS IN SIZE)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_\d"))
 async def handle_combined_filter(client, query):
@@ -346,7 +346,7 @@ async def handle_combined_filter(client, query):
         if not cached_data: return await query.answer("Search Expired", show_alert=True)
         req = cached_data.get('query')
 
-        # ✅ Call DB
+        # Call DB
         final_files = await Media.get_search_results(
             req, 
             file_type=filter_type, 
@@ -356,8 +356,13 @@ async def handle_combined_filter(client, query):
             size_range=filter_size
         )
 
+        # ✅ CRITICAL FIX: Allow empty results IF size filter is active
+        # This allows the menu to update with the checkmark even if no files found
         if not final_files:
-            return await query.answer("❌ No files match these filters!", show_alert=True)
+            if filter_size == "none":
+                # For other filters, show alert
+                return await query.answer("❌ No files match these filters!", show_alert=True)
+            # If Size filter is active, continue (final_files is empty list)
 
         await Media.update_search_cache(search_id, final_files)
 
@@ -377,6 +382,7 @@ async def handle_combined_filter(client, query):
         pass_year = filter_year if filter_year != "none" else None
         pass_size = filter_size if filter_size != "none" else None
 
+        # PASSING FINAL_FILES (Even if empty) to generate buttons with checkmarks
         filter_buttons = get_filter_buttons(search_id, final_files, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
 
         if mode == 'button':
@@ -390,6 +396,8 @@ async def handle_combined_filter(client, query):
             if mode == 'text': text = format_text_results(page_files, req, query.message.chat.id)
             else: text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
             
+            if not final_files: text = f"👻 **Results for:** `{req}`\n\n❌ No files found in this size range."
+
             btn = []
             if filter_buttons: 
                 for row in filter_buttons: btn.append(row)
@@ -555,7 +563,7 @@ async def handle_size_menu(client, query):
         logger.error(f"Size Menu Error: {e}")
 
 # ==============================================================================
-# 12. RESET & IGNORE & CARD NAV
+# 12. RESET & IGNORE & CARD NAV (Restored)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^unfilter_"))
 async def handle_unfilter(client, query):

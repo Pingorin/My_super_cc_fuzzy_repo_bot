@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu"]
 QUALITIES = ["4k", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
 
-# ✅ OPTIMIZATION: Pre-compiled Regex (Significantly Faster)
+# ✅ OPTIMIZATION: Pre-compiled Regex
 YEAR_REGEX = re.compile(r"\b(?:19|20)\d{2}\b")
 QUALITY_REGEXES = {q: re.compile(rf"\b{re.escape(q)}\b", re.IGNORECASE) for q in QUALITIES}
 
@@ -32,9 +32,9 @@ class temp(object):
     ME = None
 
 # ==============================================================================
-# 1. FILTER FUNCTIONS (Backup Logic)
+# 1. FILTER FUNCTIONS
 # ==============================================================================
-
+# (Same as before)
 def filter_by_type(files, f_type):
     if not f_type or f_type.lower() == "none" or f_type.lower() == "all": return files
     filtered = []
@@ -94,10 +94,47 @@ def filter_by_size(files, size_range):
     return filtered
 
 # ==============================================================================
-# 2. BUTTON GENERATORS
+# 2. BUTTON GENERATORS (UPDATED WITH SMART CHECK LOGIC)
 # ==============================================================================
 
-def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
+def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
+    # ✅ Step 1: Scan Files to see what exists
+    has_video = False
+    has_docs = False
+    has_lang_data = False
+    has_qual_data = False
+    has_year_data = False
+    
+    # We check limited files to save CPU, or all if list is small
+    # Checking all is safer for "Disappear" logic
+    for f in files:
+        fname = f.get('file_name', '')
+        ftype = f.get('file_type', 'document')
+        
+        if ftype == 'video': has_video = True
+        elif ftype == 'document': has_docs = True
+        
+        # Check Language presence
+        if not has_lang_data:
+            for lang in LANGUAGES:
+                if lang.lower() in fname.lower():
+                    has_lang_data = True
+                    break
+        
+        # Check Quality presence
+        if not has_qual_data:
+            for qual, regex in QUALITY_REGEXES.items():
+                if regex.search(fname):
+                    has_qual_data = True
+                    break
+                    
+        # Check Year presence
+        if not has_year_data:
+            if YEAR_REGEX.search(fname):
+                has_year_data = True
+
+    # -----------------------------------------------------------
+    
     buttons = []
     
     curr_type = active_filter if active_filter else "none"
@@ -106,42 +143,60 @@ def get_filter_buttons(search_id, active_filter=None, active_lang=None, active_q
     curr_year = active_year if active_year else "none"
     curr_size = active_size if active_size else "none"
 
-    # ROW 1: Type Filters
+    # ROW 1: Type Filters (Only show if that type exists)
     row1 = []
-    if active_filter == "video":
-        row1.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
-        row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
-    elif active_filter == "document":
-        row1.append(InlineKeyboardButton("Docs ✅", callback_data="ignore"))
-        row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
-    else:
-        row1.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_video_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
-        row1.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_document_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
-    buttons.append(row1)
-
-    # ROW 2: Language | Quality
-    row2 = []
-    btn_text = f"Lang: {active_lang} ✅" if active_lang and active_lang != "none" else "Select Language 🌐"
-    row2.append(InlineKeyboardButton(btn_text, callback_data=f"lang_menu_{search_id}_{curr_type}_{curr_qual}_{curr_year}_{curr_size}_{curr_lang}"))
-
-    btn_text = f"Qual: {active_qual} ✅" if active_qual and active_qual != "none" else "Select Quality 📀"
-    row2.append(InlineKeyboardButton(btn_text, callback_data=f"qual_menu_{search_id}_{curr_type}_{curr_lang}_{curr_year}_{curr_size}_{curr_qual}"))
-    buttons.append(row2)
-
-    # ROW 3: YEAR | SIZE
-    row3 = []
-    btn_text = f"Year: {active_year} ✅" if active_year and active_year != "none" else "Select Year 🗓"
-    row3.append(InlineKeyboardButton(btn_text, callback_data=f"year_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_size}_{curr_year}"))
     
+    # If Videos exist, show Video Button
+    if has_video:
+        if active_filter == "video":
+            row1.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
+        else:
+            row1.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_video_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+            
+    # If Docs exist, show Docs Button
+    if has_docs:
+        if active_filter == "document":
+            row1.append(InlineKeyboardButton("Docs ✅", callback_data="ignore"))
+        else:
+            row1.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_document_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+    
+    # If filter is selected, show "All Files" to clear Type filter
+    if active_filter not in [None, "none"]:
+         row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+
+    if row1: buttons.append(row1)
+
+    # ROW 2: Language | Quality (Only show if data detected)
+    row2 = []
+    
+    if has_lang_data or (active_lang and active_lang != "none"):
+        btn_text = f"Lang: {active_lang} ✅" if active_lang and active_lang != "none" else "Select Language 🌐"
+        row2.append(InlineKeyboardButton(btn_text, callback_data=f"lang_menu_{search_id}_{curr_type}_{curr_qual}_{curr_year}_{curr_size}_{curr_lang}"))
+
+    if has_qual_data or (active_qual and active_qual != "none"):
+        btn_text = f"Qual: {active_qual} ✅" if active_qual and active_qual != "none" else "Select Quality 📀"
+        row2.append(InlineKeyboardButton(btn_text, callback_data=f"qual_menu_{search_id}_{curr_type}_{curr_lang}_{curr_year}_{curr_size}_{curr_qual}"))
+    
+    if row2: buttons.append(row2)
+
+    # ROW 3: YEAR | SIZE (Year dynamic, Size always shown as files always have size)
+    row3 = []
+    
+    if has_year_data or (active_year and active_year != "none"):
+        btn_text = f"Year: {active_year} ✅" if active_year and active_year != "none" else "Select Year 🗓"
+        row3.append(InlineKeyboardButton(btn_text, callback_data=f"year_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_size}_{curr_year}"))
+    
+    # Size always exists
     size_label = "Select Size 📦"
     if active_size == "min500": size_label = "<500MB ✅"
     elif active_size == "500-1gb": size_label = "0.5-1GB ✅"
     elif active_size == "1gb-2gb": size_label = "1-2GB ✅"
     elif active_size == "max2gb": size_label = ">2GB ✅"
     row3.append(InlineKeyboardButton(size_label, callback_data=f"size_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}"))
-    buttons.append(row3)
+    
+    if row3: buttons.append(row3)
 
-    # ROW 4: RESET SPECIFIC FILTERS (Main Menu Clear Buttons)
+    # ROW 4: RESET SPECIFIC FILTERS
     row4 = []
     if active_lang and active_lang != "none":
         row4.append(InlineKeyboardButton("All Langs", callback_data=f"filter_{search_id}_{curr_type}_none_{curr_qual}_{curr_year}_{curr_size}_0"))
@@ -187,7 +242,6 @@ def get_language_buttons(search_id, files, active_type=None, active_qual=None, a
             row = []
     if row: buttons.append(row)
     
-    # ✅ "Clear" Button REMOVED from here
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_{search_id}_{c_type}_{back_lang_state}_{c_qual}_{c_year}_{c_size}_0")])
     return buttons
 
@@ -217,7 +271,6 @@ def get_quality_buttons(search_id, files, active_type=None, active_lang=None, ac
             row = []
     if row: buttons.append(row)
     
-    # ✅ "Clear" Button REMOVED from here
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{back_qual_state}_{c_year}_{c_size}_0")])
     return buttons
 
@@ -248,7 +301,6 @@ def get_year_buttons(search_id, files, active_type=None, active_lang=None, activ
             row = []
     if row: buttons.append(row)
     
-    # ✅ "Clear" Button REMOVED from here
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{c_qual}_{back_year_state}_{c_size}_0")])
     return buttons
 
@@ -273,7 +325,6 @@ def get_size_buttons(search_id, active_type=None, active_lang=None, active_qual=
         
         buttons.append([InlineKeyboardButton(btn_txt, callback_data=f"filter_size_{search_id}_{key}_{c_type}_{c_lang}_{c_qual}_{c_year}_0")])
             
-    # ✅ "Clear" Button REMOVED from here
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{c_qual}_{c_year}_{back_size_state}_0")])
     return buttons
 
@@ -307,7 +358,7 @@ def format_text_results(files, query, chat_id):
         link_id = file['link_id']
         f_chat_id = chat_id
         
-        # ✅ Added Caption Logic
+        # Caption Logic
         caption = file.get('caption', '')
         if query.lower() not in f_name.lower() and query.lower() in caption.lower():
              clean_cap = caption.replace("<b>", "").replace("</b>", "")[:50] + "..."
@@ -317,7 +368,6 @@ def format_text_results(files, query, chat_id):
         text += f"{i}. 📂 <a href='{link}'>{f_name}</a> [{f_size}]\n\n"
     return text
 
-# ✅ DETAILED RESULTS (FIXED with Regex & Caption)
 def format_detailed_results(files, query, chat_id, time_taken=0):
     text = (
         f"⚡ **Hey {query} lovers!**\n"
@@ -331,15 +381,12 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         link_id = file['link_id']
         f_chat_id = chat_id
         
-        # Caption Logic
         caption = file.get('caption', '')
         if query.lower() not in f_name.lower() and query.lower() in caption.lower():
              clean_cap = caption.replace("<b>", "").replace("</b>", "")[:50] + "..."
-             # Optional: use caption as display name
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         
-        # Regex Extraction for Quality & Language
         q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
         quality = q_match.group(0) if q_match else "N/A"
         

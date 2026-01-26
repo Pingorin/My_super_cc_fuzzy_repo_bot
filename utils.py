@@ -17,11 +17,26 @@ except: AUTH_CHANNEL_4 = None
 
 logger = logging.getLogger(__name__)
 
-# ✅ CONSTANTS
+# ✅ CONSTANTS (Display Names)
 LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu"]
 QUALITIES = ["4k", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
 
-# ✅ OPTIMIZATION: Pre-compiled Regex
+# ✅ SMART DETECTION REGEX (Short codes + Full names)
+# Ye "Hin", "Eng", "Tam" sabko pakdega
+LANG_REGEX = {
+    "English": re.compile(r"\b(english|eng)\b", re.IGNORECASE),
+    "Hindi": re.compile(r"\b(hindi|hin)\b", re.IGNORECASE),
+    "Tamil": re.compile(r"\b(tamil|tam)\b", re.IGNORECASE),
+    "Telugu": re.compile(r"\b(telugu|tel)\b", re.IGNORECASE),
+    "Malayalam": re.compile(r"\b(malayalam|mal)\b", re.IGNORECASE),
+    "Kannada": re.compile(r"\b(kannada|kan)\b", re.IGNORECASE),
+    "Bengali": re.compile(r"\b(bengali|ben)\b", re.IGNORECASE),
+    "Punjabi": re.compile(r"\b(punjabi|pun)\b", re.IGNORECASE),
+    "Marathi": re.compile(r"\b(marathi|mar)\b", re.IGNORECASE),
+    "Gujarati": re.compile(r"\b(gujarati|guj)\b", re.IGNORECASE),
+    "Urdu": re.compile(r"\b(urdu)\b", re.IGNORECASE)
+}
+
 YEAR_REGEX = re.compile(r"\b(?:19|20)\d{2}\b")
 QUALITY_REGEXES = {q: re.compile(rf"\b{re.escape(q)}\b", re.IGNORECASE) for q in QUALITIES}
 
@@ -32,9 +47,9 @@ class temp(object):
     ME = None
 
 # ==============================================================================
-# 1. FILTER FUNCTIONS
+# 1. FILTER FUNCTIONS (Client Side Helper)
 # ==============================================================================
-# (Same as before)
+
 def filter_by_type(files, f_type):
     if not f_type or f_type.lower() == "none" or f_type.lower() == "all": return files
     filtered = []
@@ -48,10 +63,13 @@ def filter_by_type(files, f_type):
 def filter_by_lang(files, lang):
     if not lang or lang.lower() == "none" or lang.lower() == "all": return files
     filtered = []
-    target_lang = lang.lower()
+    # Smart Filter using Regex
+    regex = LANG_REGEX.get(lang)
     for f in files:
-        fname = f.get('file_name', '').lower()
-        if target_lang in fname: filtered.append(f)
+        text = (f.get('file_name', '') + " " + f.get('caption', '')).lower()
+        if regex:
+            if regex.search(text): filtered.append(f)
+        elif lang.lower() in text: filtered.append(f)
     return filtered
 
 def filter_by_quality(files, quality):
@@ -94,30 +112,31 @@ def filter_by_size(files, size_range):
     return filtered
 
 # ==============================================================================
-# 2. BUTTON GENERATORS (UPDATED WITH SMART CHECK LOGIC)
+# 2. BUTTON GENERATORS (UPDATED WITH SMART DETECTION)
 # ==============================================================================
 
 def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
-    # ✅ Step 1: Scan Files to see what exists
+    # ✅ Step 1: Scan Files to see what exists (File Name + Caption)
     has_video = False
     has_docs = False
     has_lang_data = False
     has_qual_data = False
     has_year_data = False
     
-    # We check limited files to save CPU, or all if list is small
-    # Checking all is safer for "Disappear" logic
     for f in files:
         fname = f.get('file_name', '')
+        caption = f.get('caption') or ""
+        # Combine name and caption for search
+        full_text = f"{fname} {caption}"
         ftype = f.get('file_type', 'document')
         
         if ftype == 'video': has_video = True
         elif ftype == 'document': has_docs = True
         
-        # Check Language presence
+        # Check Language presence (Smart Regex)
         if not has_lang_data:
-            for lang in LANGUAGES:
-                if lang.lower() in fname.lower():
+            for lang, regex in LANG_REGEX.items():
+                if regex.search(full_text):
                     has_lang_data = True
                     break
         
@@ -143,32 +162,27 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
     curr_year = active_year if active_year else "none"
     curr_size = active_size if active_size else "none"
 
-    # ROW 1: Type Filters (Only show if that type exists)
+    # ROW 1: Type Filters
     row1 = []
-    
-    # If Videos exist, show Video Button
     if has_video:
         if active_filter == "video":
             row1.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
         else:
             row1.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_video_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
             
-    # If Docs exist, show Docs Button
     if has_docs:
         if active_filter == "document":
             row1.append(InlineKeyboardButton("Docs ✅", callback_data="ignore"))
         else:
             row1.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_document_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
     
-    # If filter is selected, show "All Files" to clear Type filter
     if active_filter not in [None, "none"]:
          row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
 
     if row1: buttons.append(row1)
 
-    # ROW 2: Language | Quality (Only show if data detected)
+    # ROW 2: Language | Quality
     row2 = []
-    
     if has_lang_data or (active_lang and active_lang != "none"):
         btn_text = f"Lang: {active_lang} ✅" if active_lang and active_lang != "none" else "Select Language 🌐"
         row2.append(InlineKeyboardButton(btn_text, callback_data=f"lang_menu_{search_id}_{curr_type}_{curr_qual}_{curr_year}_{curr_size}_{curr_lang}"))
@@ -179,21 +193,18 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
     
     if row2: buttons.append(row2)
 
-    # ROW 3: YEAR | SIZE (Year dynamic, Size always shown as files always have size)
+    # ROW 3: YEAR | SIZE
     row3 = []
-    
     if has_year_data or (active_year and active_year != "none"):
         btn_text = f"Year: {active_year} ✅" if active_year and active_year != "none" else "Select Year 🗓"
         row3.append(InlineKeyboardButton(btn_text, callback_data=f"year_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_size}_{curr_year}"))
     
-    # Size always exists
     size_label = "Select Size 📦"
     if active_size == "min500": size_label = "<500MB ✅"
     elif active_size == "500-1gb": size_label = "0.5-1GB ✅"
     elif active_size == "1gb-2gb": size_label = "1-2GB ✅"
     elif active_size == "max2gb": size_label = ">2GB ✅"
     row3.append(InlineKeyboardButton(size_label, callback_data=f"size_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}"))
-    
     if row3: buttons.append(row3)
 
     # ROW 4: RESET SPECIFIC FILTERS
@@ -227,9 +238,11 @@ def get_language_buttons(search_id, files, active_type=None, active_qual=None, a
 
     stats = {lang: 0 for lang in LANGUAGES}
     for file in files:
-        fname = file.get('file_name', '').lower()
-        for lang in LANGUAGES:
-            if lang.lower() in fname:
+        # Check Name AND Caption using Regex
+        text = (file.get('file_name', '') + " " + (file.get('caption') or "")).lower()
+        
+        for lang, regex in LANG_REGEX.items():
+            if regex.search(text):
                 stats[lang] += 1
                 
     for lang, count in stats.items():
@@ -358,7 +371,6 @@ def format_text_results(files, query, chat_id):
         link_id = file['link_id']
         f_chat_id = chat_id
         
-        # Caption Logic
         caption = file.get('caption', '')
         if query.lower() not in f_name.lower() and query.lower() in caption.lower():
              clean_cap = caption.replace("<b>", "").replace("</b>", "")[:50] + "..."
@@ -381,7 +393,7 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         link_id = file['link_id']
         f_chat_id = chat_id
         
-        caption = file.get('caption', '')
+        caption = file.get('caption') or ""
         if query.lower() not in f_name.lower() and query.lower() in caption.lower():
              clean_cap = caption.replace("<b>", "").replace("</b>", "")[:50] + "..."
         
@@ -390,13 +402,19 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
         quality = q_match.group(0) if q_match else "N/A"
         
-        l_matches = re.findall(r"\b(Hindi|Eng|English|Tam|Tamil|Tel|Telugu|Mal|Malayalam|Kan|Kannada|Ben|Bengali|Pun|Punjabi|Mar|Marathi)\b", f_name, re.IGNORECASE)
-        lang = ", ".join(sorted(set([l.capitalize() for l in l_matches]))) if l_matches else "N/A"
+        # Smart Language Extraction for Display
+        langs_found = []
+        text_to_check = (f_name + " " + caption).lower()
+        for lang, regex in LANG_REGEX.items():
+            if regex.search(text_to_check):
+                langs_found.append(lang)
+        
+        lang_str = ", ".join(sorted(set(langs_found))) if langs_found else "N/A"
 
         text += f"📂 <a href='{link}'>Click to get this file 📥</a>\n"
         text += f"🖥 Name: {f_name}\n"
         text += f"📀 Quality: {quality}\n"
-        text += f"🌍 Language: {lang}\n"
+        text += f"🌍 Language: {lang_str}\n"
         text += f"📦 Size: [{f_size}]\n\n"
         
         if len(text) > 3800:
@@ -458,7 +476,6 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active
         caption = file.get('caption')
         display_name = f_name
         
-        # Caption Check Logic
         if query and isinstance(query, str) and caption:
             q = query.lower()
             if q not in f_name.lower() and q in caption.lower():

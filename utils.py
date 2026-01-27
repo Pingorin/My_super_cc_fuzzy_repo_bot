@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 
 # ✅ CONSTANTS (Display Names)
 LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu"]
-QUALITIES = ["4k", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
+# ✅ Added "Bluray" to the list
+QUALITIES = ["Bluray", "4k", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
 
-# ✅ SMART DETECTION REGEX (Short codes + Full names)
-# Ye "Hin", "Eng", "Tam" sabko pakdega
+# ✅ SMART LANGUAGE REGEX
 LANG_REGEX = {
     "English": re.compile(r"\b(english|eng)\b", re.IGNORECASE),
     "Hindi": re.compile(r"\b(hindi|hin)\b", re.IGNORECASE),
@@ -37,8 +37,22 @@ LANG_REGEX = {
     "Urdu": re.compile(r"\b(urdu)\b", re.IGNORECASE)
 }
 
+# ✅ SMART QUALITY REGEX (Updated for Bluray, 4k, HD variants)
+QUALITY_REGEX = {
+    "Bluray": re.compile(r"\b(bluray|blu-ray|bdrip)\b", re.IGNORECASE),
+    "4k": re.compile(r"\b(4k|ultra\s?hd|uhd)\b", re.IGNORECASE),
+    "2160p": re.compile(r"\b2160p\b", re.IGNORECASE),
+    "1080p": re.compile(r"\b1080p\b", re.IGNORECASE),
+    "720p": re.compile(r"\b720p\b", re.IGNORECASE),
+    "480p": re.compile(r"\b480p\b", re.IGNORECASE),
+    "360p": re.compile(r"\b360p\b", re.IGNORECASE),
+    "HD": re.compile(r"\b(hd|hdtv|hdrip|hq)\b", re.IGNORECASE),
+    "SD": re.compile(r"\b(sd|sdqv)\b", re.IGNORECASE),
+    "CAM": re.compile(r"\b(cam|camrip|hdcam)\b", re.IGNORECASE),
+    "DVD": re.compile(r"\b(dvd|dvdrip)\b", re.IGNORECASE)
+}
+
 YEAR_REGEX = re.compile(r"\b(?:19|20)\d{2}\b")
-QUALITY_REGEXES = {q: re.compile(rf"\b{re.escape(q)}\b", re.IGNORECASE) for q in QUALITIES}
 
 class temp(object):
     U_NAME = None
@@ -47,7 +61,7 @@ class temp(object):
     ME = None
 
 # ==============================================================================
-# 1. FILTER FUNCTIONS (Client Side Helper)
+# 1. FILTER FUNCTIONS
 # ==============================================================================
 
 def filter_by_type(files, f_type):
@@ -63,10 +77,9 @@ def filter_by_type(files, f_type):
 def filter_by_lang(files, lang):
     if not lang or lang.lower() == "none" or lang.lower() == "all": return files
     filtered = []
-    # Smart Filter using Regex
     regex = LANG_REGEX.get(lang)
     for f in files:
-        text = (f.get('file_name', '') + " " + f.get('caption', '')).lower()
+        text = (f.get('file_name', '') + " " + (f.get('caption') or "")).lower()
         if regex:
             if regex.search(text): filtered.append(f)
         elif lang.lower() in text: filtered.append(f)
@@ -75,13 +88,13 @@ def filter_by_lang(files, lang):
 def filter_by_quality(files, quality):
     if not quality or quality.lower() == "none" or quality.lower() == "all": return files
     filtered = []
-    regex = QUALITY_REGEXES.get(quality)
-    target_qual = quality.lower()
+    # Use Smart Regex
+    regex = QUALITY_REGEX.get(quality)
     for f in files:
         fname = f.get('file_name', '')
         if regex:
             if regex.search(fname): filtered.append(f)
-        elif target_qual in fname.lower(): filtered.append(f)
+        elif quality.lower() in fname.lower(): filtered.append(f)
     return filtered
 
 def filter_by_year(files, year):
@@ -112,11 +125,11 @@ def filter_by_size(files, size_range):
     return filtered
 
 # ==============================================================================
-# 2. BUTTON GENERATORS (UPDATED WITH SMART DETECTION)
+# 2. BUTTON GENERATORS
 # ==============================================================================
 
 def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
-    # ✅ Step 1: Scan Files to see what exists (File Name + Caption)
+    # Step 1: Scan Files to see what exists (File Name + Caption)
     has_video = False
     has_docs = False
     has_lang_data = False
@@ -126,28 +139,27 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
     for f in files:
         fname = f.get('file_name', '')
         caption = f.get('caption') or ""
-        # Combine name and caption for search
         full_text = f"{fname} {caption}"
         ftype = f.get('file_type', 'document')
         
         if ftype == 'video': has_video = True
         elif ftype == 'document': has_docs = True
         
-        # Check Language presence (Smart Regex)
+        # Check Language
         if not has_lang_data:
             for lang, regex in LANG_REGEX.items():
                 if regex.search(full_text):
                     has_lang_data = True
                     break
         
-        # Check Quality presence
+        # Check Quality (Scan fname)
         if not has_qual_data:
-            for qual, regex in QUALITY_REGEXES.items():
+            for qual, regex in QUALITY_REGEX.items():
                 if regex.search(fname):
                     has_qual_data = True
                     break
                     
-        # Check Year presence
+        # Check Year
         if not has_year_data:
             if YEAR_REGEX.search(fname):
                 has_year_data = True
@@ -238,9 +250,7 @@ def get_language_buttons(search_id, files, active_type=None, active_qual=None, a
 
     stats = {lang: 0 for lang in LANGUAGES}
     for file in files:
-        # Check Name AND Caption using Regex
         text = (file.get('file_name', '') + " " + (file.get('caption') or "")).lower()
-        
         for lang, regex in LANG_REGEX.items():
             if regex.search(text):
                 stats[lang] += 1
@@ -270,7 +280,7 @@ def get_quality_buttons(search_id, files, active_type=None, active_lang=None, ac
     stats = {qual: 0 for qual in QUALITIES}
     for file in files:
         fname = file.get('file_name', '')
-        for qual, regex in QUALITY_REGEXES.items():
+        for qual, regex in QUALITY_REGEX.items():
             if regex.search(fname):
                 stats[qual] += 1
                 
@@ -402,7 +412,6 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
         quality = q_match.group(0) if q_match else "N/A"
         
-        # Smart Language Extraction for Display
         langs_found = []
         text_to_check = (f_name + " " + caption).lower()
         for lang, regex in LANG_REGEX.items():
@@ -490,10 +499,6 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active
     pagination = get_pagination_row(search_id, offset, limit, len(files), active_filter, active_lang, active_qual, active_year, active_size)
     if pagination: buttons.append(pagination)
     return buttons
-
-# ==============================================================================
-# 5. OTHER HELPERS
-# ==============================================================================
 
 async def get_shortlink(site, api, link):
     url = f'https://{site}/api'

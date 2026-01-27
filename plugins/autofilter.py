@@ -145,6 +145,7 @@ async def auto_filter(client, message):
             
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
+        # ✅ PASSING FILES HERE
         filter_buttons = get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
 
         if mode == 'button':
@@ -247,6 +248,7 @@ async def handle_pagination(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
+        # ✅ FIX: Passing files to generate buttons correctly
         filter_buttons = get_filter_buttons(search_id, files)
 
         buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, req)
@@ -261,7 +263,7 @@ async def handle_pagination(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 3. SELECTION HANDLERS (MUST BE BEFORE MAIN FILTER)
+# 3. SELECTION HANDLERS
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_lang_"))
 async def handle_language_selection(client, query):
@@ -310,7 +312,7 @@ async def handle_size_selection(client, query):
     except: pass
 
 # ==============================================================================
-# 4. MASTER FILTER HANDLER (FIXED FOR ZERO RESULTS IN SIZE)
+# 4. MASTER FILTER HANDLER (FIXED FOR ZERO RESULTS)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_\d"))
 async def handle_combined_filter(client, query):
@@ -342,11 +344,18 @@ async def handle_combined_filter(client, query):
             filter_size = "none"
             offset = int(data[5])
 
-        cached_data = await Media.get_search_query(search_id)
+        task_data = Media.get_search_query(search_id)
+        task_settings = db.get_group_settings(query.message.chat.id)
+        cached_data, group_settings = await asyncio.gather(task_data, task_settings)
+        
         if not cached_data: return await query.answer("Search Expired", show_alert=True)
+        
+        # ✅ Get BOTH All Files (for buttons) AND Filtered Files (for display)
+        all_files = cached_data.get('files') or []
         req = cached_data.get('query')
+        if not all_files: all_files = await Media.get_search_results(req)
 
-        # Call DB
+        # Call DB for Filtered Results
         final_files = await Media.get_search_results(
             req, 
             file_type=filter_type, 
@@ -356,14 +365,8 @@ async def handle_combined_filter(client, query):
             size_range=filter_size
         )
 
-        # ✅ CRITICAL FIX: Allow empty results IF size filter is active
-        # This allows the menu to update with the checkmark even if no files found
-        if not final_files:
-            if filter_size == "none":
-                # For other filters, show alert
-                return await query.answer("❌ No files match these filters!", show_alert=True)
-            # If Size filter is active, continue (final_files is empty list)
-
+        # ✅ CRITICAL FIX: If results 0, DON'T STOP. Show "No Files" text but KEEP BUTTONS.
+        
         await Media.update_search_cache(search_id, final_files)
 
         group_settings = await db.get_group_settings(query.message.chat.id)
@@ -382,22 +385,28 @@ async def handle_combined_filter(client, query):
         pass_year = filter_year if filter_year != "none" else None
         pass_size = filter_size if filter_size != "none" else None
 
-        # PASSING FINAL_FILES (Even if empty) to generate buttons with checkmarks
-        filter_buttons = get_filter_buttons(search_id, final_files, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
+        # ✅ PASSING 'all_files' (Original List) SO BUTTONS DON'T DISAPPEAR
+        filter_buttons = get_filter_buttons(search_id, all_files, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
 
         if mode == 'button':
-            buttons = btn_parser(final_files, query.message.chat.id, search_id, offset, limit, req, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
+            if not final_files:
+                msg_text = f"👻 **Results for:** `{req}`\n\n❌ No files found with these filters."
+                buttons = []
+            else:
+                msg_text = f"⚡ **Results for:** `{req}`\nfound {len(final_files)} files."
+                buttons = btn_parser(final_files, query.message.chat.id, search_id, offset, limit, req)
+                
             buttons = arrange_buttons(buttons, final_files, limit, filter_buttons, howto_btn, free_prem_btn)
-            await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+            await query.message.edit_text(text=msg_text, reply_markup=InlineKeyboardMarkup(buttons))
             
         elif mode in ['text', 'detailed']:
-            page_files = final_files[offset : offset + limit]
+            if not final_files:
+                text = f"👻 **Results for:** `{req}`\n\n❌ No files found with these filters."
+            else:
+                page_files = final_files[offset : offset + limit]
+                if mode == 'text': text = format_text_results(page_files, req, query.message.chat.id)
+                else: text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
             
-            if mode == 'text': text = format_text_results(page_files, req, query.message.chat.id)
-            else: text = format_detailed_results(page_files, req, query.message.chat.id, time_taken=0)
-            
-            if not final_files: text = f"👻 **Results for:** `{req}`\n\n❌ No files found in this size range."
-
             btn = []
             if filter_buttons: 
                 for row in filter_buttons: btn.append(row)
@@ -417,7 +426,7 @@ async def handle_combined_filter(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 8 - 11 MENU OPENERS
+# 8 - 11 MENU OPENERS (Stuck Fix Applied)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^lang_menu_"))
 async def handle_language_menu(client, query):
@@ -431,14 +440,16 @@ async def handle_language_menu(client, query):
         c_qual = data[4]
         c_year = data[5] if len(data) > 5 else "none"
         c_size = data[6] if len(data) > 6 else "none"
-        c_lang = data[7] if len(data) > 7 else "none"
+        c_lang = data[7] if len(data) > 7 else "none" # Hidden active lang
 
         cached_data = await Media.get_search_query(search_id)
         if not cached_data: return await query.answer("Results expired.", show_alert=True)
         req = cached_data.get('query')
         
+        # ✅ Fetching files inside Menu (Allows 0 results to open menu)
         files = await Media.get_search_results(req, file_type=c_type, lang=None, quality=c_qual, year=c_year, size_range=c_size)
-        if not files: return await query.answer("No files to filter.", show_alert=True)
+        
+        # Note: Even if files is empty (0), we show the menu so user can click "Back" or see empty list
         
         pt = c_type if c_type != "none" else None
         pq = c_qual if c_qual != "none" else None
@@ -469,14 +480,13 @@ async def handle_quality_menu(client, query):
         c_lang = data[4]
         c_year = data[5] if len(data) > 5 else "none"
         c_size = data[6] if len(data) > 6 else "none"
-        c_qual = data[7] if len(data) > 7 else "none"
+        c_qual = data[7] if len(data) > 7 else "none" # Hidden active qual
 
         cached_data = await Media.get_search_query(search_id)
         if not cached_data: return await query.answer("Results expired.", show_alert=True)
         req = cached_data.get('query')
         
         files = await Media.get_search_results(req, file_type=c_type, lang=c_lang, quality=None, year=c_year, size_range=c_size)
-        if not files: return await query.answer("No files to filter.", show_alert=True)
         
         pt = c_type if c_type != "none" else None
         pl = c_lang if c_lang != "none" else None
@@ -507,14 +517,13 @@ async def handle_year_menu(client, query):
         c_lang = data[4]
         c_qual = data[5]
         c_size = data[6] if len(data) > 6 else "none"
-        c_year = data[7] if len(data) > 7 else "none"
+        c_year = data[7] if len(data) > 7 else "none" # Hidden active year
 
         cached_data = await Media.get_search_query(search_id)
         if not cached_data: return await query.answer("Results expired.", show_alert=True)
         req = cached_data.get('query')
         
         files = await Media.get_search_results(req, file_type=c_type, lang=c_lang, quality=c_qual, year=None, size_range=c_size)
-        if not files: return await query.answer("No files to filter.", show_alert=True)
         
         pt = c_type if c_type != "none" else None
         pl = c_lang if c_lang != "none" else None
@@ -546,7 +555,7 @@ async def handle_size_menu(client, query):
         c_lang = data[4]
         c_qual = data[5]
         c_year = data[6]
-        c_size = data[7] if len(data) > 7 else "none"
+        c_size = data[7] if len(data) > 7 else "none" # Hidden active size
 
         howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []

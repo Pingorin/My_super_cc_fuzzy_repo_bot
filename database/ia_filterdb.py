@@ -9,8 +9,7 @@ from info import DATABASE_URI, DATABASE_NAME
 
 logger = logging.getLogger(__name__)
 
-# ✅ SMART LANGUAGE MAPPING (Database ke liye)
-# Jab user "Hindi" select kare, toh DB "Hindi" aur "Hin" dono dhunde.
+# ✅ SMART LANGUAGE MAPPING
 LANG_MAP = {
     "English": "English|Eng",
     "Hindi": "Hindi|Hin",
@@ -61,9 +60,6 @@ class MediaDB:
             print(f"❌ Error Getting Sequence ID: {e}")
             return None
 
-    # ==================================================================
-    # ⚡ CACHING SAVE FUNCTION
-    # ==================================================================
     async def save_search_query(self, query, user_id, files):
         try:
             search_id = await self.get_next_sequence_value("search_id_counter", increment=1)
@@ -100,8 +96,6 @@ class MediaDB:
             print(f"❌ CRITICAL DB ERROR (Get): {e}")
             return None
 
-    # ==================================================================
-    
     @staticmethod
     def clean_text(text):
         if not text: return ""
@@ -200,9 +194,9 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ OPTIMIZED SEARCH WITH SMART REGEX
+    # ⚡ OPTIMIZED SEARCH WITH SORTING
     # ==================================================================
-    async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None):
+    async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         try:
             must_clauses = []
             words = query.split()
@@ -230,18 +224,14 @@ class MediaDB:
                 capital_type = "video" if file_type.lower() == "video" else "document"
                 match_filters["file_type"] = capital_type
 
-            # ✅ SMART LANGUAGE FILTER
             if lang and lang != "none":
-                # User se "Hindi" aaya, hum DB mein "Hindi|Hin" dhundenge
                 pattern = LANG_MAP.get(lang, lang)
-                # Check BOTH file_name AND caption
                 match_filters["$or"] = [
                     {"file_name": {"$regex": pattern, "$options": "i"}},
                     {"caption": {"$regex": pattern, "$options": "i"}}
                 ]
 
             if quality and quality != "none":
-                # Quality bhi Caption aur Name dono mein check karein
                 match_filters["$or"] = [
                     {"file_name": {"$regex": quality, "$options": "i"}},
                     {"caption": {"$regex": quality, "$options": "i"}}
@@ -255,17 +245,25 @@ class MediaDB:
                 GB_1 = 1024 * 1024 * 1024
                 GB_2 = 2 * 1024 * 1024 * 1024
                 
-                if size_range == "min500":
-                    match_filters["file_size"] = {"$lt": MB_500}
-                elif size_range == "500-1gb":
-                    match_filters["file_size"] = {"$gte": MB_500, "$lt": GB_1}
-                elif size_range == "1gb-2gb":
-                    match_filters["file_size"] = {"$gte": GB_1, "$lt": GB_2}
-                elif size_range == "max2gb":
-                    match_filters["file_size"] = {"$gte": GB_2}
+                if size_range == "min500": match_filters["file_size"] = {"$lt": MB_500}
+                elif size_range == "500-1gb": match_filters["file_size"] = {"$gte": MB_500, "$lt": GB_1}
+                elif size_range == "1gb-2gb": match_filters["file_size"] = {"$gte": GB_1, "$lt": GB_2}
+                elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
             if match_filters:
                 pipeline.append({"$match": match_filters})
+
+            # ✅ SORTING LOGIC
+            # keys: relevance, new, old, large, small
+            if sort == "new":
+                pipeline.append({"$sort": {"_id": -1}}) # Descending ID = Newest
+            elif sort == "old":
+                pipeline.append({"$sort": {"_id": 1}}) # Ascending ID = Oldest
+            elif sort == "large":
+                pipeline.append({"$sort": {"file_size": -1}}) # High to Low
+            elif sort == "small":
+                pipeline.append({"$sort": {"file_size": 1}}) # Low to High
+            # "relevance" uses default text score from $search
 
             pipeline.append({"$limit": 100}) 
 
@@ -274,23 +272,28 @@ class MediaDB:
             return files
             
         except Exception as e:
-            # Fallback for when Index is not ready
             print(f"⚠️ Index Search Failed: {e}. Switching to Fallback.")
             safe_query = re.escape(query)
             regex = re.compile(safe_query, re.IGNORECASE)
             
             fallback_filter = {"$or": [{"file_name": regex}, {"caption": regex}]}
-            
             if file_type and file_type != "none": 
                 fallback_filter["file_type"] = "video" if file_type.lower() == "video" else "document"
 
             cursor = self.search_col.find(fallback_filter)
-            cursor.sort('$natural', -1)
+            
+            # Manual Sort for Fallback
+            if sort == "new": cursor.sort('_id', -1)
+            elif sort == "old": cursor.sort('_id', 1)
+            elif sort == "large": cursor.sort('file_size', -1)
+            elif sort == "small": cursor.sort('file_size', 1)
+            else: cursor.sort('$natural', -1)
+
             files = await cursor.to_list(length=100)
             
-            # Manual Filter Logic
             final_files = []
             for f in files:
+                # ... (Same Manual filtering logic as before) ...
                 fname = f.get('file_name', '').lower()
                 caption = (f.get('caption') or "").lower()
                 full_text = fname + " " + caption

@@ -215,13 +215,8 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
 
     # ✅ ROW 4: SORT BY FILES
     row4 = []
-    sort_label = "Sort By Files 📂"
-    if active_sort == "new": sort_label = "Sort: Newest ✅"
-    elif active_sort == "old": sort_label = "Sort: Oldest ✅"
-    elif active_sort == "large": sort_label = "Sort: Large First ✅"
-    elif active_sort == "small": sort_label = "Sort: Small First ✅"
-    
-    row4.append(InlineKeyboardButton(sort_label, callback_data=f"sort_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_{curr_sort}"))
+        # Updated: Button name never changes, but we pass current sort in data so menu shows checkmark
+    row4.append(InlineKeyboardButton("Sort By Files 📂", callback_data=f"sort_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_{curr_sort}"))
     buttons.append(row4)
 
     # ROW 5: RESET SPECIFIC FILTERS

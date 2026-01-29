@@ -61,7 +61,6 @@ class temp(object):
 # ==============================================================================
 # 1. FILTER FUNCTIONS
 # ==============================================================================
-
 def filter_by_type(files, f_type):
     if not f_type or f_type.lower() == "none" or f_type.lower() == "all": return files
     filtered = []
@@ -126,7 +125,7 @@ def filter_by_size(files, size_range):
 # ==============================================================================
 
 def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None, active_sort=None):
-    # Scan logic for available filters
+    # Scan logic
     has_video = False
     has_docs = False
     has_lang_data = False
@@ -213,9 +212,8 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
     
     if row3: buttons.append(row3)
 
-    # ✅ ROW 4: SORT BY FILES
+    # ROW 4: SORT BY FILES
     row4 = []
-        # Updated: Button name never changes, but we pass current sort in data so menu shows checkmark
     row4.append(InlineKeyboardButton("Sort By Files 📂", callback_data=f"sort_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_{curr_sort}"))
     buttons.append(row4)
 
@@ -239,10 +237,8 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
         
     return buttons
 
-# ✅ NEW: SORT BUTTONS GENERATOR
 def get_sort_buttons(search_id, active_type, active_lang, active_qual, active_year, active_size, active_sort):
     buttons = []
-    
     options = [
         ("Relevance", "relevance"),
         ("Newest First", "new"),
@@ -250,12 +246,10 @@ def get_sort_buttons(search_id, active_type, active_lang, active_qual, active_ye
         ("Size (High-Low)", "large"),
         ("Size (Low-High)", "small")
     ]
-    
     for label, key in options:
         btn_text = label
         if key == active_sort or (key == "relevance" and not active_sort):
             btn_text += " ✅"
-            
         buttons.append([InlineKeyboardButton(btn_text, callback_data=f"filter_sort_{search_id}_{key}_{active_type}_{active_lang}_{active_qual}_{active_year}_{active_size}_0")])
         
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_{search_id}_{active_type}_{active_lang}_{active_qual}_{active_year}_{active_size}_{active_sort}_0")])

@@ -12,7 +12,7 @@ from database.users_chats_db import db
 from info import SITE_URL
 from cachetools import TTLCache 
 
-# ✅ Utils Imports (Make sure get_sort_buttons is imported)
+# ✅ Utils Imports
 from utils import (
     temp, btn_parser, format_text_results, format_detailed_results, 
     format_card_result, get_pagination_row, get_filter_buttons, 
@@ -54,7 +54,7 @@ async def auto_delete_task(bot_message, user_message, delay, show_thanks, query=
     except: pass
 
 # ==============================================================================
-# 🛠️ HELPER: ARRANGE BUTTONS (Locally Defined)
+# 🛠️ HELPER: ARRANGE BUTTONS
 # ==============================================================================
 def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn):
     pagination_row = []
@@ -72,7 +72,7 @@ def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_
         
     return buttons
 
-# ✅ HELPER: Get "Video | Docs" Row (Locally Defined)
+# ✅ HELPER: Get "Video | Docs" Row
 def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_size, curr_sort):
     row = []
     if curr_type == "video":
@@ -112,9 +112,15 @@ async def auto_filter(client, message):
         
         if not files: return
 
+        # ✅ FIXED: Bot Username Fetching
+        if not temp.U_NAME:
+            try: temp.U_NAME = (await client.get_me()).username
+            except: temp.U_NAME = "Telegram"
+
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'req'))
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'suc'))
 
+        # ✅ FIXED: Group Settings Usage
         mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
         auto_react = group_settings.get('auto_reaction', False)
@@ -162,6 +168,7 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
             
+            # Pass sort to pagination
             pagination = get_pagination_row(search_id, offset, limit, total_results, active_size=None, active_sort="relevance")
             if pagination: btn.append(pagination)
             
@@ -244,8 +251,7 @@ async def handle_pagination(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
-        # Note: Pagination doesn't need to know current filters to render buttons, 
-        # as files list is already filtered/sorted in cache.
+        # ✅ FIX: Passing files to generate buttons correctly
         filter_buttons = get_filter_buttons(search_id, files)
 
         buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, req)
@@ -266,7 +272,6 @@ async def handle_pagination(client, query):
 async def handle_language_selection(client, query):
     try:
         data = query.data.split("_")
-        # Shifted Indices due to Sort
         if len(data) >= 10:
             search_id, lang, f_type, qual, year, size, sort, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]
         else:
@@ -309,6 +314,7 @@ async def handle_size_selection(client, query):
             await handle_combined_filter(client, query)
     except: pass
 
+# ✅ NEW: SORT SELECTION HANDLER
 @Client.on_callback_query(filters.regex(r"^filter_sort_"))
 async def handle_sort_selection(client, query):
     try:
@@ -558,6 +564,7 @@ async def handle_size_menu(client, query):
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
     except: pass
 
+# ✅ NEW: SORT MENU OPENER
 @Client.on_callback_query(filters.regex(r"^sort_menu_"))
 async def handle_sort_menu(client, query):
     try: await query.answer()
@@ -565,6 +572,7 @@ async def handle_sort_menu(client, query):
     try:
         data = query.data.split("_")
         search_id, c_type, c_lang, c_qual, c_year, c_size = int(data[2]), data[3], data[4], data[5], data[6], data[7]
+        # Current active sort is implicit in the menu being viewed, defaulting to relevance if not set
         c_sort = "relevance"
         if len(data) > 8: c_sort = data[8]
 
@@ -572,7 +580,9 @@ async def handle_sort_menu(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
+        # Header Row
         type_buttons = get_type_row(search_id, c_type, c_lang, c_qual, c_year, c_size, c_sort)
+        # Sort Buttons
         sort_buttons = get_sort_buttons(search_id, c_type, c_lang, c_qual, c_year, c_size, c_sort)
         
         middle_buttons = type_buttons + sort_buttons

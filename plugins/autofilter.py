@@ -12,12 +12,12 @@ from database.users_chats_db import db
 from info import SITE_URL
 from cachetools import TTLCache 
 
-# ✅ Utils Imports
+# ✅ Utils Imports (Make sure get_sort_buttons is imported)
 from utils import (
     temp, btn_parser, format_text_results, format_detailed_results, 
     format_card_result, get_pagination_row, get_filter_buttons, 
     get_language_buttons, get_quality_buttons, get_year_buttons,
-    get_size_buttons, filter_by_type, filter_by_lang, filter_by_quality, 
+    get_size_buttons, get_sort_buttons, filter_by_type, filter_by_lang, filter_by_quality, 
     filter_by_year, filter_by_size
 )
 
@@ -54,7 +54,7 @@ async def auto_delete_task(bot_message, user_message, delay, show_thanks, query=
     except: pass
 
 # ==============================================================================
-# 🛠️ HELPER: ARRANGE BUTTONS
+# 🛠️ HELPER: ARRANGE BUTTONS (Locally Defined)
 # ==============================================================================
 def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn):
     pagination_row = []
@@ -72,18 +72,18 @@ def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_
         
     return buttons
 
-# ✅ HELPER: Get "Video | Docs" Row
-def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_size):
+# ✅ HELPER: Get "Video | Docs" Row (Locally Defined)
+def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_size, curr_sort):
     row = []
     if curr_type == "video":
         row.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
-        row.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+        row.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_{curr_sort}_0"))
     elif curr_type == "document":
         row.append(InlineKeyboardButton("Docs ✅", callback_data="ignore"))
-        row.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+        row.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_{curr_sort}_0"))
     else:
-        row.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_video_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
-        row.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_document_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+        row.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_video_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_{curr_sort}_0"))
+        row.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_document_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_{curr_sort}_0"))
     return [row]
 
 # ==============================================================================
@@ -104,7 +104,8 @@ async def auto_filter(client, message):
 
         start_time = time.time()
         
-        task_files = Media.get_search_results(query)
+        # Initial Search (Default sort: relevance)
+        task_files = Media.get_search_results(query, sort="relevance")
         task_settings = db.get_group_settings(message.chat.id)
         
         files, group_settings = await asyncio.gather(task_files, task_settings)
@@ -138,15 +139,10 @@ async def auto_filter(client, message):
         
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
-        
-        if not temp.U_NAME:
-            try: temp.U_NAME = (await client.get_me()).username
-            except: temp.U_NAME = "Telegram"
-            
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
-        # ✅ PASSING FILES HERE
-        filter_buttons = get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None)
+        # Pass "relevance" as default sort
+        filter_buttons = get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None, active_sort="relevance")
 
         if mode == 'button':
             buttons = btn_parser(files, message.chat.id, search_id, offset, limit, query)
@@ -166,7 +162,7 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
             
-            pagination = get_pagination_row(search_id, offset, limit, total_results, active_size=None)
+            pagination = get_pagination_row(search_id, offset, limit, total_results, active_size=None, active_sort="relevance")
             if pagination: btn.append(pagination)
             
             sent_msg = await message.reply_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
@@ -248,7 +244,8 @@ async def handle_pagination(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
-        # ✅ FIX: Passing files to generate buttons correctly
+        # Note: Pagination doesn't need to know current filters to render buttons, 
+        # as files list is already filtered/sorted in cache.
         filter_buttons = get_filter_buttons(search_id, files)
 
         buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, req)
@@ -263,17 +260,18 @@ async def handle_pagination(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 3. SELECTION HANDLERS
+# 3. SELECTION HANDLERS (UPDATED WITH SORT PARAM)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_lang_"))
 async def handle_language_selection(client, query):
     try:
         data = query.data.split("_")
-        if len(data) >= 9:
-            search_id, lang, f_type, qual, year, size, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8]
+        # Shifted Indices due to Sort
+        if len(data) >= 10:
+            search_id, lang, f_type, qual, year, size, sort, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]
         else:
-            search_id, lang, f_type, qual, year, size, offset = data[2], data[3], data[4], data[5], "none", "none", data[6]
-        query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{offset}"
+            search_id, lang, f_type, qual, year, size, sort, offset = data[2], data[3], data[4], data[5], "none", "none", "relevance", data[6]
+        query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{sort}_{offset}"
         await handle_combined_filter(client, query)
     except: pass
 
@@ -281,11 +279,11 @@ async def handle_language_selection(client, query):
 async def handle_quality_selection(client, query):
     try:
         data = query.data.split("_")
-        if len(data) >= 9:
-            search_id, qual, f_type, lang, year, size, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8]
+        if len(data) >= 10:
+            search_id, qual, f_type, lang, year, size, sort, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]
         else:
-            search_id, qual, f_type, lang, year, size, offset = data[2], data[3], data[4], data[5], "none", "none", data[6]
-        query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{offset}"
+            search_id, qual, f_type, lang, year, size, sort, offset = data[2], data[3], data[4], data[5], "none", "none", "relevance", data[6]
+        query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{sort}_{offset}"
         await handle_combined_filter(client, query)
     except: pass
 
@@ -293,11 +291,11 @@ async def handle_quality_selection(client, query):
 async def handle_year_selection(client, query):
     try:
         data = query.data.split("_")
-        if len(data) >= 9:
-            search_id, year, f_type, lang, qual, size, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8]
+        if len(data) >= 10:
+            search_id, year, f_type, lang, qual, size, sort, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]
         else:
-            search_id, year, f_type, lang, qual, size, offset = data[2], data[3], data[4], data[5], "none", "none", data[6]
-        query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{offset}"
+            search_id, year, f_type, lang, qual, size, sort, offset = data[2], data[3], data[4], data[5], "none", "none", "relevance", data[6]
+        query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{sort}_{offset}"
         await handle_combined_filter(client, query)
     except: pass
 
@@ -305,14 +303,24 @@ async def handle_year_selection(client, query):
 async def handle_size_selection(client, query):
     try:
         data = query.data.split("_")
-        if len(data) >= 9:
-            search_id, size, f_type, lang, qual, year, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8]
-            query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{offset}"
+        if len(data) >= 10:
+            search_id, size, f_type, lang, qual, year, sort, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]
+            query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{sort}_{offset}"
+            await handle_combined_filter(client, query)
+    except: pass
+
+@Client.on_callback_query(filters.regex(r"^filter_sort_"))
+async def handle_sort_selection(client, query):
+    try:
+        data = query.data.split("_")
+        if len(data) >= 10:
+            search_id, sort, f_type, lang, qual, year, size, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]
+            query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{sort}_{offset}"
             await handle_combined_filter(client, query)
     except: pass
 
 # ==============================================================================
-# 4. MASTER FILTER HANDLER (FIXED FOR ZERO RESULTS)
+# 4. MASTER FILTER HANDLER (UPDATED WITH SORT & ZERO RESULT FIX)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_\d"))
 async def handle_combined_filter(client, query):
@@ -331,42 +339,47 @@ async def handle_combined_filter(client, query):
         filter_lang = data[3]
         filter_qual = data[4]
         
-        if len(data) >= 8:
+        # Extended Parsing for Sort
+        if len(data) >= 9:
             filter_year = data[5]
             filter_size = data[6]
-            offset = int(data[7])
-        elif len(data) >= 7:
+            filter_sort = data[7]
+            offset = int(data[8])
+        elif len(data) >= 8:
             filter_year = data[5]
-            filter_size = "none"
-            offset = int(data[6])
+            filter_size = data[6]
+            filter_sort = "relevance"
+            offset = int(data[7])
         else:
             filter_year = "none"
             filter_size = "none"
+            filter_sort = "relevance"
             offset = int(data[5])
 
-        task_data = Media.get_search_query(search_id)
-        task_settings = db.get_group_settings(query.message.chat.id)
-        cached_data, group_settings = await asyncio.gather(task_data, task_settings)
-        
+        cached_data = await Media.get_search_query(search_id)
         if not cached_data: return await query.answer("Search Expired", show_alert=True)
         
-        # ✅ Get BOTH All Files (for buttons) AND Filtered Files (for display)
+        # Get Original files to keep buttons alive (if zero results)
         all_files = cached_data.get('files') or []
         req = cached_data.get('query')
-        if not all_files: all_files = await Media.get_search_results(req)
+        if not all_files: all_files = await Media.get_search_results(req, sort=filter_sort)
 
-        # Call DB for Filtered Results
+        # ✅ DB Call with Sort & Filters
         final_files = await Media.get_search_results(
             req, 
             file_type=filter_type, 
             lang=filter_lang, 
             quality=filter_qual, 
             year=filter_year,
-            size_range=filter_size
+            size_range=filter_size,
+            sort=filter_sort
         )
 
-        # ✅ CRITICAL FIX: If results 0, DON'T STOP. Show "No Files" text but KEEP BUTTONS.
-        
+        if not final_files:
+            # If Size filter is active, allow 0 results to update UI checkmarks
+            if filter_size == "none":
+                return await query.answer("❌ No files match these filters!", show_alert=True)
+
         await Media.update_search_cache(search_id, final_files)
 
         group_settings = await db.get_group_settings(query.message.chat.id)
@@ -384,9 +397,10 @@ async def handle_combined_filter(client, query):
         pass_qual = filter_qual if filter_qual != "none" else None
         pass_year = filter_year if filter_year != "none" else None
         pass_size = filter_size if filter_size != "none" else None
+        pass_sort = filter_sort if filter_sort != "relevance" else None
 
-        # ✅ PASSING 'all_files' (Original List) SO BUTTONS DON'T DISAPPEAR
-        filter_buttons = get_filter_buttons(search_id, all_files, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
+        # PASSING ALL FILES TO ENSURE BUTTONS EXIST EVEN IF RESULTS ARE 0
+        filter_buttons = get_filter_buttons(search_id, all_files, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size, active_sort=pass_sort)
 
         if mode == 'button':
             if not final_files:
@@ -413,7 +427,7 @@ async def handle_combined_filter(client, query):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn) 
             
-            pagination = get_pagination_row(search_id, offset, limit, len(final_files), active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size)
+            pagination = get_pagination_row(search_id, offset, limit, len(final_files), active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size, active_sort=pass_sort)
             if pagination: btn.append(pagination)
             
             await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn) if btn else None)
@@ -426,163 +440,158 @@ async def handle_combined_filter(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 8 - 11 MENU OPENERS (Stuck Fix Applied)
+# 8 - 12 MENU OPENERS (Updated with Sort Param)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^lang_menu_"))
 async def handle_language_menu(client, query):
     try: await query.answer()
     except: pass
-
     try:
         data = query.data.split("_")
-        search_id = int(data[2])
-        c_type = data[3] 
-        c_qual = data[4]
-        c_year = data[5] if len(data) > 5 else "none"
-        c_size = data[6] if len(data) > 6 else "none"
-        c_lang = data[7] if len(data) > 7 else "none" # Hidden active lang
+        search_id, c_type, c_qual, c_year, c_size = int(data[2]), data[3], data[4], data[5], data[6]
+        c_sort = data[7] if len(data) > 7 else "relevance"
+        c_lang = data[8] if len(data) > 8 else "none"
 
         cached_data = await Media.get_search_query(search_id)
-        if not cached_data: return await query.answer("Results expired.", show_alert=True)
+        if not cached_data: return
         req = cached_data.get('query')
-        
-        # ✅ Fetching files inside Menu (Allows 0 results to open menu)
-        files = await Media.get_search_results(req, file_type=c_type, lang=None, quality=c_qual, year=c_year, size_range=c_size)
-        
-        # Note: Even if files is empty (0), we show the menu so user can click "Back" or see empty list
+        files = await Media.get_search_results(req, file_type=c_type, lang=None, quality=c_qual, year=c_year, size_range=c_size, sort=c_sort)
         
         pt = c_type if c_type != "none" else None
         pq = c_qual if c_qual != "none" else None
+        ps = c_sort if c_sort != "relevance" else None
         
         howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        type_buttons = get_type_row(search_id, c_type, "none", c_qual, c_year, c_size)
-        lang_buttons = get_language_buttons(search_id, files, active_type=pt, active_qual=pq, active_year=c_year, active_size=c_size, active_lang=c_lang) 
+        type_buttons = get_type_row(search_id, c_type, "none", c_qual, c_year, c_size, c_sort)
+        lang_buttons = get_language_buttons(search_id, files, active_type=pt, active_qual=pq, active_year=c_year, active_size=c_size, active_lang=c_lang, active_sort=ps) 
         middle_buttons = type_buttons + lang_buttons
         
         buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
-        
-    except Exception as e:
-        logger.error(f"Lang Menu Error: {e}")
+    except: pass
 
 @Client.on_callback_query(filters.regex(r"^qual_menu_"))
 async def handle_quality_menu(client, query):
     try: await query.answer()
     except: pass
-
     try:
         data = query.data.split("_")
-        search_id = int(data[2])
-        c_type = data[3]
-        c_lang = data[4]
-        c_year = data[5] if len(data) > 5 else "none"
-        c_size = data[6] if len(data) > 6 else "none"
-        c_qual = data[7] if len(data) > 7 else "none" # Hidden active qual
+        search_id, c_type, c_lang, c_year, c_size = int(data[2]), data[3], data[4], data[5], data[6]
+        c_sort = data[7] if len(data) > 7 else "relevance"
+        c_qual = data[8] if len(data) > 8 else "none"
 
         cached_data = await Media.get_search_query(search_id)
-        if not cached_data: return await query.answer("Results expired.", show_alert=True)
+        if not cached_data: return
         req = cached_data.get('query')
-        
-        files = await Media.get_search_results(req, file_type=c_type, lang=c_lang, quality=None, year=c_year, size_range=c_size)
+        files = await Media.get_search_results(req, file_type=c_type, lang=c_lang, quality=None, year=c_year, size_range=c_size, sort=c_sort)
         
         pt = c_type if c_type != "none" else None
         pl = c_lang if c_lang != "none" else None
+        ps = c_sort if c_sort != "relevance" else None
         
         howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        type_buttons = get_type_row(search_id, c_type, c_lang, "none", c_year, c_size)
-        qual_buttons = get_quality_buttons(search_id, files, active_type=pt, active_lang=pl, active_year=c_year, active_size=c_size, active_qual=c_qual)
+        type_buttons = get_type_row(search_id, c_type, c_lang, "none", c_year, c_size, c_sort)
+        qual_buttons = get_quality_buttons(search_id, files, active_type=pt, active_lang=pl, active_year=c_year, active_size=c_size, active_qual=c_qual, active_sort=ps)
         middle_buttons = type_buttons + qual_buttons
         
         buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
-        
-    except Exception as e:
-        logger.error(f"Qual Menu Error: {e}")
+    except: pass
 
 @Client.on_callback_query(filters.regex(r"^year_menu_"))
 async def handle_year_menu(client, query):
     try: await query.answer()
     except: pass
-
     try:
         data = query.data.split("_")
-        search_id = int(data[2])
-        c_type = data[3]
-        c_lang = data[4]
-        c_qual = data[5]
-        c_size = data[6] if len(data) > 6 else "none"
-        c_year = data[7] if len(data) > 7 else "none" # Hidden active year
+        search_id, c_type, c_lang, c_qual, c_size = int(data[2]), data[3], data[4], data[5], data[6]
+        c_sort = data[7] if len(data) > 7 else "relevance"
+        c_year = data[8] if len(data) > 8 else "none"
 
         cached_data = await Media.get_search_query(search_id)
-        if not cached_data: return await query.answer("Results expired.", show_alert=True)
+        if not cached_data: return
         req = cached_data.get('query')
-        
-        files = await Media.get_search_results(req, file_type=c_type, lang=c_lang, quality=c_qual, year=None, size_range=c_size)
+        files = await Media.get_search_results(req, file_type=c_type, lang=c_lang, quality=c_qual, year=None, size_range=c_size, sort=c_sort)
         
         pt = c_type if c_type != "none" else None
         pl = c_lang if c_lang != "none" else None
         pq = c_qual if c_qual != "none" else None
+        ps = c_sort if c_sort != "relevance" else None
         
         howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        type_buttons = get_type_row(search_id, c_type, c_lang, c_qual, "none", c_size)
-        year_buttons = get_year_buttons(search_id, files, active_type=pt, active_lang=pl, active_qual=pq, active_size=c_size, active_year=c_year)
+        type_buttons = get_type_row(search_id, c_type, c_lang, c_qual, "none", c_size, c_sort)
+        year_buttons = get_year_buttons(search_id, files, active_type=pt, active_lang=pl, active_qual=pq, active_size=c_size, active_year=c_year, active_sort=ps)
         middle_buttons = type_buttons + year_buttons
         
         buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
-        
-    except Exception as e:
-        logger.error(f"Year Menu Error: {e}")
+    except: pass
 
 @Client.on_callback_query(filters.regex(r"^size_menu_"))
 async def handle_size_menu(client, query):
     try: await query.answer()
     except: pass
-
     try:
         data = query.data.split("_")
-        search_id = int(data[2])
-        c_type = data[3]
-        c_lang = data[4]
-        c_qual = data[5]
-        c_year = data[6]
-        c_size = data[7] if len(data) > 7 else "none" # Hidden active size
+        search_id, c_type, c_lang, c_qual, c_year = int(data[2]), data[3], data[4], data[5], data[6]
+        c_sort = data[7] if len(data) > 7 else "relevance"
+        c_size = data[8] if len(data) > 8 else "none"
 
         howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
 
-        type_buttons = get_type_row(search_id, c_type, c_lang, c_qual, c_year, "none")
-        size_buttons = get_size_buttons(search_id, active_type=c_type, active_lang=c_lang, active_qual=c_qual, active_year=c_year, active_size=c_size)
+        type_buttons = get_type_row(search_id, c_type, c_lang, c_qual, c_year, "none", c_sort)
+        size_buttons = get_size_buttons(search_id, active_type=c_type, active_lang=c_lang, active_qual=c_qual, active_year=c_year, active_size=c_size, active_sort=c_sort)
         middle_buttons = type_buttons + size_buttons
         
         buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+    except: pass
+
+@Client.on_callback_query(filters.regex(r"^sort_menu_"))
+async def handle_sort_menu(client, query):
+    try: await query.answer()
+    except: pass
+    try:
+        data = query.data.split("_")
+        search_id, c_type, c_lang, c_qual, c_year, c_size = int(data[2]), data[3], data[4], data[5], data[6], data[7]
+        c_sort = "relevance"
+        if len(data) > 8: c_sort = data[8]
+
+        howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
+        howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
+        free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
+
+        type_buttons = get_type_row(search_id, c_type, c_lang, c_qual, c_year, c_size, c_sort)
+        sort_buttons = get_sort_buttons(search_id, c_type, c_lang, c_qual, c_year, c_size, c_sort)
         
+        middle_buttons = type_buttons + sort_buttons
+        buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn)
+        await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
     except Exception as e:
-        logger.error(f"Size Menu Error: {e}")
+        logger.error(f"Sort Menu Error: {e}")
+        traceback.print_exc()
 
 # ==============================================================================
-# 12. RESET & IGNORE & CARD NAV (Restored)
+# 13. RESET & IGNORE & CARD NAV
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^unfilter_"))
 async def handle_unfilter(client, query):
     try:
         search_id = int(query.data.split("_")[1])
-        query.data = f"filter_{search_id}_none_none_none_none_none_0"
+        query.data = f"filter_{search_id}_none_none_none_none_none_relevance_0"
         await handle_combined_filter(client, query)
-    except: 
-        try: await query.answer("Error Resetting", show_alert=True)
-        except: pass
+    except: pass
 
 @Client.on_callback_query(filters.regex(r"^ignore"))
 async def ignore_callback(client, query):

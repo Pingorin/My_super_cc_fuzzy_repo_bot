@@ -17,12 +17,11 @@ except: AUTH_CHANNEL_4 = None
 
 logger = logging.getLogger(__name__)
 
-# ✅ CONSTANTS (Display Names)
+# ✅ CONSTANTS
 LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu"]
-# ✅ Added "Bluray" to the list
 QUALITIES = ["Bluray", "4k", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
 
-# ✅ SMART LANGUAGE REGEX
+# ✅ REGEX
 LANG_REGEX = {
     "English": re.compile(r"\b(english|eng)\b", re.IGNORECASE),
     "Hindi": re.compile(r"\b(hindi|hin)\b", re.IGNORECASE),
@@ -37,7 +36,6 @@ LANG_REGEX = {
     "Urdu": re.compile(r"\b(urdu)\b", re.IGNORECASE)
 }
 
-# ✅ SMART QUALITY REGEX (Updated for Bluray, 4k, HD variants)
 QUALITY_REGEX = {
     "Bluray": re.compile(r"\b(bluray|blu-ray|bdrip)\b", re.IGNORECASE),
     "4k": re.compile(r"\b(4k|ultra\s?hd|uhd)\b", re.IGNORECASE),
@@ -88,7 +86,6 @@ def filter_by_lang(files, lang):
 def filter_by_quality(files, quality):
     if not quality or quality.lower() == "none" or quality.lower() == "all": return files
     filtered = []
-    # Use Smart Regex
     regex = QUALITY_REGEX.get(quality)
     for f in files:
         fname = f.get('file_name', '')
@@ -128,8 +125,8 @@ def filter_by_size(files, size_range):
 # 2. BUTTON GENERATORS
 # ==============================================================================
 
-def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
-    # Step 1: Scan Files to see what exists (File Name + Caption)
+def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None, active_sort=None):
+    # Scan logic for available filters
     has_video = False
     has_docs = False
     has_lang_data = False
@@ -145,21 +142,16 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
         if ftype == 'video': has_video = True
         elif ftype == 'document': has_docs = True
         
-        # Check Language
         if not has_lang_data:
             for lang, regex in LANG_REGEX.items():
                 if regex.search(full_text):
                     has_lang_data = True
                     break
-        
-        # Check Quality (Scan fname)
         if not has_qual_data:
             for qual, regex in QUALITY_REGEX.items():
                 if regex.search(fname):
                     has_qual_data = True
                     break
-                    
-        # Check Year
         if not has_year_data:
             if YEAR_REGEX.search(fname):
                 has_year_data = True
@@ -173,23 +165,24 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
     curr_qual = active_qual if active_qual else "none"
     curr_year = active_year if active_year else "none"
     curr_size = active_size if active_size else "none"
+    curr_sort = active_sort if active_sort else "relevance"
 
-    # ROW 1: Type Filters
+    # ROW 1: Type
     row1 = []
     if has_video:
         if active_filter == "video":
             row1.append(InlineKeyboardButton("Videos ✅", callback_data="ignore"))
         else:
-            row1.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_video_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+            row1.append(InlineKeyboardButton("Videos", callback_data=f"filter_{search_id}_video_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_{curr_sort}_0"))
             
     if has_docs:
         if active_filter == "document":
             row1.append(InlineKeyboardButton("Docs ✅", callback_data="ignore"))
         else:
-            row1.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_document_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+            row1.append(InlineKeyboardButton("Docs", callback_data=f"filter_{search_id}_document_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_{curr_sort}_0"))
     
     if active_filter not in [None, "none"]:
-         row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_0"))
+         row1.append(InlineKeyboardButton("All Files", callback_data=f"filter_{search_id}_none_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_{curr_sort}_0"))
 
     if row1: buttons.append(row1)
 
@@ -197,11 +190,11 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
     row2 = []
     if has_lang_data or (active_lang and active_lang != "none"):
         btn_text = f"Lang: {active_lang} ✅" if active_lang and active_lang != "none" else "Select Language 🌐"
-        row2.append(InlineKeyboardButton(btn_text, callback_data=f"lang_menu_{search_id}_{curr_type}_{curr_qual}_{curr_year}_{curr_size}_{curr_lang}"))
+        row2.append(InlineKeyboardButton(btn_text, callback_data=f"lang_menu_{search_id}_{curr_type}_{curr_qual}_{curr_year}_{curr_size}_{curr_sort}_{curr_lang}"))
 
     if has_qual_data or (active_qual and active_qual != "none"):
         btn_text = f"Qual: {active_qual} ✅" if active_qual and active_qual != "none" else "Select Quality 📀"
-        row2.append(InlineKeyboardButton(btn_text, callback_data=f"qual_menu_{search_id}_{curr_type}_{curr_lang}_{curr_year}_{curr_size}_{curr_qual}"))
+        row2.append(InlineKeyboardButton(btn_text, callback_data=f"qual_menu_{search_id}_{curr_type}_{curr_lang}_{curr_year}_{curr_size}_{curr_sort}_{curr_qual}"))
     
     if row2: buttons.append(row2)
 
@@ -209,43 +202,78 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
     row3 = []
     if has_year_data or (active_year and active_year != "none"):
         btn_text = f"Year: {active_year} ✅" if active_year and active_year != "none" else "Select Year 🗓"
-        row3.append(InlineKeyboardButton(btn_text, callback_data=f"year_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_size}_{curr_year}"))
+        row3.append(InlineKeyboardButton(btn_text, callback_data=f"year_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_size}_{curr_sort}_{curr_year}"))
     
     size_label = "Select Size 📦"
     if active_size == "min500": size_label = "<500MB ✅"
     elif active_size == "500-1gb": size_label = "0.5-1GB ✅"
     elif active_size == "1gb-2gb": size_label = "1-2GB ✅"
     elif active_size == "max2gb": size_label = ">2GB ✅"
-    row3.append(InlineKeyboardButton(size_label, callback_data=f"size_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}"))
+    row3.append(InlineKeyboardButton(size_label, callback_data=f"size_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}_{curr_sort}_{curr_size}"))
+    
     if row3: buttons.append(row3)
 
-    # ROW 4: RESET SPECIFIC FILTERS
+    # ✅ ROW 4: SORT BY FILES
     row4 = []
-    if active_lang and active_lang != "none":
-        row4.append(InlineKeyboardButton("All Langs", callback_data=f"filter_{search_id}_{curr_type}_none_{curr_qual}_{curr_year}_{curr_size}_0"))
-    if active_qual and active_qual != "none":
-        row4.append(InlineKeyboardButton("All Quals", callback_data=f"filter_{search_id}_{curr_type}_{curr_lang}_none_{curr_year}_{curr_size}_0"))
-    if active_year and active_year != "none":
-        row4.append(InlineKeyboardButton("All Years", callback_data=f"filter_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_none_{curr_size}_0"))
-    if active_size and active_size != "none":
-        row4.append(InlineKeyboardButton("All Sizes", callback_data=f"filter_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}_none_0"))
+    sort_label = "Sort By Files 📂"
+    if active_sort == "new": sort_label = "Sort: Newest ✅"
+    elif active_sort == "old": sort_label = "Sort: Oldest ✅"
+    elif active_sort == "large": sort_label = "Sort: Large First ✅"
+    elif active_sort == "small": sort_label = "Sort: Small First ✅"
     
-    if row4:
-        if len(row4) > 2:
-            buttons.append(row4[:2])
-            buttons.append(row4[2:])
+    row4.append(InlineKeyboardButton(sort_label, callback_data=f"sort_menu_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}_{curr_size}_{curr_sort}"))
+    buttons.append(row4)
+
+    # ROW 5: RESET SPECIFIC FILTERS
+    row5 = []
+    if active_lang and active_lang != "none":
+        row5.append(InlineKeyboardButton("All Langs", callback_data=f"filter_{search_id}_{curr_type}_none_{curr_qual}_{curr_year}_{curr_size}_{curr_sort}_0"))
+    if active_qual and active_qual != "none":
+        row5.append(InlineKeyboardButton("All Quals", callback_data=f"filter_{search_id}_{curr_type}_{curr_lang}_none_{curr_year}_{curr_size}_{curr_sort}_0"))
+    if active_year and active_year != "none":
+        row5.append(InlineKeyboardButton("All Years", callback_data=f"filter_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_none_{curr_size}_{curr_sort}_0"))
+    if active_size and active_size != "none":
+        row5.append(InlineKeyboardButton("All Sizes", callback_data=f"filter_{search_id}_{curr_type}_{curr_lang}_{curr_qual}_{curr_year}_none_{curr_sort}_0"))
+    
+    if row5:
+        if len(row5) > 2:
+            buttons.append(row5[:2])
+            buttons.append(row5[2:])
         else:
-            buttons.append(row4)
+            buttons.append(row5)
         
     return buttons
 
-def get_language_buttons(search_id, files, active_type=None, active_qual=None, active_year=None, active_size=None, active_lang=None):
+# ✅ NEW: SORT BUTTONS GENERATOR
+def get_sort_buttons(search_id, active_type, active_lang, active_qual, active_year, active_size, active_sort):
+    buttons = []
+    
+    options = [
+        ("Relevance", "relevance"),
+        ("Newest First", "new"),
+        ("Oldest First", "old"),
+        ("Size (High-Low)", "large"),
+        ("Size (Low-High)", "small")
+    ]
+    
+    for label, key in options:
+        btn_text = label
+        if key == active_sort or (key == "relevance" and not active_sort):
+            btn_text += " ✅"
+            
+        buttons.append([InlineKeyboardButton(btn_text, callback_data=f"filter_sort_{search_id}_{key}_{active_type}_{active_lang}_{active_qual}_{active_year}_{active_size}_0")])
+        
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_{search_id}_{active_type}_{active_lang}_{active_qual}_{active_year}_{active_size}_{active_sort}_0")])
+    return buttons
+
+def get_language_buttons(search_id, files, active_type=None, active_qual=None, active_year=None, active_size=None, active_lang=None, active_sort=None):
     buttons = []
     row = []
     c_type = active_type if active_type else "none"
     c_qual = active_qual if active_qual else "none"
     c_year = active_year if active_year else "none"
     c_size = active_size if active_size else "none"
+    c_sort = active_sort if active_sort else "relevance"
     back_lang_state = active_lang if active_lang else "none"
 
     stats = {lang: 0 for lang in LANGUAGES}
@@ -259,22 +287,23 @@ def get_language_buttons(search_id, files, active_type=None, active_qual=None, a
         if count > 0:
             btn_txt = f"{lang} ({count})"
             if lang == active_lang: btn_txt += " ✅"
-            row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_lang_{search_id}_{lang}_{c_type}_{c_qual}_{c_year}_{c_size}_0"))
+            row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_lang_{search_id}_{lang}_{c_type}_{c_qual}_{c_year}_{c_size}_{c_sort}_0"))
         if len(row) == 2:
             buttons.append(row)
             row = []
     if row: buttons.append(row)
     
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_{search_id}_{c_type}_{back_lang_state}_{c_qual}_{c_year}_{c_size}_0")])
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_{search_id}_{c_type}_{back_lang_state}_{c_qual}_{c_year}_{c_size}_{c_sort}_0")])
     return buttons
 
-def get_quality_buttons(search_id, files, active_type=None, active_lang=None, active_year=None, active_size=None, active_qual=None):
+def get_quality_buttons(search_id, files, active_type=None, active_lang=None, active_year=None, active_size=None, active_qual=None, active_sort=None):
     buttons = []
     row = []
     c_type = active_type if active_type else "none"
     c_lang = active_lang if active_lang else "none"
     c_year = active_year if active_year else "none"
     c_size = active_size if active_size else "none"
+    c_sort = active_sort if active_sort else "relevance"
     back_qual_state = active_qual if active_qual else "none"
 
     stats = {qual: 0 for qual in QUALITIES}
@@ -288,22 +317,23 @@ def get_quality_buttons(search_id, files, active_type=None, active_lang=None, ac
         if count > 0:
             btn_txt = f"{qual} ({count})"
             if qual == active_qual: btn_txt += " ✅"
-            row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_qual_{search_id}_{qual}_{c_type}_{c_lang}_{c_year}_{c_size}_0"))
+            row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_qual_{search_id}_{qual}_{c_type}_{c_lang}_{c_year}_{c_size}_{c_sort}_0"))
         if len(row) == 3:
             buttons.append(row)
             row = []
     if row: buttons.append(row)
     
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{back_qual_state}_{c_year}_{c_size}_0")])
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{back_qual_state}_{c_year}_{c_size}_{c_sort}_0")])
     return buttons
 
-def get_year_buttons(search_id, files, active_type=None, active_lang=None, active_qual=None, active_size=None, active_year=None):
+def get_year_buttons(search_id, files, active_type=None, active_lang=None, active_qual=None, active_size=None, active_year=None, active_sort=None):
     buttons = []
     row = []
     c_type = active_type if active_type else "none"
     c_lang = active_lang if active_lang else "none"
     c_qual = active_qual if active_qual else "none"
     c_size = active_size if active_size else "none"
+    c_sort = active_sort if active_sort else "relevance"
     back_year_state = active_year if active_year else "none"
 
     years = set()
@@ -318,20 +348,21 @@ def get_year_buttons(search_id, files, active_type=None, active_lang=None, activ
         btn_txt = f"{year}"
         if str(year) == str(active_year): btn_txt += " ✅"
         
-        row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_year_{search_id}_{year}_{c_type}_{c_lang}_{c_qual}_{c_size}_0"))
+        row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_year_{search_id}_{year}_{c_type}_{c_lang}_{c_qual}_{c_size}_{c_sort}_0"))
         if len(row) == 4:
             buttons.append(row)
             row = []
     if row: buttons.append(row)
     
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{c_qual}_{back_year_state}_{c_size}_0")])
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{c_qual}_{back_year_state}_{c_size}_{c_sort}_0")])
     return buttons
 
-def get_size_buttons(search_id, active_type=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
+def get_size_buttons(search_id, active_type=None, active_lang=None, active_qual=None, active_year=None, active_size=None, active_sort=None):
     c_type = active_type if active_type else "none"
     c_lang = active_lang if active_lang else "none"
     c_qual = active_qual if active_qual else "none"
     c_year = active_year if active_year else "none"
+    c_sort = active_sort if active_sort else "relevance"
     back_size_state = active_size if active_size else "none"
 
     ranges = [
@@ -346,9 +377,9 @@ def get_size_buttons(search_id, active_type=None, active_lang=None, active_qual=
         btn_txt = text
         if key == active_size: btn_txt += " ✅"
         
-        buttons.append([InlineKeyboardButton(btn_txt, callback_data=f"filter_size_{search_id}_{key}_{c_type}_{c_lang}_{c_qual}_{c_year}_0")])
+        buttons.append([InlineKeyboardButton(btn_txt, callback_data=f"filter_size_{search_id}_{key}_{c_type}_{c_lang}_{c_qual}_{c_year}_{c_sort}_0")])
             
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{c_qual}_{c_year}_{back_size_state}_0")])
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"filter_{search_id}_{c_type}_{c_lang}_{c_qual}_{c_year}_{back_size_state}_{c_sort}_0")])
     return buttons
 
 # ==============================================================================
@@ -454,7 +485,7 @@ async def post_to_telegraph(files, query, chat_id):
         logger.error(f"Telegraph Error: {e}")
         return None
 
-def get_pagination_row(search_id, current_offset, limit, total_count, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
+def get_pagination_row(search_id, current_offset, limit, total_count, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None, active_sort=None):
     buttons = []
     current_page = int(current_offset / limit) + 1
     total_pages = math.ceil(total_count / limit)
@@ -465,8 +496,9 @@ def get_pagination_row(search_id, current_offset, limit, total_count, active_fil
     a_qual = active_qual if active_qual else "none"
     a_year = active_year if active_year else "none"
     a_size = active_size if active_size else "none"
+    a_sort = active_sort if active_sort else "relevance"
     
-    cb_prefix = f"filter_{search_id}_{a_type}_{a_lang}_{a_qual}_{a_year}_{a_size}"
+    cb_prefix = f"filter_{search_id}_{a_type}_{a_lang}_{a_qual}_{a_year}_{a_size}_{a_sort}"
     
     if current_offset >= limit:
         buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"{cb_prefix}_{current_offset - limit}"))

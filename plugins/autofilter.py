@@ -12,13 +12,13 @@ from database.users_chats_db import db
 from info import SITE_URL
 from cachetools import TTLCache 
 
-# ✅ Utils Imports
+# ✅ Utils Imports (Added check_fsub_status)
 from utils import (
     temp, btn_parser, format_text_results, format_detailed_results, 
     format_card_result, get_pagination_row, get_filter_buttons, 
     get_language_buttons, get_quality_buttons, get_year_buttons,
     get_size_buttons, get_sort_buttons, filter_by_type, filter_by_lang, filter_by_quality, 
-    filter_by_year, filter_by_size
+    filter_by_year, filter_by_size, check_fsub_status
 )
 
 logger = logging.getLogger(__name__)
@@ -66,8 +66,6 @@ def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_
             buttons.append(row)
     
     if howto_btn: buttons.append(howto_btn)
-    
-    # ✅ "Free Premium" and "Send All" are passed as a single list (Row)
     if free_prem_btn: buttons.append(free_prem_btn)
     
     if pagination_row: buttons.append(pagination_row)
@@ -106,7 +104,7 @@ async def auto_filter(client, message):
 
         start_time = time.time()
         
-        # Initial Search (Default sort: relevance)
+        # Initial Search
         task_files = Media.get_search_results(query, sort="relevance")
         task_settings = db.get_group_settings(message.chat.id)
         
@@ -114,7 +112,6 @@ async def auto_filter(client, message):
         
         if not files: return
 
-        # ✅ Bot Username Fetching
         if not temp.U_NAME:
             try: temp.U_NAME = (await client.get_me()).username
             except: temp.U_NAME = "Telegram"
@@ -146,12 +143,7 @@ async def auto_filter(client, message):
         
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
-        
-        # ✅ UPDATED FOOTER BUTTONS
-        free_prem_btn = [
-            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", callback_data=f"send_all_{search_id}")
-        ]
+        free_prem_btn = [InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")]
         
         # Pass "relevance" as default sort
         filter_buttons = get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None, active_sort="relevance")
@@ -174,7 +166,6 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
             
-            # Pass sort to pagination
             pagination = get_pagination_row(search_id, offset, limit, total_results, active_size=None, active_sort="relevance")
             if pagination: btn.append(pagination)
             
@@ -225,7 +216,7 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# ✅ NEW: HANDLE SEND ALL
+# ✅ NEW: HANDLE SEND ALL (Protected with FSub & Shortner)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^send_all_"))
 async def handle_send_all(client, query):
@@ -238,35 +229,51 @@ async def handle_send_all(client, query):
         if not cached_data:
             return await query.answer("Result expired. Search again.", show_alert=True)
         
+        chat_id = cached_data.get('chat_id')
+        user_id = query.from_user.id
+        
+        # 1. FSUB CHECK
+        is_participant = await check_fsub_status(client, user_id, chat_id)
+        # Check if any required channel is NOT_JOINED
+        if any(status != "MEMBER" for status in is_participant if isinstance(status, str)):
+             return await query.answer("❌ You must join our Update Channels first!\n\nGo to /start to join.", show_alert=True)
+
+        # 2. SHORTNER VERIFICATION CHECK
+        settings = await db.get_group_settings(chat_id)
+        if settings.get('is_shortner'):
+            # This requires 'is_user_verified' method in your DB handler
+            try:
+                is_verified = await db.is_user_verified(user_id)
+                if not is_verified:
+                    return await query.answer("❌ You must verify the Shortlink first!\n\nGo to /start or check group buttons.", show_alert=True)
+            except AttributeError:
+                # Fallback if method doesn't exist (safety)
+                pass
+
         files = cached_data.get('files')
         if not files:
             return await query.answer("No files to send.", show_alert=True)
 
         await query.answer(f"Sending {len(files)} files to PM...", show_alert=True)
         
-        # Limit to prevent massive spam if needed, or remove slicing for truly ALL
-        # files = files[:50] 
-        
         for file in files:
             try:
                 link_id = file['link_id']
-                # Fetch actual file ID from DB because cache might be simplified
                 file_details = await Media.get_file_details(link_id)
                 if file_details:
                     await client.send_cached_media(
-                        chat_id=query.from_user.id,
+                        chat_id=user_id,
                         file_id=file_details['file_id'],
                         caption=file['caption'] or file['file_name']
                     )
-                    # Delay to prevent floodwait
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.5) # Floodwait protection
             except Exception as e:
                 logger.error(f"Send All Error: {e}")
                 continue
                 
     except Exception as e:
         logger.error(f"Handle Send All Error: {e}")
-        await query.answer("Error sending files.", show_alert=True)
+        await query.answer("Error sending files. Start bot in PM.", show_alert=True)
 
 # ==============================================================================
 # 2. PAGINATION
@@ -306,7 +313,7 @@ async def handle_pagination(client, query):
             InlineKeyboardButton("📂 Send All", callback_data=f"send_all_{search_id}")
         ]
         
-        # ✅ FIX: Passing files to generate buttons correctly
+        # ✅ FIX: Passing files
         filter_buttons = get_filter_buttons(search_id, files)
 
         buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, req)
@@ -321,7 +328,7 @@ async def handle_pagination(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 3. SELECTION HANDLERS (UPDATED WITH SORT PARAM)
+# 3. SELECTION HANDLERS
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_lang_"))
 async def handle_language_selection(client, query):
@@ -369,7 +376,6 @@ async def handle_size_selection(client, query):
             await handle_combined_filter(client, query)
     except: pass
 
-# ✅ NEW: SORT SELECTION HANDLER
 @Client.on_callback_query(filters.regex(r"^filter_sort_"))
 async def handle_sort_selection(client, query):
     try:
@@ -381,7 +387,7 @@ async def handle_sort_selection(client, query):
     except: pass
 
 # ==============================================================================
-# 4. MASTER FILTER HANDLER (UPDATED WITH SORT & ZERO RESULT FIX)
+# 4. MASTER FILTER HANDLER
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_\d"))
 async def handle_combined_filter(client, query):
@@ -400,7 +406,6 @@ async def handle_combined_filter(client, query):
         filter_lang = data[3]
         filter_qual = data[4]
         
-        # Extended Parsing for Sort
         if len(data) >= 9:
             filter_year = data[5]
             filter_size = data[6]
@@ -420,12 +425,10 @@ async def handle_combined_filter(client, query):
         cached_data = await Media.get_search_query(search_id)
         if not cached_data: return await query.answer("Search Expired", show_alert=True)
         
-        # Get Original files to keep buttons alive (if zero results)
         all_files = cached_data.get('files') or []
         req = cached_data.get('query')
         if not all_files: all_files = await Media.get_search_results(req, sort=filter_sort)
 
-        # ✅ DB Call with Sort & Filters
         final_files = await Media.get_search_results(
             req, 
             file_type=filter_type, 
@@ -437,7 +440,6 @@ async def handle_combined_filter(client, query):
         )
 
         if not final_files:
-            # If Size filter is active, allow 0 results to update UI checkmarks
             if filter_size == "none":
                 return await query.answer("❌ No files match these filters!", show_alert=True)
 
@@ -465,7 +467,6 @@ async def handle_combined_filter(client, query):
         pass_size = filter_size if filter_size != "none" else None
         pass_sort = filter_sort if filter_sort != "relevance" else None
 
-        # PASSING ALL FILES TO ENSURE BUTTONS EXIST EVEN IF RESULTS ARE 0
         filter_buttons = get_filter_buttons(search_id, all_files, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size, active_sort=pass_sort)
 
         if mode == 'button':
@@ -506,7 +507,7 @@ async def handle_combined_filter(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 8 - 12 MENU OPENERS (Updated with Sort Param)
+# 8 - 12 MENU OPENERS
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^lang_menu_"))
 async def handle_language_menu(client, query):
@@ -529,7 +530,6 @@ async def handle_language_menu(client, query):
         
         howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
-        
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
             InlineKeyboardButton("📂 Send All", callback_data=f"send_all_{search_id}")
@@ -637,7 +637,6 @@ async def handle_size_menu(client, query):
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
     except: pass
 
-# ✅ NEW: SORT MENU OPENER
 @Client.on_callback_query(filters.regex(r"^sort_menu_"))
 async def handle_sort_menu(client, query):
     try: await query.answer()
@@ -655,9 +654,7 @@ async def handle_sort_menu(client, query):
             InlineKeyboardButton("📂 Send All", callback_data=f"send_all_{search_id}")
         ]
 
-        # Header Row
         type_buttons = get_type_row(search_id, c_type, c_lang, c_qual, c_year, c_size, c_sort)
-        # Sort Buttons
         sort_buttons = get_sort_buttons(search_id, c_type, c_lang, c_qual, c_year, c_size, c_sort)
         
         middle_buttons = type_buttons + sort_buttons

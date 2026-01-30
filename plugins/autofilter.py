@@ -6,10 +6,10 @@ import asyncio
 import traceback 
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import FloodWait, MessageNotModified, UserNotParticipant
+from pyrogram.errors import FloodWait, MessageNotModified
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-from info import SITE_URL, ADMINS, AUTH_CHANNEL
+from info import SITE_URL
 from cachetools import TTLCache 
 
 # ✅ Utils Imports
@@ -104,7 +104,6 @@ async def auto_filter(client, message):
 
         start_time = time.time()
         
-        # Initial Search
         task_files = Media.get_search_results(query, sort="relevance")
         task_settings = db.get_group_settings(message.chat.id)
         
@@ -112,19 +111,15 @@ async def auto_filter(client, message):
         
         if not files: return
 
-        # Bot Username
         if not temp.U_NAME:
             try: temp.U_NAME = (await client.get_me()).username
             except: temp.U_NAME = "Telegram"
 
-        # Safe Group Settings
-        if not group_settings: group_settings = {}
-
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'req'))
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'suc'))
 
-        mode = group_settings.get('result_mode', 'hybrid')
-        limit = group_settings.get('result_page_limit', 10)
+        mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
+        limit = group_settings.get('result_page_limit', 10) if group_settings else 10
         auto_react = group_settings.get('auto_reaction', False)
         auto_del_time = group_settings.get('auto_delete_time', 300)
         user_del = group_settings.get('auto_delete_user_msg', False)
@@ -149,6 +144,7 @@ async def auto_filter(client, message):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
+            # ✅ DEEP LINK FOR SEND ALL
             InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=all_{search_id}")
         ]
         
@@ -222,7 +218,7 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# ✅ NEW: START HANDLER FOR SEND ALL (CRASH PROOF)
+# ✅ NEW: START HANDLER FOR SEND ALL (FIXED)
 # ==============================================================================
 @Client.on_message(filters.command("start") & filters.private & filters.regex(r"^/start all_"))
 async def send_all_handler(client, message):
@@ -233,32 +229,27 @@ async def send_all_handler(client, message):
         search_id = int(message.text.split("_")[1])
         cached_data = await Media.get_search_query(search_id)
         if not cached_data:
-            return await message.reply("❌ Link expired. Search again.", quote=True)
+            return await message.reply("❌ Link expired or invalid. Search again.", quote=True)
         
         chat_id = cached_data.get('chat_id')
         user_id = message.from_user.id
         
-        # 1️⃣ FSUB CHECK
-        is_participant = await check_fsub_status(client, user_id, chat_id)
-        # Note: check_fsub_status returns a tuple. We need to check if result is "MEMBER" or something else
-        # Assuming is_participant returns (status1, status2, status3, id1, id2, id3)
+        # 1️⃣ FSUB CHECK (Always check even if settings default)
+        statuses = await check_fsub_status(client, user_id, chat_id)
         
         join_buttons = []
-        # Check Channel 1
-        if is_participant[0] != "MEMBER" and is_participant[3]: 
-            try: link = (await client.get_chat(is_participant[3])).invite_link
+        if statuses[0] != "MEMBER" and statuses[3]: 
+            try: link = (await client.get_chat(statuses[3])).invite_link
             except: link = "https://t.me/telegram"
             join_buttons.append([InlineKeyboardButton("Join Channel 1", url=link)])
             
-        # Check Channel 2
-        if is_participant[1] != "MEMBER" and is_participant[4]:
-            try: link = (await client.get_chat(is_participant[4])).invite_link
+        if statuses[1] != "MEMBER" and statuses[4]:
+            try: link = (await client.get_chat(statuses[4])).invite_link
             except: link = "https://t.me/telegram"
             join_buttons.append([InlineKeyboardButton("Join Channel 2", url=link)])
             
-        # Check Channel 3
-        if is_participant[2] != "MEMBER" and is_participant[5]:
-            try: link = (await client.get_chat(is_participant[5])).invite_link
+        if statuses[2] != "MEMBER" and statuses[5]:
+            try: link = (await client.get_chat(statuses[5])).invite_link
             except: link = "https://t.me/telegram"
             join_buttons.append([InlineKeyboardButton("Join Channel 3", url=link)])
 
@@ -270,13 +261,13 @@ async def send_all_handler(client, message):
                 quote=True
             )
 
-        # 2️⃣ SHORTNER CHECK (Crash Proof)
-        # Get settings, if None default to empty dict
-        settings = await db.get_group_settings(chat_id)
-        if not settings: settings = {}
-        
-        if settings.get('is_shortner'):
-            try:
+        # 2️⃣ SHORTNER CHECK (Safe Method)
+        try:
+            settings = await db.get_group_settings(chat_id)
+            if not settings: settings = {} # Prevent NoneType error
+            
+            # Check if shortener is enabled AND api/site are present
+            if settings.get('is_shortner') and settings.get('shortner_site') and settings.get('shortner_api'):
                 is_verified = await db.is_user_verified(user_id)
                 if not is_verified:
                     cmd_link = f"https://t.me/{temp.U_NAME}?start=all_{search_id}"
@@ -292,9 +283,9 @@ async def send_all_handler(client, message):
                             reply_markup=InlineKeyboardMarkup(btn),
                             quote=True
                         )
-            except Exception as e:
-                logger.error(f"Shortener Check Error: {e}")
-                # Fallback: Continue if shortener error (don't block user)
+        except Exception as e:
+            logger.error(f"Shortener Check Error: {e}")
+            # If shortener check fails (DB error), continue to send files
 
         # 3️⃣ SEND FILES
         files = cached_data.get('files')
@@ -322,7 +313,6 @@ async def send_all_handler(client, message):
                 
     except Exception as e:
         logger.error(f"Send All Handler Error: {e}")
-        traceback.print_exc()
         await message.reply("Error sending files. Please try again.", quote=True)
 
 # ==============================================================================
@@ -353,11 +343,8 @@ async def handle_pagination(client, query):
         req = cached_data.get('query')
         if not files: return 
             
-        # Safe Settings
-        if not group_settings: group_settings = {}
-        limit = group_settings.get('result_page_limit', 10)
+        limit = group_settings.get('result_page_limit', 10) if group_settings else 10
         howto_url = group_settings.get('howto_url')
-        
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
@@ -497,10 +484,8 @@ async def handle_combined_filter(client, query):
         await Media.update_search_cache(search_id, final_files)
 
         group_settings = await db.get_group_settings(query.message.chat.id)
-        if not group_settings: group_settings = {}
-
-        mode = group_settings.get('result_mode', 'hybrid')
-        limit = group_settings.get('result_page_limit', 10)
+        mode = group_settings.get('result_mode', 'hybrid') if group_settings else 'hybrid'
+        limit = group_settings.get('result_page_limit', 10) if group_settings else 10
         if mode == 'hybrid':
             mode = 'button' if len(final_files) <= limit else 'text'
 
@@ -579,10 +564,7 @@ async def handle_language_menu(client, query):
         pq = c_qual if c_qual != "none" else None
         ps = c_sort if c_sort != "relevance" else None
         
-        group_settings = await db.get_group_settings(query.message.chat.id)
-        if not group_settings: group_settings = {}
-        
-        howto_url = group_settings.get('howto_url')
+        howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
@@ -616,10 +598,7 @@ async def handle_quality_menu(client, query):
         pl = c_lang if c_lang != "none" else None
         ps = c_sort if c_sort != "relevance" else None
         
-        group_settings = await db.get_group_settings(query.message.chat.id)
-        if not group_settings: group_settings = {}
-        
-        howto_url = group_settings.get('howto_url')
+        howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
@@ -654,10 +633,7 @@ async def handle_year_menu(client, query):
         pq = c_qual if c_qual != "none" else None
         ps = c_sort if c_sort != "relevance" else None
         
-        group_settings = await db.get_group_settings(query.message.chat.id)
-        if not group_settings: group_settings = {}
-        
-        howto_url = group_settings.get('howto_url')
+        howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
@@ -682,10 +658,7 @@ async def handle_size_menu(client, query):
         c_sort = data[7] if len(data) > 7 else "relevance"
         c_size = data[8] if len(data) > 8 else "none"
 
-        group_settings = await db.get_group_settings(query.message.chat.id)
-        if not group_settings: group_settings = {}
-        
-        howto_url = group_settings.get('howto_url')
+        howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
@@ -700,7 +673,7 @@ async def handle_size_menu(client, query):
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
     except: pass
 
-# ✅ NEW: SORT MENU OPENER
+# ✅ SORT MENU OPENER
 @Client.on_callback_query(filters.regex(r"^sort_menu_"))
 async def handle_sort_menu(client, query):
     try: await query.answer()
@@ -711,10 +684,7 @@ async def handle_sort_menu(client, query):
         c_sort = "relevance"
         if len(data) > 8: c_sort = data[8]
 
-        group_settings = await db.get_group_settings(query.message.chat.id)
-        if not group_settings: group_settings = {}
-        
-        howto_url = group_settings.get('howto_url')
+        howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
@@ -772,8 +742,6 @@ async def card_next_nav(client, query):
         file = files[next_index]
         text = format_card_result(file, next_index, total)
         group_settings = await db.get_group_settings(query.message.chat.id)
-        if not group_settings: group_settings = {}
-        
         howto_url = group_settings.get('howto_url')
         btn = []
         link_id = file['link_id']
@@ -809,8 +777,6 @@ async def card_prev_nav(client, query):
         file = files[prev_index]
         text = format_card_result(file, prev_index, total)
         group_settings = await db.get_group_settings(query.message.chat.id)
-        if not group_settings: group_settings = {}
-        
         howto_url = group_settings.get('howto_url')
         btn = []
         link_id = file['link_id']

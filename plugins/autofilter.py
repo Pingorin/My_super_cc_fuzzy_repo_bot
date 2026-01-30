@@ -144,7 +144,6 @@ async def auto_filter(client, message):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            # ✅ DEEP LINK FOR SEND ALL
             InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=all_{search_id}")
         ]
         
@@ -218,23 +217,26 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# ✅ NEW: START HANDLER FOR SEND ALL (FIXED)
+# ✅ NEW: START HANDLER FOR SEND ALL (HIGH PRIORITY FIX)
 # ==============================================================================
-@Client.on_message(filters.command("start") & filters.private & filters.regex(r"^/start all_"))
+# Group -1 ensures this runs BEFORE the default start handler
+@Client.on_message(filters.command("start") & filters.private & filters.regex(r"all_"), group=-1)
 async def send_all_handler(client, message):
     if is_spam(message.from_user.id):
         return await message.reply("Please wait...", quote=True)
         
     try:
+        # Extract search_id from /start all_{search_id}
         search_id = int(message.text.split("_")[1])
         cached_data = await Media.get_search_query(search_id)
         if not cached_data:
-            return await message.reply("❌ Link expired or invalid. Search again.", quote=True)
+            await message.reply("❌ Link expired or invalid. Search again.", quote=True)
+            return await message.stop_propagation()
         
         chat_id = cached_data.get('chat_id')
         user_id = message.from_user.id
         
-        # 1️⃣ FSUB CHECK (Always check even if settings default)
+        # 1️⃣ FSUB CHECK
         statuses = await check_fsub_status(client, user_id, chat_id)
         
         join_buttons = []
@@ -255,18 +257,18 @@ async def send_all_handler(client, message):
 
         if join_buttons:
             join_buttons.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start=all_{search_id}")])
-            return await message.reply(
+            await message.reply(
                 "❌ **You must join our update channels to get files!**\n\n👇 Click below to join and then click Try Again.",
                 reply_markup=InlineKeyboardMarkup(join_buttons),
                 quote=True
             )
+            return await message.stop_propagation()
 
-        # 2️⃣ SHORTNER CHECK (Safe Method)
+        # 2️⃣ SHORTNER CHECK
         try:
             settings = await db.get_group_settings(chat_id)
-            if not settings: settings = {} # Prevent NoneType error
+            if not settings: settings = {} 
             
-            # Check if shortener is enabled AND api/site are present
             if settings.get('is_shortner') and settings.get('shortner_site') and settings.get('shortner_api'):
                 is_verified = await db.is_user_verified(user_id)
                 if not is_verified:
@@ -278,19 +280,20 @@ async def send_all_handler(client, message):
                             [InlineKeyboardButton("🖥 Verify to Get Files 🔓", url=short_url)],
                             [InlineKeyboardButton("⁉️ How To Verify", url=settings.get('howto_url') or "https://t.me/telegram")]
                         ]
-                        return await message.reply(
+                        await message.reply(
                             "<b>🔒 Verification Required!</b>\n\nTo prevent spam, please verify once to get all files.",
                             reply_markup=InlineKeyboardMarkup(btn),
                             quote=True
                         )
+                        return await message.stop_propagation()
         except Exception as e:
             logger.error(f"Shortener Check Error: {e}")
-            # If shortener check fails (DB error), continue to send files
 
         # 3️⃣ SEND FILES
         files = cached_data.get('files')
         if not files:
-            return await message.reply("No files to send.", quote=True)
+            await message.reply("No files to send.", quote=True)
+            return await message.stop_propagation()
 
         msg = await message.reply(f"⚡ **Sending {len(files)} files...**\nPlease wait and do not block the bot.", quote=True)
         
@@ -310,6 +313,8 @@ async def send_all_handler(client, message):
                 continue
         
         await msg.edit("✅ All files sent successfully!")
+        # Stop propagation to prevent Main Start handler from running
+        await message.stop_propagation()
                 
     except Exception as e:
         logger.error(f"Send All Handler Error: {e}")
@@ -443,7 +448,6 @@ async def handle_combined_filter(client, query):
         filter_lang = data[3]
         filter_qual = data[4]
         
-        # Extended Parsing for Sort
         if len(data) >= 9:
             filter_year = data[5]
             filter_size = data[6]

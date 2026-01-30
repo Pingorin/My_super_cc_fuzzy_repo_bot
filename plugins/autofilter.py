@@ -147,10 +147,10 @@ async def auto_filter(client, message):
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         
-        # ✅ UPDATED FOOTER BUTTONS
+        # ✅ UPDATED FOOTER BUTTONS (Send All -> Deep Link to PM)
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", callback_data=f"send_all_{search_id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{message.chat.id}")
         ]
         
         # Pass "relevance" as default sort
@@ -225,50 +225,6 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# ✅ NEW: HANDLE SEND ALL
-# ==============================================================================
-@Client.on_callback_query(filters.regex(r"^send_all_"))
-async def handle_send_all(client, query):
-    if is_spam(query.from_user.id):
-        return await query.answer("Please wait...", show_alert=False)
-        
-    try:
-        search_id = int(query.data.split("_")[2])
-        cached_data = await Media.get_search_query(search_id)
-        if not cached_data:
-            return await query.answer("Result expired. Search again.", show_alert=True)
-        
-        files = cached_data.get('files')
-        if not files:
-            return await query.answer("No files to send.", show_alert=True)
-
-        await query.answer(f"Sending {len(files)} files to PM...", show_alert=True)
-        
-        # Limit to prevent massive spam if needed, or remove slicing for truly ALL
-        # files = files[:50] 
-        
-        for file in files:
-            try:
-                link_id = file['link_id']
-                # Fetch actual file ID from DB because cache might be simplified
-                file_details = await Media.get_file_details(link_id)
-                if file_details:
-                    await client.send_cached_media(
-                        chat_id=query.from_user.id,
-                        file_id=file_details['file_id'],
-                        caption=file['caption'] or file['file_name']
-                    )
-                    # Delay to prevent floodwait
-                    await asyncio.sleep(0.5)
-            except Exception as e:
-                logger.error(f"Send All Error: {e}")
-                continue
-                
-    except Exception as e:
-        logger.error(f"Handle Send All Error: {e}")
-        await query.answer("Error sending files.", show_alert=True)
-
-# ==============================================================================
 # 2. PAGINATION
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^page_"))
@@ -300,10 +256,10 @@ async def handle_pagination(client, query):
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         
-        # ✅ Updated Footer
+        # ✅ Updated Footer (Send All -> PM)
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", callback_data=f"send_all_{search_id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}")
         ]
         
         # ✅ FIX: Passing files to generate buttons correctly
@@ -452,10 +408,10 @@ async def handle_combined_filter(client, query):
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         
-        # ✅ UPDATED FOOTER
+        # ✅ UPDATED FOOTER (Send All -> PM)
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", callback_data=f"send_all_{search_id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}")
         ]
 
         pass_type = filter_type if filter_type != "none" else None
@@ -532,7 +488,7 @@ async def handle_language_menu(client, query):
         
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", callback_data=f"send_all_{search_id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}")
         ]
 
         type_buttons = get_type_row(search_id, c_type, "none", c_qual, c_year, c_size, c_sort)
@@ -566,7 +522,7 @@ async def handle_quality_menu(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", callback_data=f"send_all_{search_id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}")
         ]
 
         type_buttons = get_type_row(search_id, c_type, c_lang, "none", c_year, c_size, c_sort)
@@ -601,7 +557,7 @@ async def handle_year_menu(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", callback_data=f"send_all_{search_id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}")
         ]
 
         type_buttons = get_type_row(search_id, c_type, c_lang, c_qual, "none", c_size, c_sort)
@@ -626,7 +582,7 @@ async def handle_size_menu(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", callback_data=f"send_all_{search_id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}")
         ]
 
         type_buttons = get_type_row(search_id, c_type, c_lang, c_qual, c_year, "none", c_sort)
@@ -652,7 +608,7 @@ async def handle_sort_menu(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", callback_data=f"send_all_{search_id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}")
         ]
 
         # Header Row

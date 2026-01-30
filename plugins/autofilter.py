@@ -129,7 +129,8 @@ async def auto_filter(client, message):
             try: await message.react(random.choice(REACTIONS))
             except: pass 
 
-        search_id = await Media.save_search_query(query, message.from_user.id, files)
+        # ✅ FIXED: Now saving Chat ID so "Send All" knows where to get settings from
+        search_id = await Media.save_search_query(query, message.from_user.id, files, message.chat.id)
         if not search_id: search_id = 0
 
         if mode == 'hybrid':
@@ -217,7 +218,7 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# ✅ FIXED: START HANDLER FOR SEND ALL (No Double Msg + Checks)
+# ✅ FIXED: START HANDLER FOR SEND ALL (WITH CORRECT SETTINGS CHECK)
 # ==============================================================================
 @Client.on_message(filters.command("start") & filters.private & filters.regex(r"^/start all_"), group=-1)
 async def send_all_handler(client, message):
@@ -228,7 +229,6 @@ async def send_all_handler(client, message):
     try:
         data_split = message.text.split("_")
         if len(data_split) < 2:
-            await message.reply("❌ Invalid Link.", quote=True)
             return await message.stop_propagation()
 
         search_id = int(data_split[1])
@@ -237,6 +237,7 @@ async def send_all_handler(client, message):
             await message.reply("❌ Link expired. Search again in group.", quote=True)
             return await message.stop_propagation()
         
+        # ✅ Chat ID from where search originated
         chat_id = cached_data.get('chat_id')
         user_id = message.from_user.id
         
@@ -268,26 +269,22 @@ async def send_all_handler(client, message):
             )
             return await message.stop_propagation()
 
-        # 2️⃣ SHORTNER CHECK
+        # 2️⃣ SHORTNER CHECK (Safe)
         try:
             settings = await db.get_group_settings(chat_id)
             if not settings: settings = {} 
             
-            # Check if Shortener is active in DB (Handle Boolean or String "True")
             is_shortner = settings.get('is_shortner')
+            # Check if True (Boolean) or "True" (String)
             if is_shortner and (is_shortner is True or str(is_shortner).lower() == 'true'):
-                # Check Verification
-                if hasattr(db, 'is_user_verified'):
-                    is_verified = await db.is_user_verified(user_id)
-                    
-                    if not is_verified:
-                        cmd_link = f"https://t.me/{temp.U_NAME}?start=all_{search_id}"
-                        # Check if API keys exist
-                        site = settings.get('shortner_site')
-                        api = settings.get('shortner_api')
-                        
-                        if site and api:
-                            short_url = await get_shortlink(site, api, cmd_link)
+                if settings.get('shortner_site') and settings.get('shortner_api'):
+                    # Check verified status
+                    if hasattr(db, 'is_user_verified'):
+                        is_verified = await db.is_user_verified(user_id)
+                        if not is_verified:
+                            cmd_link = f"https://t.me/{temp.U_NAME}?start=all_{search_id}"
+                            short_url = await get_shortlink(settings['shortner_site'], settings['shortner_api'], cmd_link)
+                            
                             if short_url:
                                 btn = [
                                     [InlineKeyboardButton("🖥 Verify to Get Files 🔓", url=short_url)],
@@ -301,7 +298,6 @@ async def send_all_handler(client, message):
                                 return await message.stop_propagation()
         except Exception as e:
             logger.error(f"Shortener Check Error: {e}")
-            # If error in settings check, Proceed to send files (Fail Open)
 
         # 3️⃣ SEND FILES
         files = cached_data.get('files')
@@ -323,27 +319,20 @@ async def send_all_handler(client, message):
                         caption=file['caption'] or file['file_name']
                     )
                     sent_count += 1
-                    await asyncio.sleep(0.8) # Floodwait protection
+                    await asyncio.sleep(0.8)
             except (FloodWait, UserIsBlocked, InputUserDeactivated):
-                # Critical errors, stop loop
                 break 
-            except Exception as e:
-                # Skip file if deleted or other error
-                logger.error(f"File Send Error: {e}")
+            except Exception:
                 continue
         
         try:
             await msg.edit(f"✅ **Sent {sent_count} files successfully!**")
-        except:
-            pass
+        except: pass
             
-        # ✅ CRITICAL: Stop propagation so Main Start doesn't run
         return await message.stop_propagation()
                 
     except Exception as e:
         logger.error(f"Send All Handler Error: {e}")
-        # Only reply error if we haven't already replied
-        # await message.reply("Error processing request.", quote=True)
         return await message.stop_propagation()
 
 # ==============================================================================

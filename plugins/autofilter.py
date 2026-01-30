@@ -6,13 +6,13 @@ import asyncio
 import traceback 
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import FloodWait, MessageNotModified
+from pyrogram.errors import FloodWait, MessageNotModified, UserNotParticipant
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-from info import SITE_URL, AUTH_CHANNEL, AUTH_CHANNEL_2, AUTH_CHANNEL_3
+from info import SITE_URL, ADMINS, AUTH_CHANNEL
 from cachetools import TTLCache 
 
-# ✅ Utils Imports (Added get_shortlink)
+# ✅ Utils Imports
 from utils import (
     temp, btn_parser, format_text_results, format_detailed_results, 
     format_card_result, get_pagination_row, get_filter_buttons, 
@@ -104,7 +104,6 @@ async def auto_filter(client, message):
 
         start_time = time.time()
         
-        # Initial Search (Default sort: relevance)
         task_files = Media.get_search_results(query, sort="relevance")
         task_settings = db.get_group_settings(message.chat.id)
         
@@ -143,14 +142,12 @@ async def auto_filter(client, message):
         
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
-        
-        # ✅ FOOTER BUTTONS
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
+            # ✅ SEND ALL IS A LINK NOW TO TRIGGER START HANDLER
             InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=all_{search_id}")
         ]
         
-        # Pass "relevance" as default sort
         filter_buttons = get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None, active_sort="relevance")
 
         if mode == 'button':
@@ -171,7 +168,6 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
             
-            # Pass sort to pagination
             pagination = get_pagination_row(search_id, offset, limit, total_results, active_size=None, active_sort="relevance")
             if pagination: btn.append(pagination)
             
@@ -222,7 +218,7 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# ✅ NEW: START HANDLER FOR SEND ALL (WITH VERIFICATION CHECK)
+# ✅ NEW: START HANDLER FOR SEND ALL (WITH VERIFICATION)
 # ==============================================================================
 @Client.on_message(filters.command("start") & filters.private & filters.regex(r"^/start all_"))
 async def send_all_handler(client, message):
@@ -233,49 +229,78 @@ async def send_all_handler(client, message):
         search_id = int(message.text.split("_")[1])
         cached_data = await Media.get_search_query(search_id)
         if not cached_data:
-            return await message.reply("❌ **Link Expired!**\n\nPlease search again in the group.", quote=True)
+            return await message.reply("❌ Link expired. Search again.", quote=True)
         
         chat_id = cached_data.get('chat_id')
         user_id = message.from_user.id
         
-        # 1️⃣ FSUB CHECK (Channel Join)
+        # 1️⃣ FSUB CHECK
         is_participant = await check_fsub_status(client, user_id, chat_id)
-        if any(status != "MEMBER" for status in is_participant if isinstance(status, str)):
-             # Construct Join Button (Simple approach, assumes main auth channel)
-             join_btn = [[InlineKeyboardButton("🤖 Join Updates Channel", url=f"https://t.me/{temp.U_NAME}?start=all_{search_id}")]]
-             return await message.reply("❌ **You must join our Update Channels first!**\n\nClick below to join, then try again.", reply_markup=InlineKeyboardMarkup(join_btn), quote=True)
+        # Assuming check_fsub_status returns "MEMBER" if joined, else logic for buttons
+        # Since check_fsub_status returns a tuple of statuses, we need to check if ANY is not MEMBER
+        # Note: Your check_fsub_status returns multiple values (status1, status2, status3, id1, id2, id3)
+        # We need to construct buttons if user is NOT joined.
+        
+        # NOTE: Re-implementing logic to get Channel IDs to show buttons if not joined
+        statuses = await check_fsub_status(client, user_id, chat_id)
+        # statuses = (status_1, status_2, status_3, id_1, id_2, id_3)
+        
+        join_buttons = []
+        if statuses[0] != "MEMBER" and statuses[3]: 
+            try: link = (await client.get_chat(statuses[3])).invite_link
+            except: link = "https://t.me/telegram"
+            join_buttons.append([InlineKeyboardButton("Join Channel 1", url=link)])
+            
+        if statuses[1] != "MEMBER" and statuses[4]:
+            try: link = (await client.get_chat(statuses[4])).invite_link
+            except: link = "https://t.me/telegram"
+            join_buttons.append([InlineKeyboardButton("Join Channel 2", url=link)])
+            
+        if statuses[2] != "MEMBER" and statuses[5]:
+            try: link = (await client.get_chat(statuses[5])).invite_link
+            except: link = "https://t.me/telegram"
+            join_buttons.append([InlineKeyboardButton("Join Channel 3", url=link)])
 
-        # 2️⃣ SHORTENER VERIFICATION CHECK
-        try:
-            settings = await db.get_group_settings(chat_id)
-            if settings.get('is_shortner'):
+        if join_buttons:
+            join_buttons.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start=all_{search_id}")])
+            return await message.reply(
+                "❌ **You must join our update channels to get files!**\n\n👇 Click below to join and then click Try Again.",
+                reply_markup=InlineKeyboardMarkup(join_buttons),
+                quote=True
+            )
+
+        # 2️⃣ SHORTNER CHECK
+        settings = await db.get_group_settings(chat_id)
+        if settings.get('is_shortner'):
+            try:
                 is_verified = await db.is_user_verified(user_id)
-                
-                # 🔴 AGAR NOT VERIFIED: Link Bhejo
                 if not is_verified:
-                    api = settings.get('shortner_api')
-                    site = settings.get('shortner_site')
+                    # Generate Shortlink that redirects back to "all_{search_id}"
+                    cmd_link = f"https://t.me/{temp.U_NAME}?start=all_{search_id}"
+                    short_url = await get_shortlink(settings['shortner_site'], settings['shortner_api'], cmd_link)
                     
-                    # Deep link wapas yahi aane ke liye
-                    base_url = f"https://t.me/{temp.U_NAME}?start=all_{search_id}"
-                    short_url = await get_shortlink(site, api, base_url)
-                    
-                    btn = [[InlineKeyboardButton("✅ Verify & Get All Files", url=short_url)]]
-                    return await message.reply(
-                        f"<b>⚠️ Verification Required!</b>\n\nYou need to verify to get all files at once.\n\n👇 <b>Click below to verify:</b>",
-                        reply_markup=InlineKeyboardMarkup(btn),
-                        quote=True,
-                        disable_web_page_preview=True
-                    )
-        except Exception as e:
-            logger.error(f"Verification Check Error: {e}")
+                    if short_url:
+                        btn = [
+                            [InlineKeyboardButton("🖥 Verify to Get Files 🔓", url=short_url)],
+                            [InlineKeyboardButton("⁉️ How To Verify", url=settings.get('howto_url') or "https://t.me/telegram")]
+                        ]
+                        return await message.reply(
+                            "<b>🔒 Verification Required!</b>\n\nTo prevent spam, please verify once to get all files.",
+                            reply_markup=InlineKeyboardMarkup(btn),
+                            quote=True
+                        )
+                    else:
+                        # Fallback if shortener API fails
+                        logger.error("Shortener generation failed in Send All")
+            except Exception as e:
+                logger.error(f"Shortener Check Error: {e}")
 
-        # 🟢 SAB SAHI HAI: Files Bhejo
+        # 3️⃣ SEND FILES
         files = cached_data.get('files')
         if not files:
             return await message.reply("No files to send.", quote=True)
 
-        status_msg = await message.reply(f"⚡ **Sending {len(files)} files...**\n\n⬇️ Starting download...", quote=True)
+        msg = await message.reply(f"⚡ **Sending {len(files)} files...**\nPlease wait and do not block the bot.", quote=True)
         
         for file in files:
             try:
@@ -287,16 +312,16 @@ async def send_all_handler(client, message):
                         file_id=file_details['file_id'],
                         caption=file['caption'] or file['file_name']
                     )
-                    await asyncio.sleep(0.8) # Floodwait Protection
+                    await asyncio.sleep(0.8) # Floodwait protection
             except Exception as e:
                 logger.error(f"Send All Loop Error: {e}")
                 continue
         
-        await status_msg.edit("✅ **All files sent successfully!**")
+        await msg.edit("✅ All files sent successfully!")
                 
     except Exception as e:
         logger.error(f"Send All Handler Error: {e}")
-        await message.reply("Error sending files.", quote=True)
+        await message.reply("Error sending files. Please try again.", quote=True)
 
 # ==============================================================================
 # 2. PAGINATION
@@ -329,8 +354,6 @@ async def handle_pagination(client, query):
         limit = group_settings.get('result_page_limit', 10) if group_settings else 10
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
-        
-        # ✅ Updated Footer
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
             InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=all_{search_id}")
@@ -350,7 +373,7 @@ async def handle_pagination(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 3. SELECTION HANDLERS (UPDATED WITH SORT PARAM)
+# 3. SELECTION HANDLERS
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_lang_"))
 async def handle_language_selection(client, query):
@@ -398,7 +421,6 @@ async def handle_size_selection(client, query):
             await handle_combined_filter(client, query)
     except: pass
 
-# ✅ NEW: SORT SELECTION HANDLER
 @Client.on_callback_query(filters.regex(r"^filter_sort_"))
 async def handle_sort_selection(client, query):
     try:
@@ -410,7 +432,7 @@ async def handle_sort_selection(client, query):
     except: pass
 
 # ==============================================================================
-# 4. MASTER FILTER HANDLER (UPDATED WITH SORT & ZERO RESULT FIX)
+# 4. MASTER FILTER HANDLER
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^filter_\d"))
 async def handle_combined_filter(client, query):
@@ -429,7 +451,6 @@ async def handle_combined_filter(client, query):
         filter_lang = data[3]
         filter_qual = data[4]
         
-        # Extended Parsing for Sort
         if len(data) >= 9:
             filter_year = data[5]
             filter_size = data[6]
@@ -449,12 +470,10 @@ async def handle_combined_filter(client, query):
         cached_data = await Media.get_search_query(search_id)
         if not cached_data: return await query.answer("Search Expired", show_alert=True)
         
-        # Get Original files to keep buttons alive (if zero results)
         all_files = cached_data.get('files') or []
         req = cached_data.get('query')
         if not all_files: all_files = await Media.get_search_results(req, sort=filter_sort)
 
-        # ✅ DB Call with Sort & Filters
         final_files = await Media.get_search_results(
             req, 
             file_type=filter_type, 
@@ -466,7 +485,6 @@ async def handle_combined_filter(client, query):
         )
 
         if not final_files:
-            # If Size filter is active, allow 0 results to update UI checkmarks
             if filter_size == "none":
                 return await query.answer("❌ No files match these filters!", show_alert=True)
 
@@ -480,8 +498,6 @@ async def handle_combined_filter(client, query):
 
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
-        
-        # ✅ UPDATED FOOTER
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
             InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=all_{search_id}")
@@ -494,7 +510,6 @@ async def handle_combined_filter(client, query):
         pass_size = filter_size if filter_size != "none" else None
         pass_sort = filter_sort if filter_sort != "relevance" else None
 
-        # PASSING ALL FILES TO ENSURE BUTTONS EXIST EVEN IF RESULTS ARE 0
         filter_buttons = get_filter_buttons(search_id, all_files, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size, active_sort=pass_sort)
 
         if mode == 'button':
@@ -535,7 +550,7 @@ async def handle_combined_filter(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 8 - 12 MENU OPENERS (Updated with Sort Param)
+# 8 - 12 MENU OPENERS
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^lang_menu_"))
 async def handle_language_menu(client, query):

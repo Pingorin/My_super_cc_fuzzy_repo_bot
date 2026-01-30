@@ -60,10 +60,7 @@ class MediaDB:
             print(f"❌ Error Getting Sequence ID: {e}")
             return None
 
-    # ==================================================================
-    # ⚡ CACHING SAVE FUNCTION (UPDATED TO SAVE CHAT ID)
-    # ==================================================================
-    async def save_search_query(self, query, user_id, files, chat_id):
+    async def save_search_query(self, query, user_id, files):
         try:
             search_id = await self.get_next_sequence_value("search_id_counter", increment=1)
             if not search_id: return None
@@ -73,7 +70,6 @@ class MediaDB:
                 {"$set": {
                     "query": query,
                     "user_id": int(user_id),
-                    "chat_id": int(chat_id), # ✅ Saving Chat ID now
                     "files": files,
                     "created_at": datetime.datetime.utcnow()
                 }},
@@ -198,7 +194,7 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ OPTIMIZED SEARCH
+    # ⚡ OPTIMIZED SEARCH WITH SORTING
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         try:
@@ -257,11 +253,17 @@ class MediaDB:
             if match_filters:
                 pipeline.append({"$match": match_filters})
 
-            # SORTING
-            if sort == "new": pipeline.append({"$sort": {"_id": -1}})
-            elif sort == "old": pipeline.append({"$sort": {"_id": 1}})
-            elif sort == "large": pipeline.append({"$sort": {"file_size": -1}})
-            elif sort == "small": pipeline.append({"$sort": {"file_size": 1}})
+            # ✅ SORTING LOGIC
+            # keys: relevance, new, old, large, small
+            if sort == "new":
+                pipeline.append({"$sort": {"_id": -1}}) # Descending ID = Newest
+            elif sort == "old":
+                pipeline.append({"$sort": {"_id": 1}}) # Ascending ID = Oldest
+            elif sort == "large":
+                pipeline.append({"$sort": {"file_size": -1}}) # High to Low
+            elif sort == "small":
+                pipeline.append({"$sort": {"file_size": 1}}) # Low to High
+            # "relevance" uses default text score from $search
 
             pipeline.append({"$limit": 100}) 
 
@@ -291,6 +293,7 @@ class MediaDB:
             
             final_files = []
             for f in files:
+                # ... (Same Manual filtering logic as before) ...
                 fname = f.get('file_name', '').lower()
                 caption = (f.get('caption') or "").lower()
                 full_text = fname + " " + caption

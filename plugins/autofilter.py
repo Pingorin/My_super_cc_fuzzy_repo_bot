@@ -9,16 +9,16 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait, MessageNotModified
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-from info import SITE_URL
+from info import SITE_URL, AUTH_CHANNEL, AUTH_CHANNEL_2, AUTH_CHANNEL_3
 from cachetools import TTLCache 
 
-# ✅ Utils Imports
+# ✅ Utils Imports (Added get_shortlink)
 from utils import (
     temp, btn_parser, format_text_results, format_detailed_results, 
     format_card_result, get_pagination_row, get_filter_buttons, 
     get_language_buttons, get_quality_buttons, get_year_buttons,
     get_size_buttons, get_sort_buttons, filter_by_type, filter_by_lang, filter_by_quality, 
-    filter_by_year, filter_by_size, check_fsub_status
+    filter_by_year, filter_by_size, check_fsub_status, get_shortlink
 )
 
 logger = logging.getLogger(__name__)
@@ -104,6 +104,7 @@ async def auto_filter(client, message):
 
         start_time = time.time()
         
+        # Initial Search (Default sort: relevance)
         task_files = Media.get_search_results(query, sort="relevance")
         task_settings = db.get_group_settings(message.chat.id)
         
@@ -143,7 +144,7 @@ async def auto_filter(client, message):
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         
-        # ✅ UPDATED FOOTER (Link Button)
+        # ✅ FOOTER BUTTONS
         free_prem_btn = [
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
             InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=all_{search_id}")
@@ -170,6 +171,7 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
             
+            # Pass sort to pagination
             pagination = get_pagination_row(search_id, offset, limit, total_results, active_size=None, active_sort="relevance")
             if pagination: btn.append(pagination)
             
@@ -220,7 +222,7 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# ✅ NEW: START HANDLER FOR SEND ALL (PM + VERIFICATION)
+# ✅ NEW: START HANDLER FOR SEND ALL (WITH VERIFICATION CHECK)
 # ==============================================================================
 @Client.on_message(filters.command("start") & filters.private & filters.regex(r"^/start all_"))
 async def send_all_handler(client, message):
@@ -231,32 +233,49 @@ async def send_all_handler(client, message):
         search_id = int(message.text.split("_")[1])
         cached_data = await Media.get_search_query(search_id)
         if not cached_data:
-            return await message.reply("❌ Link expired. Search again.", quote=True)
+            return await message.reply("❌ **Link Expired!**\n\nPlease search again in the group.", quote=True)
         
         chat_id = cached_data.get('chat_id')
         user_id = message.from_user.id
         
-        # 1. CHECK FSUB
+        # 1️⃣ FSUB CHECK (Channel Join)
         is_participant = await check_fsub_status(client, user_id, chat_id)
         if any(status != "MEMBER" for status in is_participant if isinstance(status, str)):
-             # You should add buttons to join channels here, for now simple text
-             return await message.reply("❌ You must join our Update Channels first to use 'Send All' feature!", quote=True)
+             # Construct Join Button (Simple approach, assumes main auth channel)
+             join_btn = [[InlineKeyboardButton("🤖 Join Updates Channel", url=f"https://t.me/{temp.U_NAME}?start=all_{search_id}")]]
+             return await message.reply("❌ **You must join our Update Channels first!**\n\nClick below to join, then try again.", reply_markup=InlineKeyboardMarkup(join_btn), quote=True)
 
-        # 2. CHECK SHORTNER
+        # 2️⃣ SHORTENER VERIFICATION CHECK
         try:
             settings = await db.get_group_settings(chat_id)
             if settings.get('is_shortner'):
-                # Assuming standard verification check method
                 is_verified = await db.is_user_verified(user_id)
+                
+                # 🔴 AGAR NOT VERIFIED: Link Bhejo
                 if not is_verified:
-                    return await message.reply("❌ You must verify the Shortlink first to use 'Send All'!\n\nGo back to the group and click 'How To Download' or verify button.", quote=True)
-        except: pass
+                    api = settings.get('shortner_api')
+                    site = settings.get('shortner_site')
+                    
+                    # Deep link wapas yahi aane ke liye
+                    base_url = f"https://t.me/{temp.U_NAME}?start=all_{search_id}"
+                    short_url = await get_shortlink(site, api, base_url)
+                    
+                    btn = [[InlineKeyboardButton("✅ Verify & Get All Files", url=short_url)]]
+                    return await message.reply(
+                        f"<b>⚠️ Verification Required!</b>\n\nYou need to verify to get all files at once.\n\n👇 <b>Click below to verify:</b>",
+                        reply_markup=InlineKeyboardMarkup(btn),
+                        quote=True,
+                        disable_web_page_preview=True
+                    )
+        except Exception as e:
+            logger.error(f"Verification Check Error: {e}")
 
+        # 🟢 SAB SAHI HAI: Files Bhejo
         files = cached_data.get('files')
         if not files:
             return await message.reply("No files to send.", quote=True)
 
-        msg = await message.reply(f"⚡ **Sending {len(files)} files...**\nPlease wait and do not block the bot.", quote=True)
+        status_msg = await message.reply(f"⚡ **Sending {len(files)} files...**\n\n⬇️ Starting download...", quote=True)
         
         for file in files:
             try:
@@ -268,12 +287,12 @@ async def send_all_handler(client, message):
                         file_id=file_details['file_id'],
                         caption=file['caption'] or file['file_name']
                     )
-                    await asyncio.sleep(0.8) # Floodwait protection
+                    await asyncio.sleep(0.8) # Floodwait Protection
             except Exception as e:
                 logger.error(f"Send All Loop Error: {e}")
                 continue
         
-        await msg.edit("✅ All files sent successfully!")
+        await status_msg.edit("✅ **All files sent successfully!**")
                 
     except Exception as e:
         logger.error(f"Send All Handler Error: {e}")
@@ -317,7 +336,6 @@ async def handle_pagination(client, query):
             InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=all_{search_id}")
         ]
         
-        # ✅ FIX: Passing files to generate buttons correctly
         filter_buttons = get_filter_buttons(search_id, files)
 
         buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, req)

@@ -9,7 +9,8 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait, MessageNotModified, UserIsBlocked, InputUserDeactivated
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-from info import SITE_URL, ADMINS, AUTH_CHANNEL
+# ✅ Added SHORTLINK_URL & SHORTLINK_API for default fallback
+from info import SITE_URL, SHORTLINK_URL, SHORTLINK_API
 from cachetools import TTLCache 
 
 # ✅ Utils Imports
@@ -217,7 +218,7 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# ✅ NEW: START HANDLER FOR SEND ALL (STRICT VERIFICATION)
+# ✅ FIXED: START HANDLER FOR SEND ALL (Smart Verification Check)
 # ==============================================================================
 @Client.on_message(filters.command("start") & filters.private & filters.regex(r"^/start all_"), group=-1)
 async def send_all_handler(client, message):
@@ -226,25 +227,25 @@ async def send_all_handler(client, message):
         return await message.stop_propagation()
         
     try:
-        # Extract search_id
-        data = message.text.split("all_")
-        if len(data) < 2: return await message.stop_propagation()
-        
-        search_id = int(data[1])
+        data_split = message.text.split("_")
+        if len(data_split) < 2:
+            await message.reply("❌ Invalid Link.", quote=True)
+            return await message.stop_propagation()
+
+        search_id = int(data_split[1])
         cached_data = await Media.get_search_query(search_id)
         if not cached_data:
-            await message.reply("❌ Link expired or invalid. Search again in group.", quote=True)
+            await message.reply("❌ Link expired. Search again in group.", quote=True)
             return await message.stop_propagation()
         
         chat_id = cached_data.get('chat_id')
         user_id = message.from_user.id
         
-        # 1️⃣ STRICT FSUB CHECK
-        # We explicitly check against auth channels from info.py or group settings
+        # 1️⃣ FSUB CHECK (Group + Default)
+        # check_fsub_status already handles "If Group has no fsub, check AUTH_CHANNEL"
         statuses = await check_fsub_status(client, user_id, chat_id)
         
         join_buttons = []
-        # Statuses returns: (status1, status2, status3, id1, id2, id3)
         if statuses[0] != "MEMBER" and statuses[3]: 
             try: link = (await client.get_chat(statuses[3])).invite_link
             except: link = "https://t.me/telegram"
@@ -267,46 +268,54 @@ async def send_all_handler(client, message):
                 reply_markup=InlineKeyboardMarkup(join_buttons),
                 quote=True
             )
-            # ⛔ STOP HERE if not joined
             return await message.stop_propagation()
 
-        # 2️⃣ STRICT SHORTNER CHECK
-        settings = await db.get_group_settings(chat_id)
-        if not settings: settings = {}
-        
-        is_shortner = settings.get('is_shortner')
-        # Robust check for boolean or string 'True'
-        shortner_enabled = False
-        if isinstance(is_shortner, bool): shortner_enabled = is_shortner
-        elif isinstance(is_shortner, str) and is_shortner.lower() == 'true': shortner_enabled = True
-        
-        if shortner_enabled:
-            # Must verify if shortener is ON
-            is_verified = await db.is_user_verified(user_id)
-            if not is_verified:
-                cmd_link = f"https://t.me/{temp.U_NAME}?start=all_{search_id}"
-                site = settings.get('shortner_site')
-                api = settings.get('shortner_api')
+        # 2️⃣ SHORTNER CHECK (Group + Default)
+        try:
+            settings = await db.get_group_settings(chat_id)
+            if not settings: settings = {}
+            
+            use_shortner = False
+            shortner_site = None
+            shortner_api = None
+            
+            # 2A. Check Group Settings
+            if settings.get('is_shortner'):
+                use_shortner = True
+                shortner_site = settings.get('shortner_site')
+                shortner_api = settings.get('shortner_api')
                 
-                if site and api:
-                    short_url = await get_shortlink(site, api, cmd_link)
-                    if short_url:
-                        btn = [
-                            [InlineKeyboardButton("🖥 Verify to Get Files 🔓", url=short_url)],
-                            [InlineKeyboardButton("⁉️ How To Verify", url=settings.get('howto_url') or "https://t.me/telegram")]
-                        ]
-                        await message.reply(
-                            "<b>🔒 Verification Required!</b>\n\nTo prevent spam, please verify once to get all files.",
-                            reply_markup=InlineKeyboardMarkup(btn),
-                            quote=True
-                        )
-                        # ⛔ STOP HERE if not verified
-                        return await message.stop_propagation()
-                    else:
-                        await message.reply("❌ Error generating verification link. Contact Admin.", quote=True)
-                        return await message.stop_propagation()
+            # 2B. Check Default Settings (Fallback)
+            elif SHORTLINK_URL and SHORTLINK_API:
+                use_shortner = True
+                shortner_site = SHORTLINK_URL
+                shortner_api = SHORTLINK_API
+            
+            # If enabled and credentials exist
+            if use_shortner and shortner_site and shortner_api:
+                # Use DB verification check
+                if hasattr(db, 'is_user_verified'):
+                    is_verified = await db.is_user_verified(user_id)
+                    if not is_verified:
+                        cmd_link = f"https://t.me/{temp.U_NAME}?start=all_{search_id}"
+                        short_url = await get_shortlink(shortner_site, shortner_api, cmd_link)
+                        
+                        if short_url:
+                            btn = [
+                                [InlineKeyboardButton("🖥 Verify to Get Files 🔓", url=short_url)],
+                                [InlineKeyboardButton("⁉️ How To Verify", url=settings.get('howto_url') or "https://t.me/telegram")]
+                            ]
+                            await message.reply(
+                                "<b>🔒 Verification Required!</b>\n\nTo prevent spam, please verify once to get all files.",
+                                reply_markup=InlineKeyboardMarkup(btn),
+                                quote=True
+                            )
+                            return await message.stop_propagation()
+        except Exception as e:
+            logger.error(f"Shortener Check Error: {e}")
+            # Continue if error (Fail Open)
 
-        # 3️⃣ SEND FILES (Only if passed above checks)
+        # 3️⃣ SEND FILES
         files = cached_data.get('files')
         if not files:
             await message.reply("No files to send.", quote=True)
@@ -335,17 +344,16 @@ async def send_all_handler(client, message):
                 logger.error(f"File Send Error: {e}")
                 continue
         
-        if sent_count > 0:
+        try:
             await msg.edit(f"✅ **Sent {sent_count} files successfully!**")
-        else:
-            await msg.edit("❌ Failed to send files. Maybe they were deleted.")
+        except:
+            pass
             
-        # ✅ CRITICAL: Stop propagation so Main Start doesn't run
         return await message.stop_propagation()
                 
     except Exception as e:
         logger.error(f"Send All Handler Error: {e}")
-        await message.reply("Error sending files. Please try again.", quote=True)
+        # await message.reply("Error sending files.", quote=True)
         return await message.stop_propagation()
 
 # ==============================================================================
@@ -500,7 +508,6 @@ async def handle_combined_filter(client, query):
         req = cached_data.get('query')
         if not all_files: all_files = await Media.get_search_results(req, sort=filter_sort)
 
-        # ✅ DB Call with Sort & Filters
         final_files = await Media.get_search_results(
             req, 
             file_type=filter_type, 
@@ -512,7 +519,6 @@ async def handle_combined_filter(client, query):
         )
 
         if not final_files:
-            # If Size filter is active, allow 0 results to update UI checkmarks
             if filter_size == "none":
                 return await query.answer("❌ No files match these filters!", show_alert=True)
 
@@ -538,7 +544,6 @@ async def handle_combined_filter(client, query):
         pass_size = filter_size if filter_size != "none" else None
         pass_sort = filter_sort if filter_sort != "relevance" else None
 
-        # PASSING ALL FILES TO ENSURE BUTTONS EXIST EVEN IF RESULTS ARE 0
         filter_buttons = get_filter_buttons(search_id, all_files, active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size, active_sort=pass_sort)
 
         if mode == 'button':
@@ -579,7 +584,7 @@ async def handle_combined_filter(client, query):
         traceback.print_exc()
 
 # ==============================================================================
-# 8 - 12 MENU OPENERS (Updated with Sort Param)
+# 8 - 12 MENU OPENERS
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^lang_menu_"))
 async def handle_language_menu(client, query):
@@ -787,7 +792,7 @@ async def card_next_nav(client, query):
         btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
         nav_row = []
         if next_index > 0: nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{search_id}_{next_index}"))
-        nav_row.append(InlineKeyboardButton(f"{prev_index + 1}/{total}", callback_data="pages"))
+        nav_row.append(InlineKeyboardButton(f"{next_index + 1}/{total}", callback_data="pages"))
         if next_index < total - 1: nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{search_id}_{next_index}"))
         btn.append(nav_row)
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))

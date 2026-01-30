@@ -6,7 +6,7 @@ import asyncio
 import traceback 
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import FloodWait, MessageNotModified
+from pyrogram.errors import FloodWait, MessageNotModified, UserIsBlocked, InputUserDeactivated
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 from info import SITE_URL
@@ -217,20 +217,24 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# ✅ NEW: START HANDLER FOR SEND ALL (HIGH PRIORITY FIX)
+# ✅ FIXED: START HANDLER FOR SEND ALL (No Double Msg + Checks)
 # ==============================================================================
-# Group -1 ensures this runs BEFORE the default start handler
-@Client.on_message(filters.command("start") & filters.private & filters.regex(r"all_"), group=-1)
+@Client.on_message(filters.command("start") & filters.private & filters.regex(r"^/start all_"), group=-1)
 async def send_all_handler(client, message):
     if is_spam(message.from_user.id):
-        return await message.reply("Please wait...", quote=True)
+        await message.reply("Please wait...", quote=True)
+        return await message.stop_propagation()
         
     try:
-        # Extract search_id from /start all_{search_id}
-        search_id = int(message.text.split("_")[1])
+        data_split = message.text.split("_")
+        if len(data_split) < 2:
+            await message.reply("❌ Invalid Link.", quote=True)
+            return await message.stop_propagation()
+
+        search_id = int(data_split[1])
         cached_data = await Media.get_search_query(search_id)
         if not cached_data:
-            await message.reply("❌ Link expired or invalid. Search again.", quote=True)
+            await message.reply("❌ Link expired. Search again in group.", quote=True)
             return await message.stop_propagation()
         
         chat_id = cached_data.get('chat_id')
@@ -269,25 +273,35 @@ async def send_all_handler(client, message):
             settings = await db.get_group_settings(chat_id)
             if not settings: settings = {} 
             
-            if settings.get('is_shortner') and settings.get('shortner_site') and settings.get('shortner_api'):
-                is_verified = await db.is_user_verified(user_id)
-                if not is_verified:
-                    cmd_link = f"https://t.me/{temp.U_NAME}?start=all_{search_id}"
-                    short_url = await get_shortlink(settings['shortner_site'], settings['shortner_api'], cmd_link)
+            # Check if Shortener is active in DB (Handle Boolean or String "True")
+            is_shortner = settings.get('is_shortner')
+            if is_shortner and (is_shortner is True or str(is_shortner).lower() == 'true'):
+                # Check Verification
+                if hasattr(db, 'is_user_verified'):
+                    is_verified = await db.is_user_verified(user_id)
                     
-                    if short_url:
-                        btn = [
-                            [InlineKeyboardButton("🖥 Verify to Get Files 🔓", url=short_url)],
-                            [InlineKeyboardButton("⁉️ How To Verify", url=settings.get('howto_url') or "https://t.me/telegram")]
-                        ]
-                        await message.reply(
-                            "<b>🔒 Verification Required!</b>\n\nTo prevent spam, please verify once to get all files.",
-                            reply_markup=InlineKeyboardMarkup(btn),
-                            quote=True
-                        )
-                        return await message.stop_propagation()
+                    if not is_verified:
+                        cmd_link = f"https://t.me/{temp.U_NAME}?start=all_{search_id}"
+                        # Check if API keys exist
+                        site = settings.get('shortner_site')
+                        api = settings.get('shortner_api')
+                        
+                        if site and api:
+                            short_url = await get_shortlink(site, api, cmd_link)
+                            if short_url:
+                                btn = [
+                                    [InlineKeyboardButton("🖥 Verify to Get Files 🔓", url=short_url)],
+                                    [InlineKeyboardButton("⁉️ How To Verify", url=settings.get('howto_url') or "https://t.me/telegram")]
+                                ]
+                                await message.reply(
+                                    "<b>🔒 Verification Required!</b>\n\nTo prevent spam, please verify once to get all files.",
+                                    reply_markup=InlineKeyboardMarkup(btn),
+                                    quote=True
+                                )
+                                return await message.stop_propagation()
         except Exception as e:
             logger.error(f"Shortener Check Error: {e}")
+            # If error in settings check, Proceed to send files (Fail Open)
 
         # 3️⃣ SEND FILES
         files = cached_data.get('files')
@@ -295,8 +309,9 @@ async def send_all_handler(client, message):
             await message.reply("No files to send.", quote=True)
             return await message.stop_propagation()
 
-        msg = await message.reply(f"⚡ **Sending {len(files)} files...**\nPlease wait and do not block the bot.", quote=True)
+        msg = await message.reply(f"⚡ **Sending {len(files)} files...**\n\nPlease wait and do not block the bot.", quote=True)
         
+        sent_count = 0
         for file in files:
             try:
                 link_id = file['link_id']
@@ -307,18 +322,29 @@ async def send_all_handler(client, message):
                         file_id=file_details['file_id'],
                         caption=file['caption'] or file['file_name']
                     )
+                    sent_count += 1
                     await asyncio.sleep(0.8) # Floodwait protection
+            except (FloodWait, UserIsBlocked, InputUserDeactivated):
+                # Critical errors, stop loop
+                break 
             except Exception as e:
-                logger.error(f"Send All Loop Error: {e}")
+                # Skip file if deleted or other error
+                logger.error(f"File Send Error: {e}")
                 continue
         
-        await msg.edit("✅ All files sent successfully!")
-        # Stop propagation to prevent Main Start handler from running
-        await message.stop_propagation()
+        try:
+            await msg.edit(f"✅ **Sent {sent_count} files successfully!**")
+        except:
+            pass
+            
+        # ✅ CRITICAL: Stop propagation so Main Start doesn't run
+        return await message.stop_propagation()
                 
     except Exception as e:
         logger.error(f"Send All Handler Error: {e}")
-        await message.reply("Error sending files. Please try again.", quote=True)
+        # Only reply error if we haven't already replied
+        # await message.reply("Error processing request.", quote=True)
+        return await message.stop_propagation()
 
 # ==============================================================================
 # 2. PAGINATION

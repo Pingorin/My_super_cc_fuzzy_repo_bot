@@ -9,8 +9,15 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait, MessageNotModified, UserIsBlocked, InputUserDeactivated
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-# ✅ Added SHORTLINK_URL & SHORTLINK_API for default fallback
-from info import SITE_URL, SHORTLINK_URL, SHORTLINK_API
+
+# ✅ SAFE IMPORT (Crash Fix)
+from info import SITE_URL
+try:
+    from info import SHORTLINK_URL, SHORTLINK_API
+except ImportError:
+    SHORTLINK_URL = None
+    SHORTLINK_API = None
+
 from cachetools import TTLCache 
 
 # ✅ Utils Imports
@@ -218,7 +225,7 @@ async def auto_filter(client, message):
         traceback.print_exc()
 
 # ==============================================================================
-# ✅ FIXED: START HANDLER FOR SEND ALL (Smart Verification Check)
+# ✅ FIXED: START HANDLER FOR SEND ALL
 # ==============================================================================
 @Client.on_message(filters.command("start") & filters.private & filters.regex(r"^/start all_"), group=-1)
 async def send_all_handler(client, message):
@@ -235,14 +242,13 @@ async def send_all_handler(client, message):
         search_id = int(data_split[1])
         cached_data = await Media.get_search_query(search_id)
         if not cached_data:
-            await message.reply("❌ Link expired. Search again in group.", quote=True)
+            await message.reply("❌ Link expired or invalid. Search again in group.", quote=True)
             return await message.stop_propagation()
         
         chat_id = cached_data.get('chat_id')
         user_id = message.from_user.id
         
-        # 1️⃣ FSUB CHECK (Group + Default)
-        # check_fsub_status already handles "If Group has no fsub, check AUTH_CHANNEL"
+        # 1️⃣ FSUB CHECK
         statuses = await check_fsub_status(client, user_id, chat_id)
         
         join_buttons = []
@@ -270,7 +276,7 @@ async def send_all_handler(client, message):
             )
             return await message.stop_propagation()
 
-        # 2️⃣ SHORTNER CHECK (Group + Default)
+        # 2️⃣ SHORTNER CHECK
         try:
             settings = await db.get_group_settings(chat_id)
             if not settings: settings = {}
@@ -280,20 +286,22 @@ async def send_all_handler(client, message):
             shortner_api = None
             
             # 2A. Check Group Settings
-            if settings.get('is_shortner'):
+            is_group_shortner = settings.get('is_shortner')
+            if is_group_shortner and (is_group_shortner is True or str(is_group_shortner).lower() == 'true'):
                 use_shortner = True
                 shortner_site = settings.get('shortner_site')
                 shortner_api = settings.get('shortner_api')
                 
-            # 2B. Check Default Settings (Fallback)
+            # 2B. Check Default Settings (Fallback if group settings empty but defaults exist)
             elif SHORTLINK_URL and SHORTLINK_API:
+                # Only use default if user hasn't explicitly disabled it? 
+                # Usually bots enforce default if group hasn't set anything.
                 use_shortner = True
                 shortner_site = SHORTLINK_URL
                 shortner_api = SHORTLINK_API
             
             # If enabled and credentials exist
             if use_shortner and shortner_site and shortner_api:
-                # Use DB verification check
                 if hasattr(db, 'is_user_verified'):
                     is_verified = await db.is_user_verified(user_id)
                     if not is_verified:
@@ -313,7 +321,6 @@ async def send_all_handler(client, message):
                             return await message.stop_propagation()
         except Exception as e:
             logger.error(f"Shortener Check Error: {e}")
-            # Continue if error (Fail Open)
 
         # 3️⃣ SEND FILES
         files = cached_data.get('files')
@@ -337,10 +344,8 @@ async def send_all_handler(client, message):
                     sent_count += 1
                     await asyncio.sleep(0.8) # Floodwait protection
             except (FloodWait, UserIsBlocked, InputUserDeactivated):
-                # Critical errors, stop loop
                 break 
             except Exception as e:
-                # Skip file if deleted or other error
                 logger.error(f"File Send Error: {e}")
                 continue
         
@@ -353,7 +358,6 @@ async def send_all_handler(client, message):
                 
     except Exception as e:
         logger.error(f"Send All Handler Error: {e}")
-        # await message.reply("Error sending files.", quote=True)
         return await message.stop_propagation()
 
 # ==============================================================================
@@ -484,7 +488,6 @@ async def handle_combined_filter(client, query):
         filter_lang = data[3]
         filter_qual = data[4]
         
-        # Extended Parsing for Sort
         if len(data) >= 9:
             filter_year = data[5]
             filter_size = data[6]

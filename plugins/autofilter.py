@@ -67,7 +67,7 @@ def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_
     
     if howto_btn: buttons.append(howto_btn)
     
-    # ✅ "Free Premium" and "Send All" are passed as a single list (Row)
+    # ✅ "Send All" and "Free Premium" passed as single list
     if free_prem_btn: buttons.append(free_prem_btn)
     
     if pagination_row: buttons.append(pagination_row)
@@ -147,10 +147,10 @@ async def auto_filter(client, message):
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         
-        # ✅ UPDATED FOOTER BUTTONS (Send All -> Deep Link to PM)
+        # ✅ SWAPPED: Send All (Left) | Free Premium (Right)
         free_prem_btn = [
-            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{message.chat.id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{message.chat.id}"),
+            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
         ]
         
         # Pass "relevance" as default sort
@@ -204,6 +204,8 @@ async def auto_filter(client, message):
             btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
 
             if howto_btn: btn.append(howto_btn)
+            
+            # Note: Card mode usually sends 1 file, Send All is less relevant but keeping for consistency if requested
             btn.append(free_prem_btn)
 
             if total_results > 1:
@@ -256,13 +258,12 @@ async def handle_pagination(client, query):
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         
-        # ✅ Updated Footer (Send All -> PM)
+        # ✅ SWAPPED: Send All (Left) | Free Premium (Right)
         free_prem_btn = [
-            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}"),
+            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
         ]
         
-        # ✅ FIX: Passing files to generate buttons correctly
         filter_buttons = get_filter_buttons(search_id, files)
 
         buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, req)
@@ -325,7 +326,6 @@ async def handle_size_selection(client, query):
             await handle_combined_filter(client, query)
     except: pass
 
-# ✅ NEW: SORT SELECTION HANDLER
 @Client.on_callback_query(filters.regex(r"^filter_sort_"))
 async def handle_sort_selection(client, query):
     try:
@@ -408,10 +408,10 @@ async def handle_combined_filter(client, query):
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         
-        # ✅ UPDATED FOOTER (Send All -> PM)
+        # ✅ SWAPPED: Send All (Left) | Free Premium (Right)
         free_prem_btn = [
-            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}"),
+            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
         ]
 
         pass_type = filter_type if filter_type != "none" else None
@@ -487,8 +487,8 @@ async def handle_language_menu(client, query):
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         
         free_prem_btn = [
-            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}"),
+            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
         ]
 
         type_buttons = get_type_row(search_id, c_type, "none", c_qual, c_year, c_size, c_sort)
@@ -521,8 +521,8 @@ async def handle_quality_menu(client, query):
         howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
-            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}"),
+            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
         ]
 
         type_buttons = get_type_row(search_id, c_type, c_lang, "none", c_year, c_size, c_sort)
@@ -556,8 +556,8 @@ async def handle_year_menu(client, query):
         howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
-            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}"),
+            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
         ]
 
         type_buttons = get_type_row(search_id, c_type, c_lang, c_qual, "none", c_size, c_sort)
@@ -581,8 +581,8 @@ async def handle_size_menu(client, query):
         howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
-            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}"),
+            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
         ]
 
         type_buttons = get_type_row(search_id, c_type, c_lang, c_qual, c_year, "none", c_sort)
@@ -607,8 +607,8 @@ async def handle_sort_menu(client, query):
         howto_url = (await db.get_group_settings(query.message.chat.id)).get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
-            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}")
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{query.message.chat.id}"),
+            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
         ]
 
         # Header Row
@@ -668,7 +668,13 @@ async def card_next_nav(client, query):
         chat_id = query.message.chat.id
         btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
         if howto_url: btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
-        btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
+        
+        # Swapped Position in Card Mode as well
+        btn.append([
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{chat_id}"),
+            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
+        ])
+
         nav_row = []
         if next_index > 0: nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{search_id}_{next_index}"))
         nav_row.append(InlineKeyboardButton(f"{next_index + 1}/{total}", callback_data="pages"))
@@ -703,7 +709,13 @@ async def card_prev_nav(client, query):
         chat_id = query.message.chat.id
         btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
         if howto_url: btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
-        btn.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
+        
+        # Swapped Position in Card Mode as well
+        btn.append([
+            InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{chat_id}"),
+            InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
+        ])
+
         nav_row = []
         if prev_index > 0: nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{search_id}_{prev_index}"))
         nav_row.append(InlineKeyboardButton(f"{prev_index + 1}/{total}", callback_data="pages"))

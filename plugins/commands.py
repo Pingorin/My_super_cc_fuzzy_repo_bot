@@ -2,6 +2,7 @@ import logging
 import time
 import re
 import datetime
+import asyncio 
 import urllib.parse
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -257,6 +258,7 @@ async def check_fsub(client, user_id, message_obj):
             parts = message_obj.command[1].split("_")
             if len(parts) > 3: src_chat_id = int(parts[3]) 
             elif len(parts) > 2 and parts[0] == "get": src_chat_id = int(parts[2])
+            elif len(parts) > 2 and parts[0] == "sendall": src_chat_id = int(parts[2]) # Handle SendAll
         except: pass
     
     if not src_chat_id: return True 
@@ -416,8 +418,8 @@ async def start_handler(client, message):
             await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
             return
 
-        # Normal FSub Check (if not verification/get flow)
-        if len(message.command) > 1 and not (message.command[1].startswith("verify_") or message.command[1].startswith("get_")):
+        # Normal FSub Check (if not verification/get flow/sendall flow)
+        if len(message.command) > 1 and not (message.command[1].startswith("verify_") or message.command[1].startswith("get_") or message.command[1].startswith("sendall_")):
              if not await check_fsub(client, message.from_user.id, message): return
 
     # -------------------------------------------------------------------------
@@ -428,7 +430,8 @@ async def start_handler(client, message):
             data = message.command[1].split("_")
             level = int(data[1])
             verify_chatid = int(data[3]) 
-            link_id = int(data[4]) if len(data) > 4 else 0
+            # Check if this is a SendAll ID or Normal ID
+            raw_link_id = data[4] if len(data) > 4 else "0"
             
             await db.update_verify_status(message.from_user.id, verify_chatid, level)
             
@@ -455,11 +458,164 @@ async def start_handler(client, message):
             except Exception as e:
                 print(f"Stats Error: {e}")
 
-            if await check_verification(client, message.from_user.id, verify_chatid, link_id, message):
-                btn = [[InlineKeyboardButton("📂 Get Your File Now", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{verify_chatid}")]]
-                await message.reply(f"✅ **Verification Successful!**\n\nAb niche button par click karke file lein.", reply_markup=InlineKeyboardMarkup(btn))
+            if await check_verification(client, message.from_user.id, verify_chatid, raw_link_id, message):
+                # 📂 Check if this was a SendAll request (SA-ID)
+                if str(raw_link_id).startswith("SA-"):
+                    real_search_id = raw_link_id.replace("SA-", "")
+                    btn = [[InlineKeyboardButton("📂 Send All Files Now", url=f"https://t.me/{temp.U_NAME}?start=sendall_{real_search_id}_{verify_chatid}")]]
+                    await message.reply(f"✅ **Verification Successful!**\n\nClick below to get all your files.", reply_markup=InlineKeyboardMarkup(btn))
+                else:
+                    btn = [[InlineKeyboardButton("📂 Get Your File Now", url=f"https://t.me/{temp.U_NAME}?start=get_{raw_link_id}_{verify_chatid}")]]
+                    await message.reply(f"✅ **Verification Successful!**\n\nAb niche button par click karke file lein.", reply_markup=InlineKeyboardMarkup(btn))
             return
         except Exception as e: return await message.reply(f"❌ Error: {e}")
+
+    # -------------------------------------------------------------------------
+    # 📂 SEND ALL HANDLER (FSub + Verify + Batch Send)
+    # -------------------------------------------------------------------------
+    if len(message.command) > 1 and message.command[1].startswith("sendall_"):
+        try:
+            data = message.command[1].split("_")
+            search_id = int(data[1])
+            src_chat_id = int(data[2]) if len(data) > 2 else message.chat.id
+            
+            # 1. FSub Check (Slots 1, 2, 3)
+            if not await check_fsub(client, message.from_user.id, message): return 
+
+            # 2. Verification Check (Using SA-ID flag)
+            # This tells verification logic that we are waiting for a batch send
+            if not await check_verification(client, message.from_user.id, src_chat_id, f"SA-{search_id}", message): return 
+
+            # 3. Post-Verify FSub (Slots 4 & 5)
+            group_settings = await db.get_group_settings(src_chat_id)
+            fsub = group_settings.get('fsub_channels', {}) if group_settings else {}
+            
+            id_4 = fsub.get('4')
+            id_5 = fsub.get('5')
+            post_verify_buttons = []
+
+            # Check Slot 4
+            if id_4:
+                try:
+                    id_4 = int(id_4)
+                    try: await client.get_chat(id_4)
+                    except: pass
+                    try:
+                        m4 = await client.get_chat_member(id_4, message.from_user.id)
+                        is_joined_4 = m4.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
+                    except: is_joined_4 = False
+                    
+                    if not is_joined_4 and not await db.is_user_pending(message.from_user.id, id_4):
+                         invite4 = await client.create_chat_invite_link(id_4, creates_join_request=True)
+                         post_verify_buttons.append(InlineKeyboardButton("📢 Request Final (Slot 4)", url=invite4.invite_link))
+                except: pass
+
+            # Check Slot 5
+            if id_5:
+                is_joined_5 = False
+                slot5_btn_url = None
+                str_id_5 = str(id_5)
+                if isinstance(id_5, int) or str_id_5.lstrip('-').isdigit():
+                    try:
+                        cid5 = int(id_5)
+                        try: await client.get_chat(cid5)
+                        except: pass
+                        try:
+                            m5 = await client.get_chat_member(cid5, message.from_user.id)
+                            is_joined_5 = m5.status in [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
+                        except: is_joined_5 = False
+                        
+                        if not is_joined_5:
+                            invite5 = await client.create_chat_invite_link(cid5)
+                            slot5_btn_url = invite5.invite_link
+                    except: pass
+                else:
+                    is_joined_5 = False 
+                    slot5_btn_url = str_id_5
+
+                if not is_joined_5 and slot5_btn_url:
+                    post_verify_buttons.append(InlineKeyboardButton("📢 Join Final (Slot 5)", url=slot5_btn_url))
+
+            if post_verify_buttons:
+                wrapper = []
+                if len(post_verify_buttons) == 2: wrapper.append(post_verify_buttons)
+                else: wrapper.append([post_verify_buttons[0]])
+                
+                # IMPORTANT: Loop back to sendall_, not get_
+                wrapper.append([InlineKeyboardButton("✅ I Have Joined - Send Files", url=f"https://t.me/{temp.U_NAME}?start={message.command[1]}")])
+                
+                await message.reply_text(
+                    text="🛑 **Almost There!**\n\nPlease join the Final Channels below to get your files.",
+                    reply_markup=InlineKeyboardMarkup(wrapper)
+                )
+                return 
+
+            # 4. Fetch Files & Send
+            cached_data = await Media.get_search_query(search_id)
+            if not cached_data:
+                return await message.reply("❌ **Search Expired.**\nPlease search again in the group.")
+            
+            files = cached_data.get('files', [])
+            if not files:
+                 return await message.reply("❌ **No files found.**")
+
+            msg = await message.reply(f"⚡ **Sending {len(files)} files...**\n_Please wait, this might take a moment._")
+            
+            # Fetch settings for Caption/Buttons
+            cap_url = group_settings.get('caption_url')
+            cap_btn_text = group_settings.get('caption_btn_text')
+            cap_btn_url = group_settings.get('caption_btn_url')
+            
+            sent_count = 0
+            
+            for file in files:
+                try:
+                    link_id = file['link_id']
+                    # Need to fetch full details for file_id
+                    file_details = await Media.get_file_details(link_id)
+                    if not file_details: continue
+
+                    # Construct Caption
+                    caption = file['caption'] or file['file_name']
+                    # Simple Cleaning
+                    caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", "", str(caption), flags=re.IGNORECASE)
+                    caption = re.sub(r"https?://[^\s]+", "", caption, flags=re.IGNORECASE)
+                    caption = re.sub(r"\s+", " ", caption).strip()
+                    
+                    if not caption: caption = f"{file['file_name']}"
+
+                    if cap_url: final_caption = f"<b><a href='{cap_url}'>{caption}</a></b>"
+                    else: final_caption = f"<b>{caption}</b>"
+                    
+                    final_caption += f"\n\n{script.CUSTOM_FOOTER}"
+                    
+                    # Construct Buttons
+                    btn_rows = []
+                    if cap_btn_text and cap_btn_url:
+                        btn_rows.append([InlineKeyboardButton(cap_btn_text, url=cap_btn_url)])
+                    
+                    reply_markup = InlineKeyboardMarkup(btn_rows) if btn_rows else None
+
+                    await client.send_cached_media(
+                        chat_id=message.from_user.id,
+                        file_id=file_details['file_id'],
+                        caption=final_caption,
+                        reply_markup=reply_markup,
+                        parse_mode=enums.ParseMode.HTML
+                    )
+                    sent_count += 1
+                    await asyncio.sleep(0.8) # FloodWait Prevention
+                    
+                except Exception as e:
+                    print(f"Send All Error: {e}")
+                    continue
+            
+            await msg.delete()
+            await message.reply(f"✅ **Sent {sent_count} files successfully!**")
+            return
+
+        except Exception as e:
+            return await message.reply(f"❌ Error: {e}")
 
     # -------------------------------------------------------------------------
     # 🔥 MAIN FLOW (get_linkid_chatid)

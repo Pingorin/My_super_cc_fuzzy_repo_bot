@@ -11,7 +11,7 @@ from utils import btn_parser
 try:
     from info import TMDB_API_KEY
 except ImportError:
-    TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "b2866c1b35bc5156a64d603a11977755")
+    TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "9e1353ccc623e71f80262309cda5cdfb")
 
 logger = logging.getLogger(__name__)
 

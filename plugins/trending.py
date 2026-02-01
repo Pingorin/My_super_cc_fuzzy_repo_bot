@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # ✅ CACHE SETTINGS
 TRENDING_CACHE = {'last_updated': 0, 'data': []}
-CACHE_DURATION = 3600 
+CACHE_DURATION = 60 
 
 async def get_trending_data():
     """

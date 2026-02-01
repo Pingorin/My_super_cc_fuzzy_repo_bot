@@ -1,17 +1,18 @@
 import aiohttp
 import time
 import logging
+import os
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
-from utils import btn_parser, temp
+from utils import btn_parser
 
 # ✅ CONFIG: Import API Key
 try:
     from info import TMDB_API_KEY
 except ImportError:
-    # Public Test Key (Use your own in info.py to avoid rate limits)
-    TMDB_API_KEY = "b2866c1b35bc5156a64d603a11977755" 
+    # Fallback/Test Key
+    TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "9e1353ccc623e71f80262309cda5cdfb")
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,8 @@ CACHE_DURATION = 3600
 async def get_trending_data():
     """
     Fetches Upcoming Indian Movies (2025+) using TMDB Discover API.
-    Filters: Region IN, Hindi Language Priority, Release Date >= 2025-01-01.
+    Filters: Region IN, Release Date >= 2025-01-01.
+    Includes ALL Indian languages (Hindi, Tamil, Telugu, etc.)
     """
     global TRENDING_CACHE
     
@@ -41,30 +43,26 @@ async def get_trending_data():
     # 2. Fetch New Data (Discover Endpoint)
     url = "https://api.themoviedb.org/3/discover/movie"
     
-    # ✅ STRICT FILTERS FOR UPCOMING INDIAN MOVIES (2025+)
+    # ✅ UPDATED PARAMETERS (All India Content)
     params = {
         'api_key': TMDB_API_KEY,
         'region': 'IN',                      # Focus on India
         'sort_by': 'popularity.desc',        # Most hyped first
         'primary_release_date.gte': '2025-01-01', # 🛑 CRITICAL: Only movies after Jan 1, 2025
-        'with_original_language': 'hi',      # Prioritize Hindi movies
-        'language': 'en-US'                  # Ensure titles are in English (No Hindi Script)
+        # 'with_original_language': 'hi',    # ❌ REMOVED: Now it shows South Indian movies too
+        'language': 'en-US'                  # Ensure titles are in English
     }
     
     async with aiohttp.ClientSession() as session:
         items = []
         try:
-            # Fetch Page 1
-            async with session.get(url, params={**params, 'page': 1}) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    items.extend(data.get('results', []))
-
-            # Fetch Page 2 (To ensure we have 30 items)
-            async with session.get(url, params={**params, 'page': 2}) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    items.extend(data.get('results', []))
+            # Fetch Page 1 & 2 to ensure 30 items
+            for page in range(1, 3):
+                params['page'] = page
+                async with session.get(url, params=params) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        items.extend(data.get('results', []))
             
             # 3. Parse & Clean Data
             parsed_list = []
@@ -115,7 +113,7 @@ async def trending_menu_handler(client, query):
     ITEMS_PER_PAGE = 10
     total_items = len(trending_data)
     
-    # Calculate Total Pages (should be 3 for 30 items)
+    # Calculate Total Pages
     total_pages = (total_items + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
     
     # Slice List for Current Page
@@ -125,7 +123,7 @@ async def trending_menu_handler(client, query):
     
     # Build Message Text
     text = (
-        f"🔥 **Upcoming Indian Movies (2025+)** 🔥\n"
+        f"🔥 **Upcoming Trending Movies (2025-26)** 🔥\n"
         f"Page {page + 1}/{total_pages}\n\n"
         f"👇 _Click any title to search!_"
     )
@@ -136,7 +134,7 @@ async def trending_menu_handler(client, query):
     for i, item in enumerate(current_items):
         rank = start + i + 1
         btn_text = f"{rank}. {item['title']} ({item['year']})"
-        # This callback triggers the specific search handler below
+        # Callback triggers the search handler
         buttons.append([InlineKeyboardButton(btn_text, callback_data=f"search#{item['title']}")])
         
     # 2. Navigation Buttons
@@ -160,7 +158,6 @@ async def trending_menu_handler(client, query):
     buttons.append([InlineKeyboardButton("❌ Close", callback_data="close_data")])
     
     try:
-        # Update the message
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
     except Exception as e:
         logger.error(f"Trending UI Error: {e}")
@@ -172,7 +169,6 @@ async def trending_menu_handler(client, query):
 
 @Client.on_callback_query(filters.regex(r"^search#"))
 async def search_from_trending(client, query):
-    # Extract Title from callback
     movie_name = query.data.split("#")[1]
     chat_id = query.message.chat.id
     
@@ -182,7 +178,7 @@ async def search_from_trending(client, query):
     if not files:
         return await query.answer(f"😕 No files found for: {movie_name}", show_alert=True)
     
-    # 2. Generate Result Buttons (Using existing util)
+    # 2. Generate Result Buttons
     buttons = btn_parser(files, chat_id, movie_name, offset=0, limit=10, query=movie_name)
     
     # 3. Add "Back to Trending" Footer

@@ -26,7 +26,7 @@ CACHE_DURATION = 3600 # 1 Hour
 
 async def get_trending_data():
     """
-    Fetches Upcoming Indian Movies from TMDB in English.
+    Fetches Upcoming/Trending Indian Movies (2025+) using Discover API.
     Uses cached data if available and fresh (< 1 hour).
     Fetches Page 1 & 2 to ensure 30 items.
     """
@@ -38,16 +38,17 @@ async def get_trending_data():
     if TRENDING_CACHE['data'] and (current_time - TRENDING_CACHE['last_updated'] < CACHE_DURATION):
         return TRENDING_CACHE['data']
 
-    # 2. Fetch New Data (Updated Endpoint: Upcoming)
-    url = "https://api.themoviedb.org/3/movie/upcoming"
+    # 2. Fetch New Data (Updated Endpoint: Discover for strict Date Filtering)
+    url = "https://api.themoviedb.org/3/discover/movie"
     
-    # ✅ Fixed Params:
-    # region='IN' -> Prioritize Indian release dates
-    # language='en-US' -> Force titles in English (No Hindi/Chinese script)
+    # ✅ STRICT 2025+ FILTERING PARAMETERS
     params = {
-        'api_key': TMDB_API_KEY, 
-        'language': 'en-US',
-        'region': 'IN'
+        'api_key': TMDB_API_KEY,
+        'region': 'IN',
+        'sort_by': 'popularity.desc',
+        'primary_release_date.gte': '2025-01-01',  # 🛑 CRITICAL: Filters out old movies like Jawan
+        'with_original_language': 'hi',            # Prioritizes Hindi/Indian movies
+        'language': 'en-US'                        # Ensures titles are in English
     }
     
     async with aiohttp.ClientSession() as session:
@@ -69,8 +70,6 @@ async def get_trending_data():
             parsed_list = []
             for item in items:
                 try:
-                    # Endpoint returns only movies, so direct access is safe
-                    # We removed the 'media_type' check
                     title = item.get('title')
                     date = item.get('release_date', '')
 

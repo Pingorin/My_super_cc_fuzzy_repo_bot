@@ -12,7 +12,7 @@ try:
     from info import TMDB_API_KEY
 except ImportError:
     # Public Test Key (Use your own in info.py to avoid rate limits)
-    TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "b2866c1b35bc5156a64d603a11977755")
+    TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "9e1353ccc623e71f80262309cda5cdfb")
 
 logger = logging.getLogger(__name__)
 

@@ -22,7 +22,7 @@ TRENDING_CACHE = {
     'data': []
 }
 
-CACHE_DURATION = 3600 # 1 Hour
+CACHE_DURATION = 0 # 1 Hour
 
 async def get_trending_data():
     """

@@ -8,6 +8,7 @@ id_pattern = re.compile(r'^-?\d+$')
 API_ID = int(os.environ.get("API_ID", "12345")) 
 API_HASH = os.environ.get("API_HASH", "your_api_hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "your_bot_token")
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "9e1353ccc623e71f80262309cda5cdfb") # Default Test Key
 DATABASE_URI = os.environ.get("DATABASE_URI", "your_mongo_uri")
 
 # --- DATABASE SETTINGS ---

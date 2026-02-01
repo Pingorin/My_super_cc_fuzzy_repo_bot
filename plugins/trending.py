@@ -6,17 +6,15 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from utils import btn_parser, temp
 
-# ✅ CONFIG (Add TMDB_API_KEY to your info.py for better limits)
+# ✅ CONFIG
 try:
     from info import TMDB_API_KEY
 except ImportError:
-    # Public Test Key (Use your own if this hits limits)
     TMDB_API_KEY = "b2866c1b35bc5156a64d603a11977755" 
 
 logger = logging.getLogger(__name__)
 
-# ✅ IN-MEMORY CACHE (RAM Optimized)
-# Structure: {'last_updated': timestamp, 'data': [list_of_30_items]}
+# ✅ IN-MEMORY CACHE
 TRENDING_CACHE = {
     'last_updated': 0,
     'data': []
@@ -26,7 +24,7 @@ CACHE_DURATION = 3600 # 1 Hour
 
 async def get_trending_data():
     """
-    Fetches trending movies/series from TMDB.
+    Fetches Popular Indian Movies from TMDB.
     Uses cached data if available and fresh (< 1 hour).
     Fetches Page 1 & 2 to ensure 30 items.
     """
@@ -38,9 +36,13 @@ async def get_trending_data():
     if TRENDING_CACHE['data'] and (current_time - TRENDING_CACHE['last_updated'] < CACHE_DURATION):
         return TRENDING_CACHE['data']
 
-    # 2. Fetch New Data
-    url = "https://api.themoviedb.org/3/trending/all/week"
-    params = {'api_key': TMDB_API_KEY, 'language': 'en-US'}
+    # 2. Fetch New Data (Indian Movies)
+    url = "https://api.themoviedb.org/3/movie/popular"
+    params = {
+        'api_key': TMDB_API_KEY, 
+        'language': 'hi-IN',
+        'region': 'IN'
+    }
     
     async with aiohttp.ClientSession() as session:
         items = []
@@ -61,16 +63,9 @@ async def get_trending_data():
             parsed_list = []
             for item in items:
                 try:
-                    # Handle Movie vs TV
-                    media_type = item.get('media_type')
-                    if media_type == 'movie':
-                        title = item.get('title')
-                        date = item.get('release_date', '')
-                    elif media_type == 'tv':
-                        title = item.get('name')
-                        date = item.get('first_air_date', '')
-                    else:
-                        continue 
+                    # Endpoint only returns movies, no need to check media_type
+                    title = item.get('title')
+                    date = item.get('release_date', '')
 
                     # Extract Year
                     year = date.split('-')[0] if date else "N/A"
@@ -120,7 +115,7 @@ async def trending_menu_handler(client, query):
     
     # Build Text
     text = (
-        f"🔥 **Today's Trending Movies (Top {total_items})** 🔥\n"
+        f"🇮🇳 **Today's Popular Indian Movies (Top {total_items})** 🔥\n"
         f"Page {page + 1}/{total_pages}\n\n"
         f"👇 _Click any title to search!_"
     )
@@ -171,9 +166,6 @@ async def search_from_trending(client, query):
         return await query.answer(f"😕 No files found for: {movie_name}", show_alert=True)
     
     # 2. Generate Result Buttons
-    # We use limit=10 (Page 1) directly. Pagination inside this view is complex, 
-    # so we just show the top results for quick access.
-    
     buttons = btn_parser(files, chat_id, movie_name, offset=0, limit=10, query=movie_name)
     
     # 3. Add "Back to Trending" Footer

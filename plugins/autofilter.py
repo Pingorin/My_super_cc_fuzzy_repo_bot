@@ -67,12 +67,13 @@ def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_
     
     if howto_btn: buttons.append(howto_btn)
     
-    # 1. Send All | Free Premium Row
+    # 1. Add Send All | Free Premium Row
     if free_prem_btn: buttons.append(free_prem_btn)
     
-    # ✅ 2. NEW: Trending Button (Below Free Premium)
+    # 2. Add Trending Button (New Line)
     buttons.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
     
+    # 3. Add Pagination
     if pagination_row: buttons.append(pagination_row)
         
     return buttons
@@ -149,6 +150,7 @@ async def auto_filter(client, message):
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         
+        # ✅ Footer Buttons (Send All Left, Free Premium Right)
         free_prem_btn = [
             InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{message.chat.id}"),
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
@@ -158,7 +160,6 @@ async def auto_filter(client, message):
 
         if mode == 'button':
             buttons = btn_parser(files, message.chat.id, search_id, offset, limit, query)
-            # Arrange function now adds the Trending button
             buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn)
             msg_text = f"⚡ **Results for:** `{query}`\nfound {len(files)} files."
             sent_msg = await message.reply_text(text=msg_text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -175,9 +176,10 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
             
-            # Add Trending Button here too for text mode
+            # Add Trending Button
             btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
             
+            # Pass sort to pagination
             pagination = get_pagination_row(search_id, offset, limit, total_results, active_size=None, active_sort="relevance")
             if pagination: btn.append(pagination)
             
@@ -193,6 +195,7 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
             
+            # Add Trending Button
             btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
 
             pagination = get_pagination_row(search_id, offset, limit, total_results, active_size=None)
@@ -211,6 +214,8 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             
             btn.append(free_prem_btn)
+            
+            # Add Trending Button
             btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
 
             if total_results > 1:
@@ -271,7 +276,7 @@ async def handle_pagination(client, query):
         filter_buttons = get_filter_buttons(search_id, files)
 
         buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, req)
-        # Arrange function automatically adds Trending button
+        # Arrange buttons automatically handles trending insertion
         buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
             
@@ -595,6 +600,7 @@ async def handle_size_menu(client, query):
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
     except: pass
 
+# ✅ NEW: SORT MENU OPENER
 @Client.on_callback_query(filters.regex(r"^sort_menu_"))
 async def handle_sort_menu(client, query):
     try: await query.answer()
@@ -612,7 +618,9 @@ async def handle_sort_menu(client, query):
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
         ]
 
+        # Header Row
         type_buttons = get_type_row(search_id, c_type, c_lang, c_qual, c_year, c_size, c_sort)
+        # Sort Buttons
         sort_buttons = get_sort_buttons(search_id, c_type, c_lang, c_qual, c_year, c_size, c_sort)
         
         middle_buttons = type_buttons + sort_buttons

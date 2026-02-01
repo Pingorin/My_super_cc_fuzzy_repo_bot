@@ -6,17 +6,17 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.ia_filterdb import Media
 from utils import btn_parser, temp
 
-# ✅ CONFIG (Add TMDB_API_KEY to your env variables or info.py)
-# If you don't have one, get it from https://www.themoviedb.org/documentation/api
+# ✅ CONFIG (Add TMDB_API_KEY to your info.py for better limits)
 try:
     from info import TMDB_API_KEY
 except ImportError:
-    TMDB_API_KEY = "b2866c1b35bc5156a64d603a11977755" # Default fallback key (Public Test Key)
+    # Public Test Key (Use your own if this hits limits)
+    TMDB_API_KEY = "b2866c1b35bc5156a64d603a11977755" 
 
 logger = logging.getLogger(__name__)
 
-# ✅ IN-MEMORY CACHE
-# Structure: {'last_updated': timestamp, 'data': [list_of_movies]}
+# ✅ IN-MEMORY CACHE (RAM Optimized)
+# Structure: {'last_updated': timestamp, 'data': [list_of_30_items]}
 TRENDING_CACHE = {
     'last_updated': 0,
     'data': []
@@ -70,7 +70,7 @@ async def get_trending_data():
                         title = item.get('name')
                         date = item.get('first_air_date', '')
                     else:
-                        continue # Skip people/other
+                        continue 
 
                     # Extract Year
                     year = date.split('-')[0] if date else "N/A"
@@ -107,7 +107,7 @@ async def trending_menu_handler(client, query):
     trending_data = await get_trending_data()
     
     if not trending_data:
-        return await query.answer("❌ Could not fetch trending data.", show_alert=True)
+        return await query.answer("❌ Could not fetch trending data. Try again later.", show_alert=True)
 
     ITEMS_PER_PAGE = 10
     total_items = len(trending_data)
@@ -131,6 +131,7 @@ async def trending_menu_handler(client, query):
     for i, item in enumerate(current_items):
         rank = start + i + 1
         btn_text = f"{rank}. {item['title']} ({item['year']})"
+        # Callback triggers the search handler below
         buttons.append([InlineKeyboardButton(btn_text, callback_data=f"search#{item['title']}")])
         
     # Navigation Buttons
@@ -145,9 +146,8 @@ async def trending_menu_handler(client, query):
         
     buttons.append(nav_row)
     
-    # Go Back (Return to main filtering if possible, or just delete)
-    # Since we don't track previous search state easily here, we just close or show a static back
-    buttons.append([InlineKeyboardButton("🔙 Go Back", callback_data="close_data")])
+    # Go Back (Deletes the menu to return to chat)
+    buttons.append([InlineKeyboardButton("❌ Close", callback_data="close_data")])
     
     try:
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -164,22 +164,21 @@ async def search_from_trending(client, query):
     movie_name = query.data.split("#")[1]
     chat_id = query.message.chat.id
     
-    # Search DB
+    # 1. Search Database
     files = await Media.get_search_results(movie_name)
     
     if not files:
-        return await query.answer("😕 No files found for this movie.", show_alert=True)
+        return await query.answer(f"😕 No files found for: {movie_name}", show_alert=True)
     
-    # Use existing btn_parser from utils.py
-    # We create a new "Search ID" effectively by generating buttons
-    # Note: This is a "Quick Search", it won't be cached in the filter pagination system 
-    # unless we fully replicate auto_filter logic. For simplicity, we show the first page.
+    # 2. Generate Result Buttons
+    # We use limit=10 (Page 1) directly. Pagination inside this view is complex, 
+    # so we just show the top results for quick access.
     
     buttons = btn_parser(files, chat_id, movie_name, offset=0, limit=10, query=movie_name)
     
-    # Add a Footer
-    buttons.append([InlineKeyboardButton("🔙 Back to Trending", callback_data="trend_list#0")])
+    # 3. Add "Back to Trending" Footer
+    buttons.append([InlineKeyboardButton("🔙 Back to Trending List", callback_data="trend_list#0")])
     
-    text = f"⚡ **Results for:** `{movie_name}`\nfound {len(files)} files."
+    text = f"👻 **Results for:** `{movie_name}`\nfound {len(files)} files."
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))

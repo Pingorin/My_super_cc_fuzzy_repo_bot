@@ -172,14 +172,9 @@ async def search_from_trending(client, query):
         final_markup = []
         # Files first
         for row in file_buttons:
-            # btn_parser returns list of lists or list of buttons, checking structure:
             if isinstance(row, list): final_markup.append(row)
             else: final_markup.append([row])
             
-        # Pagination row logic is inside btn_parser usually, but if not:
-        # We need to manually construct the layout to match arrange_buttons logic
-        # Since we can't import arrange_buttons easily without conflicts, we rebuild it here:
-        
         # Filters
         if filter_buttons:
             for row in filter_buttons: final_markup.append(row)
@@ -188,8 +183,8 @@ async def search_from_trending(client, query):
         if howto_btn: final_markup.append(howto_btn)
         final_markup.append(free_prem_btn)
         
-        # Back to Trending
-        final_markup.append([InlineKeyboardButton("🔙 Back to Trending List", callback_data="trend_list#0")])
+        # ✅ UPDATED: Show "Today Popular Movies" instead of "Back to Trending"
+        final_markup.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
 
         msg_text = f"⚡ **Results for:** `{movie_name}`\nfound {len(files)} files."
         
@@ -214,13 +209,14 @@ async def search_from_trending(client, query):
         pagination = get_pagination_row(search_id, 0, limit, len(files), active_sort="relevance")
         if pagination: btn.append(pagination)
         
-        btn.append([InlineKeyboardButton("🔙 Back to Trending List", callback_data="trend_list#0")])
+        # ✅ UPDATED: Show "Today Popular Movies" instead of "Back to Trending"
+        btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
         
         # Edit Message (Disable web preview for cleaner look)
         await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn))
     
     else:
-        # Fallback for Card/Site modes if needed (Simplified to Button for now)
+        # Fallback for Card/Site modes
         buttons = btn_parser(files, chat_id, search_id, 0, limit, movie_name)
-        buttons.append([InlineKeyboardButton("🔙 Back to Trending List", callback_data="trend_list#0")])
+        buttons.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
         await query.message.edit_text(f"⚡ **Results for:** `{movie_name}`", reply_markup=InlineKeyboardMarkup(buttons))

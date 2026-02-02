@@ -592,3 +592,26 @@ async def check_fsub_4_status(bot, user_id, grp_id=None):
     if not id_4: return "MEMBER", None 
     status = await _get_fsub_status(bot, user_id, id_4)
     return status, id_4
+
+# ✅ NEW HELPER FUNCTION FOR BUTTON ARRANGEMENT
+def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn, search_id):
+    pagination_row = []
+    if len(files) > limit:
+        pagination_row = buttons.pop() 
+    
+    if filter_buttons:
+        for row in filter_buttons:
+            buttons.append(row)
+    
+    if howto_btn: buttons.append(howto_btn)
+    
+    # 1. Add Send All | Free Premium Row
+    if free_prem_btn: buttons.append(free_prem_btn)
+    
+    # 2. Add Trending Button (Pass search_id)
+    buttons.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
+    
+    # 3. Add Pagination
+    if pagination_row: buttons.append(pagination_row)
+        
+    return buttons

@@ -56,7 +56,8 @@ async def auto_delete_task(bot_message, user_message, delay, show_thanks, query=
 # ==============================================================================
 # 🛠️ HELPER: ARRANGE BUTTONS
 # ==============================================================================
-def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn):
+# ✅ MODIFIED: Added search_id argument to pass previous state
+def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn, search_id):
     pagination_row = []
     if len(files) > limit:
         pagination_row = buttons.pop() 
@@ -70,8 +71,8 @@ def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_
     # 1. Add Send All | Free Premium Row
     if free_prem_btn: buttons.append(free_prem_btn)
     
-    # 2. Add Trending Button (New Line)
-    buttons.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
+    # 2. Add Trending Button (New Line) with Search ID for "Go Back" logic
+    buttons.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
     
     # 3. Add Pagination
     if pagination_row: buttons.append(pagination_row)
@@ -150,7 +151,7 @@ async def auto_filter(client, message):
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         
-        # ✅ Footer Buttons (Send All Left, Free Premium Right)
+        # ✅ Footer Buttons
         free_prem_btn = [
             InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{message.chat.id}"),
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
@@ -160,7 +161,8 @@ async def auto_filter(client, message):
 
         if mode == 'button':
             buttons = btn_parser(files, message.chat.id, search_id, offset, limit, query)
-            buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn)
+            # Passed search_id here
+            buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn, search_id)
             msg_text = f"⚡ **Results for:** `{query}`\nfound {len(files)} files."
             sent_msg = await message.reply_text(text=msg_text, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -176,8 +178,8 @@ async def auto_filter(client, message):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn)
             
-            # Add Trending Button
-            btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
+            # Add Trending Button with Search ID
+            btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
             
             # Pass sort to pagination
             pagination = get_pagination_row(search_id, offset, limit, total_results, active_size=None, active_sort="relevance")
@@ -196,7 +198,7 @@ async def auto_filter(client, message):
             btn.append(free_prem_btn)
             
             # Add Trending Button
-            btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
+            btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
 
             pagination = get_pagination_row(search_id, offset, limit, total_results, active_size=None)
             if pagination: btn.append(pagination)
@@ -216,7 +218,7 @@ async def auto_filter(client, message):
             btn.append(free_prem_btn)
             
             # Add Trending Button
-            btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
+            btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
 
             if total_results > 1:
                 btn.append([
@@ -276,8 +278,8 @@ async def handle_pagination(client, query):
         filter_buttons = get_filter_buttons(search_id, files)
 
         buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, req)
-        # Arrange buttons automatically handles trending insertion
-        buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn)
+        # Passed search_id
+        buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn, search_id)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
             
     except FloodWait as e:
@@ -436,7 +438,7 @@ async def handle_combined_filter(client, query):
                 msg_text = f"⚡ **Results for:** `{req}`\nfound {len(final_files)} files."
                 buttons = btn_parser(final_files, query.message.chat.id, search_id, offset, limit, req)
                 
-            buttons = arrange_buttons(buttons, final_files, limit, filter_buttons, howto_btn, free_prem_btn)
+            buttons = arrange_buttons(buttons, final_files, limit, filter_buttons, howto_btn, free_prem_btn, search_id)
             await query.message.edit_text(text=msg_text, reply_markup=InlineKeyboardMarkup(buttons))
             
         elif mode in ['text', 'detailed']:
@@ -453,8 +455,8 @@ async def handle_combined_filter(client, query):
             if howto_btn: btn.append(howto_btn)
             btn.append(free_prem_btn) 
             
-            # Add Trending here
-            btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
+            # Add Trending here with search ID
+            btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
             
             pagination = get_pagination_row(search_id, offset, limit, len(final_files), active_filter=pass_type, active_lang=pass_lang, active_qual=pass_qual, active_year=pass_year, active_size=pass_size, active_sort=pass_sort)
             if pagination: btn.append(pagination)
@@ -502,7 +504,8 @@ async def handle_language_menu(client, query):
         lang_buttons = get_language_buttons(search_id, files, active_type=pt, active_qual=pq, active_year=c_year, active_size=c_size, active_lang=c_lang, active_sort=ps) 
         middle_buttons = type_buttons + lang_buttons
         
-        buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn)
+        # Pass Search ID
+        buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn, search_id)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
     except: pass
 
@@ -536,7 +539,7 @@ async def handle_quality_menu(client, query):
         qual_buttons = get_quality_buttons(search_id, files, active_type=pt, active_lang=pl, active_year=c_year, active_size=c_size, active_qual=c_qual, active_sort=ps)
         middle_buttons = type_buttons + qual_buttons
         
-        buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn)
+        buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn, search_id)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
     except: pass
 
@@ -571,7 +574,7 @@ async def handle_year_menu(client, query):
         year_buttons = get_year_buttons(search_id, files, active_type=pt, active_lang=pl, active_qual=pq, active_size=c_size, active_year=c_year, active_sort=ps)
         middle_buttons = type_buttons + year_buttons
         
-        buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn)
+        buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn, search_id)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
     except: pass
 
@@ -596,7 +599,7 @@ async def handle_size_menu(client, query):
         size_buttons = get_size_buttons(search_id, active_type=c_type, active_lang=c_lang, active_qual=c_qual, active_year=c_year, active_size=c_size, active_sort=c_sort)
         middle_buttons = type_buttons + size_buttons
         
-        buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn)
+        buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn, search_id)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
     except: pass
 
@@ -624,7 +627,7 @@ async def handle_sort_menu(client, query):
         sort_buttons = get_sort_buttons(search_id, c_type, c_lang, c_qual, c_year, c_size, c_sort)
         
         middle_buttons = type_buttons + sort_buttons
-        buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn)
+        buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn, search_id)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
     except Exception as e:
         logger.error(f"Sort Menu Error: {e}")
@@ -676,12 +679,14 @@ async def card_next_nav(client, query):
         btn.append([InlineKeyboardButton("📂 Get File", url=f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}")])
         if howto_url: btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
         
+        # Swapped Position in Card Mode as well
         btn.append([
             InlineKeyboardButton("📂 Send All", url=f"https://t.me/{temp.U_NAME}?start=sendall_{search_id}_{chat_id}"),
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
         ])
-        
-        btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
+
+        # Trending Button in Card Mode
+        btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
 
         nav_row = []
         if next_index > 0: nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{search_id}_{next_index}"))
@@ -723,7 +728,7 @@ async def card_prev_nav(client, query):
             InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")
         ])
         
-        btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
+        btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
 
         nav_row = []
         if prev_index > 0: nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"card_prev_{search_id}_{prev_index}"))

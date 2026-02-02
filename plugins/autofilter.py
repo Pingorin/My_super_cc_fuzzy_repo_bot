@@ -12,10 +12,11 @@ from database.users_chats_db import db
 from info import SITE_URL
 from cachetools import TTLCache 
 
-# ✅ Utils Imports
+# ✅ Utils Imports (Now includes arrange_buttons)
 from utils import (
     temp, btn_parser, format_text_results, format_detailed_results, 
     format_card_result, get_pagination_row, get_filter_buttons, 
+    arrange_buttons, # <--- IMPORTED FROM UTILS
     get_language_buttons, get_quality_buttons, get_year_buttons,
     get_size_buttons, get_sort_buttons, filter_by_type, filter_by_lang, filter_by_quality, 
     filter_by_year, filter_by_size
@@ -53,31 +54,7 @@ async def auto_delete_task(bot_message, user_message, delay, show_thanks, query=
             await temp_msg.delete()
     except: pass
 
-# ==============================================================================
-# 🛠️ HELPER: ARRANGE BUTTONS (UPDATED to accept search_id)
-# ==============================================================================
-def arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn, search_id):
-    pagination_row = []
-    if len(files) > limit:
-        pagination_row = buttons.pop() 
-    
-    if filter_buttons:
-        for row in filter_buttons:
-            buttons.append(row)
-    
-    if howto_btn: buttons.append(howto_btn)
-    
-    # 1. Add Send All | Free Premium Row
-    if free_prem_btn: buttons.append(free_prem_btn)
-    
-    # 2. Add Trending Button (Pass search_id here!)
-    # Format: trend_list#{page}#{prev_search_id}
-    buttons.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
-    
-    # 3. Add Pagination
-    if pagination_row: buttons.append(pagination_row)
-        
-    return buttons
+# ✅ NOTE: arrange_buttons function removed from here (It is now in utils.py)
 
 # ✅ HELPER: Get "Video | Docs" Row
 def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_size, curr_sort):

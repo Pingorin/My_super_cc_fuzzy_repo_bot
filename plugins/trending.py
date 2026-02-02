@@ -80,8 +80,13 @@ async def get_trending_data():
 @Client.on_callback_query(filters.regex(r"^trend_list#"))
 async def trending_menu_handler(client, query):
     try:
-        page = int(query.data.split("#")[1])
-    except: page = 0
+        data = query.data.split("#")
+        page = int(data[1])
+        # ✅ EXTRACT PREVIOUS SEARCH ID (IF EXISTS)
+        prev_search_id = int(data[2]) if len(data) > 2 else 0
+    except: 
+        page = 0
+        prev_search_id = 0
     
     trending_data = await get_trending_data()
     
@@ -109,12 +114,24 @@ async def trending_menu_handler(client, query):
         buttons.append([InlineKeyboardButton(btn_text, callback_data=f"search#{item['title']}")])
         
     nav_row = []
-    if page > 0: nav_row.append(InlineKeyboardButton("⬅️ Back", callback_data=f"trend_list#{page-1}"))
+    # ✅ PASS PREV ID TO NAVIGATION BUTTONS TOO
+    if page > 0: 
+        nav_row.append(InlineKeyboardButton("⬅️ Back", callback_data=f"trend_list#{page-1}#{prev_search_id}"))
+        
     nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="ignore"))
-    if end < total_items: nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"trend_list#{page+1}"))
+    
+    if end < total_items: 
+        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"trend_list#{page+1}#{prev_search_id}"))
         
     if nav_row: buttons.append(nav_row)
-    buttons.append([InlineKeyboardButton("❌ Close", callback_data="close_data")])
+    
+    # ✅ GO BACK BUTTON LOGIC
+    if prev_search_id != 0:
+        # Calls Autofilter Pagination Handler (Restores previous search)
+        buttons.append([InlineKeyboardButton("🔙 Go Back", callback_data=f"page_{prev_search_id}_0")])
+    else:
+        # Fallback if no history (e.g. triggered via command)
+        buttons.append([InlineKeyboardButton("❌ Close", callback_data="close_data")])
     
     try:
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -183,8 +200,8 @@ async def search_from_trending(client, query):
         if howto_btn: final_markup.append(howto_btn)
         final_markup.append(free_prem_btn)
         
-        # ✅ UPDATED: Show "Today Popular Movies" instead of "Back to Trending"
-        final_markup.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
+        # ✅ Show Trending Button (With CURRENT Search ID for looping history)
+        final_markup.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
 
         msg_text = f"⚡ **Results for:** `{movie_name}`\nfound {len(files)} files."
         
@@ -209,14 +226,14 @@ async def search_from_trending(client, query):
         pagination = get_pagination_row(search_id, 0, limit, len(files), active_sort="relevance")
         if pagination: btn.append(pagination)
         
-        # ✅ UPDATED: Show "Today Popular Movies" instead of "Back to Trending"
-        btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
+        # ✅ Show Trending Button (With CURRENT Search ID)
+        btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
         
         # Edit Message (Disable web preview for cleaner look)
         await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn))
     
     else:
-        # Fallback for Card/Site modes
+        # Fallback for Card/Site modes if needed (Simplified to Button for now)
         buttons = btn_parser(files, chat_id, search_id, 0, limit, movie_name)
-        buttons.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")])
+        buttons.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
         await query.message.edit_text(f"⚡ **Results for:** `{movie_name}`", reply_markup=InlineKeyboardMarkup(buttons))

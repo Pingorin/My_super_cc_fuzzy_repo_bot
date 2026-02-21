@@ -12,36 +12,48 @@ logger = logging.getLogger(__name__)
 
 @Client.on_message(filters.command("broadcast") & filters.user(ADMINS))
 async def broadcast_handler(client, message):
-    # 1. Check if replying to a message
     if not message.reply_to_message:
-        return await message.reply("⚠️ **Error:** Jis message ko broadcast karna hai, uspar reply karke `/broadcast` likhein.")
+        return await message.reply("⚠️ **Error:** Jis message ko bhejna hai, uspar reply karke `/broadcast` likhein.")
 
     msg_to_broadcast = message.reply_to_message
-
-    # 2. Progress Message
-    status_msg = await message.reply("🔄 **Database se users fetch kar raha hoon...**")
-
-    # ==================================================================
-    # ✅ REAL DATABASE FETCH LOGIC
-    # ==================================================================
+    
     all_users = []
-    try:
-        # MongoDB ki 'users' collection se saari IDs nikalna
-        async for user in db.users.find({"id": {"$exists": True}}):
-            all_users.append(user['id'])
-    except Exception as e:
-        return await status_msg.edit_text(f"❌ Database Error: {e}")
-        
-    total_users = len(all_users)
+    
     # ==================================================================
+    # 🎯 TARGET SELECTION LOGIC
+    # ==================================================================
+    
+    # 1. Agar specific IDs di gayi hain (e.g., /broadcast 1234567 8901234)
+    if len(message.command) > 1:
+        for user_id in message.command[1:]:
+            try:
+                all_users.append(int(user_id))
+            except ValueError:
+                continue # Agar galti se text type ho gaya ho toh ignore karega
+                
+        if not all_users:
+            return await message.reply("❌ Koi valid User ID nahi mili. Kripya sahi ID space dekar daalein.")
+            
+        status_msg = await message.reply(f"🔄 **{len(all_users)} Specific Users ko message bhej raha hoon...**")
+        
+    # 2. Agar koi ID nahi di, toh Database se ALL USERS nikalega
+    else:
+        status_msg = await message.reply("🔄 **Database se sabhi users fetch kar raha hoon...**")
+        try:
+            async for user in db.users.find({"id": {"$exists": True}}):
+                all_users.append(user['id'])
+        except Exception as e:
+            return await status_msg.edit_text(f"❌ Database Error: {e}")
 
+    # ==================================================================
+    
+    total_users = len(all_users)
     if total_users == 0:
-        return await status_msg.edit_text("❌ Database mein koi user nahi mila.")
+        return await status_msg.edit_text("❌ Koi user nahi mila.")
 
-    # 3. Update Status
     await status_msg.edit_text(
         f"⏳ **Broadcast Started!**\n\n"
-        f"👥 Total Users: `{total_users}`\n"
+        f"👥 Target Users: `{total_users}`\n"
         f"✅ Sent: `0`\n"
         f"❌ Failed: `0`"
     )
@@ -50,30 +62,26 @@ async def broadcast_handler(client, message):
     failed = 0
     start_time = time.time()
 
-    # 4. Broadcast Loop
+    # Broadcast Loop
     for user_id in all_users:
         while True:
             try:
-                # ✅ .copy() ka use (Bina 'Forwarded' tag ke message jayega)
+                # .copy() se clean message jayega
                 await msg_to_broadcast.copy(chat_id=int(user_id))
                 sent += 1
-                break  # Success! Next user par jao
-                
+                break
             except FloodWait as e:
-                # 🛑 Agar Telegram limit lagaye, to bot automatically wait karega
                 await asyncio.sleep(e.value + 1)
-                
-            except Exception as e:
-                # ❌ User ne bot block kar diya, delete ho gaya, etc.
+            except Exception:
                 failed += 1
-                break  # Failed! Next user par jao
+                break
                 
-        # 5. Har 20 messages ke baad progress update (Taki limit na lage)
+        # Har 20 messages par UI update
         if (sent + failed) % 20 == 0:
             try:
                 await status_msg.edit_text(
                     f"🔄 **Broadcasting...**\n\n"
-                    f"👥 Total Users: `{total_users}`\n"
+                    f"👥 Target Users: `{total_users}`\n"
                     f"✅ Sent: `{sent}`\n"
                     f"❌ Failed: `{failed}`\n"
                     f"📈 Progress: `{round((sent + failed) / total_users * 100, 2)}%`"
@@ -85,17 +93,15 @@ async def broadcast_handler(client, message):
             except Exception:
                 pass
 
-        # Message bhejne ke beech thoda delay (Telegram limits se bachne ke liye)
         await asyncio.sleep(0.05)
 
-    # 6. Final Status Update
     time_taken = round(time.time() - start_time, 2)
     
     try:
         await status_msg.edit_text(
-            f"✅ **Broadcast Completed Successfully!**\n\n"
+            f"✅ **Broadcast Completed!**\n\n"
             f"⏱ Time Taken: `{time_taken} seconds`\n"
-            f"👥 Total Users: `{total_users}`\n"
+            f"👥 Target Users: `{total_users}`\n"
             f"✅ Successfully Sent: `{sent}`\n"
             f"❌ Failed/Blocked: `{failed}`"
         )

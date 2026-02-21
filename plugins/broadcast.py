@@ -10,8 +10,31 @@ from database.users_chats_db import db
 
 logger = logging.getLogger(__name__)
 
-@Client.on_message(filters.command("broadcast") & filters.user(ADMINS))
+# 🛑 Yahan se `& filters.user(ADMINS)` hata diya taaki bot kam se kam reply zaroor kare
+@Client.on_message(filters.command("broadcast"))
 async def broadcast_handler(client, message):
+    
+    # ==================================================================
+    # 🔒 ADMIN CHECK LOGIC (FIXED)
+    # ==================================================================
+    user_id = message.from_user.id
+    
+    # ADMINS list ko force karke Integer (Number) mein convert kar rahe hain
+    # (Taki string vs int ka issue hamesha ke liye khatam ho jaye)
+    try:
+        admin_list = [int(admin) for admin in ADMINS if str(admin).isdigit()]
+    except Exception:
+        admin_list = []
+        
+    if user_id not in admin_list:
+        return await message.reply(
+            f"🚫 **Access Denied!**\n\n"
+            f"Aapki User ID: `{user_id}`\n"
+            f"Bot ke paas save ADMINS: `{ADMINS}`\n\n"
+            f"*(Aapki ID aur Bot ki list match nahi kar rahi hai)*"
+        )
+    # ==================================================================
+
     if not message.reply_to_message:
         return await message.reply("⚠️ **Error:** Jis message ko bhejna hai, uspar reply karke `/broadcast` ya `/broadcast <user_id>` likhein.")
 
@@ -23,9 +46,9 @@ async def broadcast_handler(client, message):
     # 🎯 TARGET SELECTION LOGIC
     # ==================================================================
     if len(message.command) > 1:
-        for user_id in message.command[1:]:
+        for u_id in message.command[1:]:
             try:
-                all_users.append(int(user_id))
+                all_users.append(int(u_id))
             except ValueError:
                 continue
                 
@@ -58,22 +81,20 @@ async def broadcast_handler(client, message):
     sent = 0
     failed = 0
     start_time = time.time()
-    last_error = "" # Error save karne ke liye variable
+    last_error = ""
 
     # Broadcast Loop
-    for user_id in all_users:
+    for target_user_id in all_users:
         while True:
             try:
-                # Photo, Video, ya Text copy karke bhejna
-                await msg_to_broadcast.copy(chat_id=int(user_id))
+                await msg_to_broadcast.copy(chat_id=int(target_user_id))
                 sent += 1
                 break
             except FloodWait as e:
                 await asyncio.sleep(e.value + 1)
             except Exception as e:
                 failed += 1
-                last_error = str(e) # Exact error capture karna
-                logger.error(f"Broadcast Failed for {user_id}: {last_error}")
+                last_error = str(e)
                 break
                 
         # Har 20 messages par UI update
@@ -97,7 +118,6 @@ async def broadcast_handler(client, message):
 
     time_taken = round(time.time() - start_time, 2)
     
-    # Agar sirf 1 user ko bheja tha aur wo Fail ho gaya, toh specific Error dikhayega
     if total_users == 1 and failed == 1:
         try:
             await status_msg.edit_text(

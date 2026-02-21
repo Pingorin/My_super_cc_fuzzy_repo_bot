@@ -50,8 +50,8 @@ class Bot(Client):
         
         await super().start()
         
-        # Indexes Ensure Karna 
-        await Media.ensure_indexes()
+        # Indexes Ensure Karna (Background mein taaki Render Time Out na ho)
+        asyncio.create_task(Media.ensure_indexes())   
         
         me = await self.get_me()
         temp.ME = me.id

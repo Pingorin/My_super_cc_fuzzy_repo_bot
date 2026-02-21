@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 @Client.on_message(filters.command("broadcast") & filters.user(ADMINS))
 async def broadcast_handler(client, message):
     if not message.reply_to_message:
-        return await message.reply("⚠️ **Error:** Jis message ko bhejna hai, uspar reply karke `/broadcast` likhein.")
+        return await message.reply("⚠️ **Error:** Jis message ko bhejna hai, uspar reply karke `/broadcast` ya `/broadcast <user_id>` likhein.")
 
     msg_to_broadcast = message.reply_to_message
     
@@ -22,21 +22,18 @@ async def broadcast_handler(client, message):
     # ==================================================================
     # 🎯 TARGET SELECTION LOGIC
     # ==================================================================
-    
-    # 1. Agar specific IDs di gayi hain (e.g., /broadcast 1234567 8901234)
     if len(message.command) > 1:
         for user_id in message.command[1:]:
             try:
                 all_users.append(int(user_id))
             except ValueError:
-                continue # Agar galti se text type ho gaya ho toh ignore karega
+                continue
                 
         if not all_users:
-            return await message.reply("❌ Koi valid User ID nahi mili. Kripya sahi ID space dekar daalein.")
+            return await message.reply("❌ Koi valid User ID nahi mili.")
             
         status_msg = await message.reply(f"🔄 **{len(all_users)} Specific Users ko message bhej raha hoon...**")
         
-    # 2. Agar koi ID nahi di, toh Database se ALL USERS nikalega
     else:
         status_msg = await message.reply("🔄 **Database se sabhi users fetch kar raha hoon...**")
         try:
@@ -61,19 +58,22 @@ async def broadcast_handler(client, message):
     sent = 0
     failed = 0
     start_time = time.time()
+    last_error = "" # Error save karne ke liye variable
 
     # Broadcast Loop
     for user_id in all_users:
         while True:
             try:
-                # .copy() se clean message jayega
+                # Photo, Video, ya Text copy karke bhejna
                 await msg_to_broadcast.copy(chat_id=int(user_id))
                 sent += 1
                 break
             except FloodWait as e:
                 await asyncio.sleep(e.value + 1)
-            except Exception:
+            except Exception as e:
                 failed += 1
+                last_error = str(e) # Exact error capture karna
+                logger.error(f"Broadcast Failed for {user_id}: {last_error}")
                 break
                 
         # Har 20 messages par UI update
@@ -97,13 +97,24 @@ async def broadcast_handler(client, message):
 
     time_taken = round(time.time() - start_time, 2)
     
-    try:
-        await status_msg.edit_text(
-            f"✅ **Broadcast Completed!**\n\n"
-            f"⏱ Time Taken: `{time_taken} seconds`\n"
-            f"👥 Target Users: `{total_users}`\n"
-            f"✅ Successfully Sent: `{sent}`\n"
-            f"❌ Failed/Blocked: `{failed}`"
-        )
-    except Exception:
-        await message.reply(f"✅ **Broadcast Completed!**\nSent: {sent} | Failed: {failed}")
+    # Agar sirf 1 user ko bheja tha aur wo Fail ho gaya, toh specific Error dikhayega
+    if total_users == 1 and failed == 1:
+        try:
+            await status_msg.edit_text(
+                f"❌ **Message Nahi Gaya!**\n\n"
+                f"**Reason:** `{last_error}`\n\n"
+                f"*(Note: Ya toh ye ID galat hai, ya iss user ne aapke bot ko Start/Unblock nahi kiya hai)*"
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            await status_msg.edit_text(
+                f"✅ **Broadcast Completed!**\n\n"
+                f"⏱ Time Taken: `{time_taken} seconds`\n"
+                f"👥 Target Users: `{total_users}`\n"
+                f"✅ Successfully Sent: `{sent}`\n"
+                f"❌ Failed/Blocked: `{failed}`"
+            )
+        except Exception:
+            await message.reply(f"✅ **Broadcast Completed!**\nSent: {sent} | Failed: {failed}")

@@ -4,37 +4,42 @@ import time
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait, MessageNotModified
 from info import ADMINS
-# ✅ Import your database here
-# from database.users_chats_db import db
+
+# ✅ Aapka Database Import
+from database.users_chats_db import db
 
 logger = logging.getLogger(__name__)
 
 @Client.on_message(filters.command("broadcast") & filters.user(ADMINS))
 async def broadcast_handler(client, message):
-    # 1. Check if the admin is replying to a message
+    # 1. Check if replying to a message
     if not message.reply_to_message:
-        return await message.reply("⚠️ **Error:** You must reply to a message to broadcast it.")
+        return await message.reply("⚠️ **Error:** Jis message ko broadcast karna hai, uspar reply karke `/broadcast` likhein.")
 
     msg_to_broadcast = message.reply_to_message
 
+    # 2. Progress Message
+    status_msg = await message.reply("🔄 **Database se users fetch kar raha hoon...**")
+
     # ==================================================================
-    # 🔗 DATABASE INTEGRATION PLACEHOLDER
+    # ✅ REAL DATABASE FETCH LOGIC
     # ==================================================================
-    # Replace this dummy list with your MongoDB fetch logic.
-    # Example using your motor setup: 
-    # all_users = []
-    # async for user in db.users.find({}):
-    #     all_users.append(user['id'])
-    
-    all_users = [123456789, 987654321]  # <--- REPLACE THIS WITH YOUR DB FETCH
+    all_users = []
+    try:
+        # MongoDB ki 'users' collection se saari IDs nikalna
+        async for user in db.users.find({"id": {"$exists": True}}):
+            all_users.append(user['id'])
+    except Exception as e:
+        return await status_msg.edit_text(f"❌ Database Error: {e}")
+        
     total_users = len(all_users)
     # ==================================================================
 
     if total_users == 0:
-        return await message.reply("❌ No users found in the database.")
+        return await status_msg.edit_text("❌ Database mein koi user nahi mila.")
 
-    # 2. Send Initial Progress Message
-    status_msg = await message.reply(
+    # 3. Update Status
+    await status_msg.edit_text(
         f"⏳ **Broadcast Started!**\n\n"
         f"👥 Total Users: `{total_users}`\n"
         f"✅ Sent: `0`\n"
@@ -45,26 +50,25 @@ async def broadcast_handler(client, message):
     failed = 0
     start_time = time.time()
 
-    # 3. Broadcast Loop
+    # 4. Broadcast Loop
     for user_id in all_users:
         while True:
             try:
-                # ✅ .copy() sends media/text cleanly without "Forwarded" tag
+                # ✅ .copy() ka use (Bina 'Forwarded' tag ke message jayega)
                 await msg_to_broadcast.copy(chat_id=int(user_id))
                 sent += 1
-                break  # Break the while loop, move to next user
+                break  # Success! Next user par jao
                 
             except FloodWait as e:
-                # 🛑 API Limit Reached: Sleep for the required time, then loop retries
-                logger.warning(f"FloodWait of {e.value}s encountered. Sleeping...")
+                # 🛑 Agar Telegram limit lagaye, to bot automatically wait karega
                 await asyncio.sleep(e.value + 1)
                 
             except Exception as e:
-                # ❌ User blocked bot, account deleted, or invalid ID
+                # ❌ User ne bot block kar diya, delete ho gaya, etc.
                 failed += 1
-                break  # Break the while loop, move to next user
+                break  # Failed! Next user par jao
                 
-        # 4. Update Progress Message every 20 users to prevent FloodWait on edit
+        # 5. Har 20 messages ke baad progress update (Taki limit na lage)
         if (sent + failed) % 20 == 0:
             try:
                 await status_msg.edit_text(
@@ -81,10 +85,10 @@ async def broadcast_handler(client, message):
             except Exception:
                 pass
 
-        # Small delay to respect general Telegram API limits (~30 msgs per sec max)
+        # Message bhejne ke beech thoda delay (Telegram limits se bachne ke liye)
         await asyncio.sleep(0.05)
 
-    # 5. Final Status Update
+    # 6. Final Status Update
     time_taken = round(time.time() - start_time, 2)
     
     try:
@@ -95,5 +99,5 @@ async def broadcast_handler(client, message):
             f"✅ Successfully Sent: `{sent}`\n"
             f"❌ Failed/Blocked: `{failed}`"
         )
-    except Exception as e:
+    except Exception:
         await message.reply(f"✅ **Broadcast Completed!**\nSent: {sent} | Failed: {failed}")

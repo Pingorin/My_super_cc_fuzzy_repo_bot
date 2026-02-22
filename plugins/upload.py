@@ -14,6 +14,14 @@ TARGET_CHANNEL_ID = -1003719921511  # <--- ISKO CHANGE KARNA MAT BHOOLNA
 UPLOAD_STATES = {}
 USER_LOCKS = {}
 
+# 🗑️ Background Task: Ye function file ko x seconds baad delete karega
+async def delete_after_delay(message: Message, delay: int):
+    await asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
 @Client.on_message(filters.command("admin_upload") & filters.private)
 async def admin_upload_command(client, message: Message):
     user_id = message.from_user.id
@@ -21,7 +29,6 @@ async def admin_upload_command(client, message: Message):
     # User ka naya session start karo
     UPLOAD_STATES[user_id] = {"count": 0, "warned": False}
     
-    # User ke liye ek lock banao taaki files line me lagein
     if user_id not in USER_LOCKS:
         USER_LOCKS[user_id] = asyncio.Lock()
     
@@ -38,7 +45,6 @@ async def receive_and_forward_files(client, message: Message):
     user_id = message.from_user.id
     
     if user_id in UPLOAD_STATES:
-        # Lock check karo
         if user_id not in USER_LOCKS:
             USER_LOCKS[user_id] = asyncio.Lock()
             
@@ -53,29 +59,35 @@ async def receive_and_forward_files(client, message: Message):
                         await message.copy(chat_id=TARGET_CHANNEL_ID)
                         UPLOAD_STATES[user_id]["count"] += 1
                         
-                        # ✅ Limit (20) exactly abhi poori hui hai
+                        # 🗑️ Forward hone ke baad file ko 2 Minute (120 sec) baad delete hone ke liye schedule karna
+                        asyncio.create_task(delete_after_delay(message, 120))
+                        
+                        # ✅ Limit (20) poori hui
                         if UPLOAD_STATES[user_id]["count"] == 20:
                             UPLOAD_STATES[user_id]["warned"] = True
                             await message.reply(
                                 "⚠️ **20 Files Ki Limit Poori Hui!**\n\n"
-                                "Sirf 20 files hi forward ki gayi hain. Baki ki extra files ko ignore kar diya gaya hai.\n\n"
+                                "Sirf 20 files hi forward ki gayi hain. Baki aane wali saari extra files delete kar di jayengi.\n"
+                                "(Forward ki gayi 20 files bhi 2 minute baad chat se hat jayengi)\n\n"
                                 "📅 **Kripya baki ki files Next Day (Agle Din) upload karein.**"
                             )
                         
-                        # Har file bhejne ke baad 1.5 second ka aaram (Delay)
+                        # Delay taaki flood na aaye
                         await asyncio.sleep(1.5)
                         break
                         
                     except FloodWait as e:
-                        # Agar fir bhi limit aati hai, toh bot CHUPCHAP wait karega
                         await asyncio.sleep(e.value + 1)
                         
                     except Exception as e:
                         await message.reply(f"❌ File bhejne me error aaya: `{e}`")
                         break
             else:
-                # 🛑 Limit cross ho chuki hai, extra files ko silent ignore karo
-                pass
+                # 🛑 Limit cross ho chuki hai, extra files ko TURANT DELETE kar do
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
 
 @Client.on_message(filters.command("done") & filters.private)
 async def done_upload(client, message: Message):
@@ -87,6 +99,6 @@ async def done_upload(client, message: Message):
         # Session khatam karna
         del UPLOAD_STATES[user_id]
         
-        await message.reply(f"✅ **Upload Complete!**\n\nTotal `{sent_count}` files successfully channel me bhej di gayi hain.")
+        await message.reply(f"✅ **Upload Complete!**\n\nTotal `{sent_count}` files successfully channel me bhej di gayi hain.\n(Ye files 2 minute baad aapki chat se delete ho jayengi).")
     else:
         await message.reply("❌ Aapka koi upload session active nahi hai. Start karne ke liye `/admin_upload` bhejein.")

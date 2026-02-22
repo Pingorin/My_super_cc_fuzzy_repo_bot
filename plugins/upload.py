@@ -4,17 +4,15 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.errors import FloodWait
 
-logger = logging.getLogger(__name__)
+# ✅ info.py se TARGET_CHANNEL_ID import kar rahe hain
+from info import TARGET_CHANNEL_ID
 
-# ==================================================================
-# ⚙️ SETTINGS: Yahan apne asli Channel ka ID daalein!
-# ==================================================================
-TARGET_CHANNEL_ID = -1003719921511  # <--- ISKO CHANGE KARNA MAT BHOOLNA
+logger = logging.getLogger(__name__)
 
 UPLOAD_STATES = {}
 USER_LOCKS = {}
 
-# 🗑️ Background Task: Ye function file ko x seconds baad delete karega
+# 🗑️ Background Task: File ko 2 minute baad delete karne ke liye
 async def delete_after_delay(message: Message, delay: int):
     await asyncio.sleep(delay)
     try:
@@ -26,8 +24,12 @@ async def delete_after_delay(message: Message, delay: int):
 async def admin_upload_command(client, message: Message):
     user_id = message.from_user.id
     
-    # User ka naya session start karo
-    UPLOAD_STATES[user_id] = {"count": 0, "warned": False}
+    # Agar Channel ID set nahi hai toh error dega
+    if not TARGET_CHANNEL_ID or TARGET_CHANNEL_ID == -100:
+        return await message.reply("❌ **Error:** Kripya pehle `info.py` me `TARGET_CHANNEL_ID` set karein!")
+    
+    # 'received' track karega turant aayi files ko, 'forwarded' track karega jo channel me chali gayi hain
+    UPLOAD_STATES[user_id] = {"received": 0, "forwarded": 0, "warned": False}
     
     if user_id not in USER_LOCKS:
         USER_LOCKS[user_id] = asyncio.Lock()
@@ -45,58 +47,58 @@ async def receive_and_forward_files(client, message: Message):
     user_id = message.from_user.id
     
     if user_id in UPLOAD_STATES:
+        
+        # ✅ STEP 1: Turant Delete Logic (Extra files aate hi gayab)
+        if UPLOAD_STATES[user_id]["received"] >= 20:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            return  
+            
+        UPLOAD_STATES[user_id]["received"] += 1
+        
         if user_id not in USER_LOCKS:
             USER_LOCKS[user_id] = asyncio.Lock()
             
+        # ✅ STEP 2: Forward karne wali Queue
         async with USER_LOCKS[user_id]:
-            current_count = UPLOAD_STATES[user_id]["count"]
-            
-            # Agar 20 se kam files hain, toh forward karo
-            if current_count < 20:
-                while True:
-                    try:
-                        # File channel me copy karna
-                        await message.copy(chat_id=TARGET_CHANNEL_ID)
-                        UPLOAD_STATES[user_id]["count"] += 1
-                        
-                        # 🗑️ Forward hone ke baad file ko 2 Minute (120 sec) baad delete hone ke liye schedule karna
-                        asyncio.create_task(delete_after_delay(message, 120))
-                        
-                        # ✅ Limit (20) poori hui
-                        if UPLOAD_STATES[user_id]["count"] == 20:
-                            UPLOAD_STATES[user_id]["warned"] = True
-                            await message.reply(
-                                "⚠️ **20 Files Ki Limit Poori Hui!**\n\n"
-                                "Sirf 20 files hi forward ki gayi hain. Baki aane wali saari extra files delete kar di jayengi.\n"
-                                "(Forward ki gayi 20 files bhi 2 minute baad chat se hat jayengi)\n\n"
-                                "📅 **Kripya baki ki files Next Day (Agle Din) upload karein.**"
-                            )
-                        
-                        # Delay taaki flood na aaye
-                        await asyncio.sleep(1.5)
-                        break
-                        
-                    except FloodWait as e:
-                        await asyncio.sleep(e.value + 1)
-                        
-                    except Exception as e:
-                        await message.reply(f"❌ File bhejne me error aaya: `{e}`")
-                        break
-            else:
-                # 🛑 Limit cross ho chuki hai, extra files ko TURANT DELETE kar do
+            while True:
                 try:
-                    await message.delete()
-                except Exception:
-                    pass
+                    # File channel me copy karna
+                    await message.copy(chat_id=TARGET_CHANNEL_ID)
+                    UPLOAD_STATES[user_id]["forwarded"] += 1
+                    
+                    # 🗑️ 2 minute (120 seconds) baad delete timer
+                    asyncio.create_task(delete_after_delay(message, 120))
+                    
+                    if UPLOAD_STATES[user_id]["forwarded"] == 20:
+                        UPLOAD_STATES[user_id]["warned"] = True
+                        await message.reply(
+                            "⚠️ **20 Files Ki Limit Poori Hui!**\n\n"
+                            "Sirf 20 files hi forward ki gayi hain. Baki aane wali saari extra files delete kar di gayi hain.\n"
+                            "(Forward ki gayi 20 files bhi 2 minute baad chat se hat jayengi)\n\n"
+                            "📅 **Kripya baki ki files Next Day (Agle Din) upload karein.**"
+                        )
+                    
+                    # 1.5 seconds wait karna taaki API Flood limit na aaye
+                    await asyncio.sleep(1.5)
+                    break
+                    
+                except FloodWait as e:
+                    await asyncio.sleep(e.value + 1)
+                    
+                except Exception as e:
+                    await message.reply(f"❌ File bhejne me error aaya: `{e}`")
+                    break
 
 @Client.on_message(filters.command("done") & filters.private)
 async def done_upload(client, message: Message):
     user_id = message.from_user.id
     
     if user_id in UPLOAD_STATES:
-        sent_count = UPLOAD_STATES[user_id]["count"]
+        sent_count = UPLOAD_STATES[user_id]["forwarded"]
         
-        # Session khatam karna
         del UPLOAD_STATES[user_id]
         
         await message.reply(f"✅ **Upload Complete!**\n\nTotal `{sent_count}` files successfully channel me bhej di gayi hain.\n(Ye files 2 minute baad aapki chat se delete ho jayengi).")

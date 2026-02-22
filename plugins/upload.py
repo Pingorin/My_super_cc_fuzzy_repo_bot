@@ -7,9 +7,10 @@ from pyrogram.errors import FloodWait
 logger = logging.getLogger(__name__)
 
 # ==================================================================
-# ⚙️ SETTINGS: Yahan apne Channel ka ID daalein
+# ⚙️ SETTINGS: Yahan apne asli Channel ka ID daalein!
+# (Channel ID hamesha -100 se shuru hota hai)
 # ==================================================================
-TARGET_CHANNEL_ID = -1001234567890 
+TARGET_CHANNEL_ID = -1003719921511  # <--- ISKO CHANGE KARNA MAT BHOOLNA
 
 UPLOAD_STATES = {}
 
@@ -17,62 +18,66 @@ UPLOAD_STATES = {}
 async def admin_upload_command(client, message: Message):
     user_id = message.from_user.id
     
-    # User ka naya session start karo (Count = 0)
-    UPLOAD_STATES[user_id] = 0
+    # User ka naya session start karo: count = 0, aur warned = False
+    UPLOAD_STATES[user_id] = {"count": 0, "warned": False}
     
     await message.reply(
         "📤 **Upload Mode Activated!**\n\n"
         "Ab aap mujhe yahan files bhej sakte hain.\n"
         "Main unhe automatically Target Channel me bhej dunga.\n\n"
         "⚠️ **Limit:** Ek baar me maximum 20 files.\n"
-        "🛑 Jab saari files bhej dein, toh `/done` type karein."
+        "🛑 Jab complete ho jaye, toh `/done` type karein."
     )
 
 @Client.on_message(filters.media & filters.private)
 async def receive_and_forward_files(client, message: Message):
     user_id = message.from_user.id
     
-    # Check karna ki kya user upload mode me hai
     if user_id in UPLOAD_STATES:
-        current_count = UPLOAD_STATES[user_id]
+        current_count = UPLOAD_STATES[user_id]["count"]
+        has_warned = UPLOAD_STATES[user_id]["warned"]
         
-        # 20 File ki limit check karna
+        # Agar 20 se kam files hain, toh forward karo
         if current_count < 20:
-            
-            # ✅ ERROR HANDLING & RETRY LOOP
             while True:
                 try:
                     # File channel me copy karna
                     await message.copy(chat_id=TARGET_CHANNEL_ID)
-                    UPLOAD_STATES[user_id] += 1
-                    break  # Success ho gaya, loop se bahar niklo
+                    UPLOAD_STATES[user_id]["count"] += 1
+                    
+                    # Agar limit (20) exactly abhi poori hui hai
+                    if UPLOAD_STATES[user_id]["count"] == 20:
+                        UPLOAD_STATES[user_id]["warned"] = True
+                        await message.reply(
+                            "⚠️ **Limit Poori Hui!**\n\n"
+                            "Sirf 20 file hi forward ki jayegi baki file ko forward nahi kiya gaya hai.\n"
+                            "Naya session start karne ke liye pehle `/done` bhejein aur wapas `/admin_upload` karein."
+                        )
+                    break
                     
                 except FloodWait as e:
-                    # Telegram ne roka hai, wait karega
                     wait_time = e.value
-                    warning_msg = await message.reply(f"⏳ **Telegram Limit!** Bot {wait_time} seconds ke liye ruk raha hai. Kripya wait karein...")
+                    warning_msg = await message.reply(f"⏳ **Telegram Limit!** Bot {wait_time} seconds ke liye ruk raha hai...")
                     await asyncio.sleep(wait_time + 1)
                     try:
-                        await warning_msg.delete() # Wait khatam hone ke baad warning message hata dega
+                        await warning_msg.delete()
                     except:
                         pass
-                    # Loop wapas shuru hoga aur file ko phir try karega
-                    
                 except Exception as e:
-                    await message.reply(f"❌ File bhejne me error aaya: `{e}`")
+                    await message.reply(f"❌ File bhejne me error aaya: `{e}`\n(Check karo ki TARGET_CHANNEL_ID sahi hai ya nahi!)")
                     break
+                    
         else:
-            # 20 ki limit cross hone par session close karna
-            await message.reply("⚠️ **Limit Reached!**\nAapne 20 files bhej di hain. Session close kiya jaa raha hai.")
-            if user_id in UPLOAD_STATES:
-                del UPLOAD_STATES[user_id]
+            # Agar limit pehle hi cross ho chuki hai (jaise bachi hui 30 files aayengi), 
+            # toh bot spam nahi karega. Chupchap ignore kar dega.
+            pass
 
 @Client.on_message(filters.command("done") & filters.private)
 async def done_upload(client, message: Message):
     user_id = message.from_user.id
     
     if user_id in UPLOAD_STATES:
-        sent_count = UPLOAD_STATES[user_id]
+        sent_count = UPLOAD_STATES[user_id]["count"]
         
         # Session khatam karna
         del UPLOAD_STATES[user_id]

@@ -24,6 +24,9 @@ LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0"))
 PORT = int(os.environ.get("PORT", "8080"))
 CHANNELS = [int(ch) for ch in os.environ.get("CHANNELS", "0").split()] if os.environ.get("CHANNELS") else []
 
+# Yahan -1001234567890 ki jagah apna asli Channel ID daalein
+TARGET_CHANNEL_ID = int(environ.get("TARGET_CHANNEL_ID", "-1003719921511"))
+
 # ✅ SITE URL (REQUIRED FOR SITE MODE)
 # Render/Heroku users must set this in Environment Variables (e.g., https://my-app.onrender.com)
 # Do not add a trailing slash (/) at the end.

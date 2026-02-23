@@ -20,11 +20,11 @@ async def delete_after_delay(message: Message, delay: int):
     except Exception:
         pass
 
-# ⏱️ Auto-Close Timer: 10 second inactivity par session band karega
+# ⏱️ Auto-Close Timer: 30 second inactivity par session band karega
 async def auto_close_upload(client, message: Message, user_id: int):
-    await asyncio.sleep(10) # 10 seconds wait karega
+    await asyncio.sleep(30) # Ab 30 seconds wait karega
     
-    # Agar 10 second baad bhi session active hai, toh use automatically close kar do
+    # Agar 30 second baad bhi session active hai, toh use automatically close kar do
     if user_id in UPLOAD_STATES:
         sent_count = UPLOAD_STATES[user_id]["forwarded"]
         status_msg = UPLOAD_STATES[user_id]["status_msg"]
@@ -70,26 +70,33 @@ async def admin_upload_command(client, message: Message):
     
     await message.reply(
         "📤 **Upload Mode Activated!**\n\n"
-        "🎥 **Sirf Videos** bhej sakte hain (Photo, Sticker, Text ignore honge).\n"
+        "🎥 **Sirf Videos** bhej sakte hain (Photo, Sticker, Text aate hi delete ho jayenge).\n"
         "Main unhe automatically Target Channel me bhej dunga.\n\n"
         "⚠️ **Limit:** Ek baar me maximum 20 Videos.\n"
-        "*(Aapko koi Done command bhejne ki zaroorat nahi hai, 10 second wait karne par bot apne aap session close kar dega)*"
+        "*(Aapko koi command dene ki zaroorat nahi hai, 30 second wait karne par bot apne aap session close kar dega)*"
     )
 
 @Client.on_message(filters.private & ~filters.command(["admin_upload"]))
 async def receive_and_forward_files(client, message: Message):
     user_id = message.from_user.id
     
+    # Agar session chal raha hai
     if user_id in UPLOAD_STATES:
         
-        # ✅ STEP 1: Sirf Video Filter
+        # ✅ STEP 1: Sirf Video Filter (Ab Album me bhi strong delete karega)
         if not (message.video or message.document):
-            asyncio.create_task(message.delete()) 
+            try:
+                await message.delete()
+            except Exception:
+                pass
             return
             
         # ✅ STEP 2: Limit check (20 se zyada aate hi turant delete)
         if UPLOAD_STATES[user_id]["received"] >= 20:
-            asyncio.create_task(message.delete()) 
+            try:
+                await message.delete()
+            except Exception:
+                pass
             return  
             
         UPLOAD_STATES[user_id]["received"] += 1
@@ -147,9 +154,14 @@ async def receive_and_forward_files(client, message: Message):
                     await message.reply(f"❌ Error: `{e}`")
                     break
 
-        # ✅ STEP 5: Har file forward hone ke baad 10 second ka naya timer start karo
+        # ✅ STEP 5: Har file forward hone ke baad 30 second ka naya timer start karo
         if user_id in UPLOAD_STATES:
             if UPLOAD_STATES[user_id]["timer"]:
                 UPLOAD_STATES[user_id]["timer"].cancel() # Purana timer cancel
-            # Naya 10 second ka timer lagao
+            # Naya 30 second ka timer lagao
             UPLOAD_STATES[user_id]["timer"] = asyncio.create_task(auto_close_upload(client, message, user_id))
+            
+    # Agar user bina /admin_upload ke direct media bhej de
+    else:
+        if message.media:
+            await message.reply("❌ **Upload session active nahi hai!**\nPehle `/admin_upload` bhejein, fir videos upload karein.")

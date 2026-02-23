@@ -20,11 +20,11 @@ async def delete_after_delay(message: Message, delay: int):
     except Exception:
         pass
 
-# ⏱️ Auto-Close Timer: 30 second inactivity par session band karega
+# ⏱️ Auto-Close Timer: 5 second inactivity par session band karega
 async def auto_close_upload(client, message: Message, user_id: int):
-    await asyncio.sleep(30) # Ab 30 seconds wait karega
+    await asyncio.sleep(5) # Ab 5 seconds wait karega
     
-    # Agar 30 second baad bhi session active hai, toh use automatically close kar do
+    # Agar 5 second baad bhi session active hai, toh use automatically close kar do
     if user_id in UPLOAD_STATES:
         sent_count = UPLOAD_STATES[user_id]["forwarded"]
         status_msg = UPLOAD_STATES[user_id]["status_msg"]
@@ -73,7 +73,7 @@ async def admin_upload_command(client, message: Message):
         "🎥 **Sirf Videos** bhej sakte hain (Photo, Sticker, Text aate hi delete ho jayenge).\n"
         "Main unhe automatically Target Channel me bhej dunga.\n\n"
         "⚠️ **Limit:** Ek baar me maximum 20 Videos.\n"
-        "*(Aapko koi command dene ki zaroorat nahi hai, 30 second wait karne par bot apne aap session close kar dega)*"
+        "*(Aapko koi command dene ki zaroorat nahi hai, 5 second wait karne par bot apne aap session close kar dega)*"
     )
 
 @Client.on_message(filters.private & ~filters.command(["admin_upload"]))
@@ -154,14 +154,12 @@ async def receive_and_forward_files(client, message: Message):
                     await message.reply(f"❌ Error: `{e}`")
                     break
 
-        # ✅ STEP 5: Har file forward hone ke baad 30 second ka naya timer start karo
+        # ✅ STEP 5: Har file forward hone ke baad 5 second ka naya timer start karo
         if user_id in UPLOAD_STATES:
             if UPLOAD_STATES[user_id]["timer"]:
                 UPLOAD_STATES[user_id]["timer"].cancel() # Purana timer cancel
-            # Naya 30 second ka timer lagao
+            # Naya 5 second ka timer lagao
             UPLOAD_STATES[user_id]["timer"] = asyncio.create_task(auto_close_upload(client, message, user_id))
             
-    # Agar user bina /admin_upload ke direct media bhej de
-    else:
-        if message.media:
-            await message.reply("❌ **Upload session active nahi hai!**\nPehle `/admin_upload` bhejein, fir videos upload karein.")
+    # ✅ STEP 6: Agar upload session active nahi hai toh bot KOI REPLY nahi dega (Silent Ignore)
+    # (Pichle code mein yahan ek error message tha jise ab hata diya gaya hai)

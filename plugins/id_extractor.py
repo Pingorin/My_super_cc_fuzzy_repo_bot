@@ -4,87 +4,78 @@ from pyrogram.types import Message
 
 logger = logging.getLogger(__name__)
 
+# User ka state save karne ke liye dictionary
+ID_STATES = {}
+
 # ==================================================================
-# 1️⃣ The `/id` Command Handler
+# 1️⃣ The `/id` Command Handler (Mode Activate Karne Ke Liye)
 # ==================================================================
-@Client.on_message(filters.command("id"))
-async def get_id_command(client, message: Message):
-    # Basic IDs
-    chat_id = message.chat.id
-    sender_id = message.from_user.id
+@Client.on_message(filters.command("id") & filters.private)
+async def id_command_handler(client, message: Message):
+    user_id = message.from_user.id
     
-    text = f"🆔 **ID EXTRACTION**\n\n"
-    text += f"🔹 **Current Chat ID:** `{chat_id}`\n"
-    text += f"🔹 **Your User ID:** `{sender_id}`\n"
-    
-    # Agar kisi message par reply kiya gaya hai
+    # CASE 1: Agar user ne kisi message par Reply karke /id bheja hai (Direct ID nikalna)
     if message.reply_to_message:
-        text += "\n📌 **Replied Message Details:**\n"
+        return await extract_and_send_id(message.reply_to_message, message)
         
-        # Replied User ki ID
-        if message.reply_to_message.from_user:
-            replied_user_id = message.reply_to_message.from_user.id
-            text += f"🔸 **Replied User ID:** `{replied_user_id}`\n"
-            
-        # Agar replied message kisi Channel/Group se forward hoke aaya tha
-        if message.reply_to_message.forward_from_chat:
-            fwd_chat_id = message.reply_to_message.forward_from_chat.id
-            fwd_chat_title = message.reply_to_message.forward_from_chat.title
-            text += f"📢 **Forwarded Chat ID:** `{fwd_chat_id}`\n"
-            text += f"📝 **Chat Title:** {fwd_chat_title}\n"
-            
-        # Agar replied message kisi normal User ka forwarded tha
-        elif message.reply_to_message.forward_from:
-            fwd_user_id = message.reply_to_message.forward_from.id
-            text += f"👤 **Forwarded User ID:** `{fwd_user_id}`\n"
-            
-        # Agar User ne privacy lagayi hui hai
-        elif message.reply_to_message.forward_sender_name:
-            text += f"⚠️ **Forwarded User ID:** Hidden (Privacy Enabled)\n"
-
-    await message.reply(text, quote=True)
-
+    # CASE 2: Agar user ne sirf /id bheja hai (Wait Mode ON karna)
+    ID_STATES[user_id] = True
+    await message.reply(
+        "🆔 **ID Extraction Mode ON**\n\n"
+        "Ab aap kisi bhi channel, group ya user ka post yahan **forward** karein, main uski ID nikal kar dunga.\n\n"
+        "*(Ek baar ID batane ke baad ye mode apne aap band ho jayega)*"
+    )
 
 # ==================================================================
-# 2️⃣ Auto-Forward ID Detector (No Command Needed)
+# 2️⃣ Message Receiver (Jab mode ON ho tab message catch karega)
 # ==================================================================
-@Client.on_message(filters.private & filters.forwarded)
-async def auto_forward_detector(client, message: Message):
+@Client.on_message(filters.private & ~filters.command("id"))
+async def process_message_for_id(client, message: Message):
+    user_id = message.from_user.id
     
-    # Condition A: Forwarded from a Channel or Supergroup
-    if message.forward_from_chat:
-        chat_id = message.forward_from_chat.id
-        title = message.forward_from_chat.title
-        # Chat type ko clean string me convert karna (e.g., CHANNEL, SUPERGROUP)
-        chat_type = str(message.forward_from_chat.type).split(".")[-1] 
+    # Check karna ki kya user ka ID Mode ON hai?
+    if user_id in ID_STATES and ID_STATES[user_id]:
         
-        text = (
-            f"📢 **Forwarded Chat Details:**\n\n"
-            f"🔹 **ID:** `{chat_id}`\n"
-            f"🔹 **Title:** {title}\n"
-            f"🔹 **Type:** {chat_type}"
-        )
-        await message.reply(text, quote=True)
+        # ID Extract function ko call karna
+        await extract_and_send_id(message, message)
+        
+        # Ek baar ID mil gayi, toh mode ko wapas OFF kar dena
+        del ID_STATES[user_id]
 
-    # Condition B: Forwarded from a User (Public ID)
-    elif message.forward_from:
-        user_id = message.forward_from.id
-        first_name = message.forward_from.first_name
+# ==================================================================
+# 3️⃣ Main ID Extraction Logic
+# ==================================================================
+async def extract_and_send_id(target_msg: Message, reply_msg: Message):
+    text = f"🆔 **ID EXTRACTION**\n\n"
+    text += f"🔹 **Your User ID:** `{reply_msg.from_user.id}`\n"
+    
+    # Agar message kisi Channel/Group se forward hoke aaya tha
+    if target_msg.forward_from_chat:
+        fwd_chat_id = target_msg.forward_from_chat.id
+        fwd_chat_title = target_msg.forward_from_chat.title
+        chat_type = str(target_msg.forward_from_chat.type).split(".")[-1]
         
-        text = (
-            f"👤 **Forwarded User Details:**\n\n"
-            f"🔹 **User ID:** `{user_id}`\n"
-            f"🔹 **Name:** {first_name}"
-        )
-        await message.reply(text, quote=True)
+        text += f"\n📢 **Forwarded Chat Details:**\n"
+        text += f"🔹 **Chat ID:** `{fwd_chat_id}`\n"
+        text += f"📝 **Chat Title:** {fwd_chat_title}\n"
+        text += f"🏢 **Chat Type:** {chat_type}\n"
+        
+    # Agar message kisi normal User ka forwarded tha
+    elif target_msg.forward_from:
+        fwd_user_id = target_msg.forward_from.id
+        first_name = target_msg.forward_from.first_name
+        
+        text += f"\n👤 **Forwarded User Details:**\n"
+        text += f"🔹 **User ID:** `{fwd_user_id}`\n"
+        text += f"📝 **Name:** {first_name}\n"
+        
+    # Agar User ne privacy lagayi hui hai
+    elif target_msg.forward_sender_name:
+        text += f"\n⚠️ **Privacy Enabled!**\n"
+        text += f"Original User (**{target_msg.forward_sender_name}**) ne apni Forward Privacy ON rakhi hai, isliye ID hide ho chuki hai.\n"
+        
+    # Agar message forward kiya hi nahi gaya hai (Normal message)
+    else:
+        text += f"\nℹ️ **Note:** Ye message forward nahi kiya gaya hai, isliye iske paas kisi aur chat ki ID nahi hai.\n"
 
-    # Condition C: Forwarded from a User with "Forward Privacy" ENABLED
-    elif message.forward_sender_name:
-        sender_name = message.forward_sender_name
-        
-        text = (
-            f"⚠️ **Privacy Enabled!**\n\n"
-            f"Jiska ye message hai (**{sender_name}**), usne apni Telegram settings me 'Forward Privacy' ko ON rakha hai.\n\n"
-            f"Is wajah se Telegram unki original User ID chupaa raha hai aur extract karna possible nahi hai."
-        )
-        await message.reply(text, quote=True)
+    await reply_msg.reply(text, quote=True)

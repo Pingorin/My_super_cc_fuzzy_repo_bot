@@ -74,7 +74,8 @@ async def admin_upload_command(client, message: Message):
         "*(5 second wait karne par bot apne aap session close kar dega)*"
     )
 
-@Client.on_message(filters.private & ~filters.command(["admin_upload"]))
+# ✅ SOLUTION: Yahan humne "group=1" lagaya hai taaki ye id_extractor ke sath conflict na kare
+@Client.on_message(filters.private & ~filters.command(["admin_upload"]), group=1)
 async def receive_and_forward_files(client, message: Message):
     user_id = message.from_user.id
     
@@ -149,5 +150,3 @@ async def receive_and_forward_files(client, message: Message):
             if UPLOAD_STATES[user_id]["timer"]:
                 UPLOAD_STATES[user_id]["timer"].cancel()
             UPLOAD_STATES[user_id]["timer"] = asyncio.create_task(auto_close_upload(client, message, user_id))
-            
-    # Agar user bina session ke file bheje toh bot CHUPCHAP ignore karega (No Reply)

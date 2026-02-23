@@ -8,13 +8,13 @@ logger = logging.getLogger(__name__)
 ID_STATES = {}
 
 # ==================================================================
-# 1️⃣ The `/id` Command Handler (Mode Activate Karne Ke Liye)
+# 1️⃣ The `/id` Command Handler (ID Mode Activate Karne Ke Liye)
 # ==================================================================
 @Client.on_message(filters.command("id") & filters.private)
 async def id_command_handler(client, message: Message):
     user_id = message.from_user.id
     
-    # CASE 1: Agar user ne kisi message par Reply karke /id bheja hai (Direct ID nikalna)
+    # CASE 1: Agar user ne kisi message par Reply karke /id bheja hai
     if message.reply_to_message:
         return await extract_and_send_id(message.reply_to_message, message)
         
@@ -27,9 +27,47 @@ async def id_command_handler(client, message: Message):
     )
 
 # ==================================================================
-# 2️⃣ Message Receiver (Jab mode ON ho tab message catch karega)
+# 2️⃣ The `/info` Command Handler (User Details Nikalne Ke Liye)
 # ==================================================================
-@Client.on_message(filters.private & ~filters.command("id"))
+@Client.on_message(filters.command("info"))
+async def user_info_command(client, message: Message):
+    
+    # Check karna ki reply kiya hai ya direct command di hai
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_user = message.reply_to_message.from_user
+        heading = "👤 **Replied User Info**"
+    else:
+        target_user = message.from_user
+        heading = "👤 **Your Information**"
+
+    # Details Extract karna
+    user_id = target_user.id
+    first_name = target_user.first_name or "N/A"
+    last_name = target_user.last_name or ""
+    username = f"@{target_user.username}" if target_user.username else "N/A"
+    dc_id = target_user.dc_id or "Unknown"
+
+    # Profile link banana
+    profile_link = f"<a href='tg://user?id={user_id}'>Click Here</a>"
+
+    # Message format karna
+    text = f"{heading}\n\n"
+    text += f"🔹 **First Name:** {first_name}\n"
+    if last_name:
+        text += f"🔹 **Last Name:** {last_name}\n"
+    text += f"🔹 **User ID:** `{user_id}`\n"
+    text += f"🔹 **Username:** {username}\n"
+    text += f"🔹 **Profile Link:** {profile_link}\n"
+    text += f"🔹 **Data Center (DC):** `{dc_id}`\n"
+
+    # Bot ki taraf se reply
+    await message.reply(text, quote=True, disable_web_page_preview=True)
+
+# ==================================================================
+# 3️⃣ Message Receiver (Jab /id mode ON ho tab message catch karega)
+# ==================================================================
+# Yahan dhyan dein: Humne ["id", "info"] dono commands ko yahan aane se block kar diya hai
+@Client.on_message(filters.private & ~filters.command(["id", "info"]))
 async def process_message_for_id(client, message: Message):
     user_id = message.from_user.id
     
@@ -43,7 +81,7 @@ async def process_message_for_id(client, message: Message):
         del ID_STATES[user_id]
 
 # ==================================================================
-# 3️⃣ Main ID Extraction Logic
+# 4️⃣ Main ID Extraction Logic (Backend Function)
 # ==================================================================
 async def extract_and_send_id(target_msg: Message, reply_msg: Message):
     text = f"🆔 **ID EXTRACTION**\n\n"

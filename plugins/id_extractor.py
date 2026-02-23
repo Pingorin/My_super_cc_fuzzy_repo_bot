@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 ID_STATES = {}
 
 # ==================================================================
-# 1️⃣ The `/id` Command Handler (ID Mode Activate Karne Ke Liye)
+# 1️⃣ The `/id` Command Handler 
 # ==================================================================
 @Client.on_message(filters.command("id") & filters.private)
 async def id_command_handler(client, message: Message):
@@ -27,12 +27,11 @@ async def id_command_handler(client, message: Message):
     )
 
 # ==================================================================
-# 2️⃣ The `/info` Command Handler (User Details Nikalne Ke Liye)
+# 2️⃣ The `/info` Command Handler 
 # ==================================================================
 @Client.on_message(filters.command("info"))
 async def user_info_command(client, message: Message):
     
-    # Check karna ki reply kiya hai ya direct command di hai
     if message.reply_to_message and message.reply_to_message.from_user:
         target_user = message.reply_to_message.from_user
         heading = "👤 **Replied User Info**"
@@ -40,17 +39,14 @@ async def user_info_command(client, message: Message):
         target_user = message.from_user
         heading = "👤 **Your Information**"
 
-    # Details Extract karna
     user_id = target_user.id
     first_name = target_user.first_name or "N/A"
     last_name = target_user.last_name or ""
     username = f"@{target_user.username}" if target_user.username else "N/A"
     dc_id = target_user.dc_id or "Unknown"
 
-    # Profile link banana
     profile_link = f"<a href='tg://user?id={user_id}'>Click Here</a>"
 
-    # Message format karna
     text = f"{heading}\n\n"
     text += f"🔹 **First Name:** {first_name}\n"
     if last_name:
@@ -60,14 +56,12 @@ async def user_info_command(client, message: Message):
     text += f"🔹 **Profile Link:** {profile_link}\n"
     text += f"🔹 **Data Center (DC):** `{dc_id}`\n"
 
-    # Bot ki taraf se reply
     await message.reply(text, quote=True, disable_web_page_preview=True)
 
 # ==================================================================
-# 3️⃣ Message Receiver (Jab /id mode ON ho tab message catch karega)
+# 3️⃣ Message Receiver (Yahan group=2 lagaya gaya hai fix ke liye)
 # ==================================================================
-# Yahan dhyan dein: Humne ["id", "info"] dono commands ko yahan aane se block kar diya hai
-@Client.on_message(filters.private & ~filters.command(["id", "info"]))
+@Client.on_message(filters.private & ~filters.command(["id", "info"]), group=2)
 async def process_message_for_id(client, message: Message):
     user_id = message.from_user.id
     
@@ -81,13 +75,12 @@ async def process_message_for_id(client, message: Message):
         del ID_STATES[user_id]
 
 # ==================================================================
-# 4️⃣ Main ID Extraction Logic (Backend Function)
+# 4️⃣ Main ID Extraction Logic
 # ==================================================================
 async def extract_and_send_id(target_msg: Message, reply_msg: Message):
     text = f"🆔 **ID EXTRACTION**\n\n"
     text += f"🔹 **Your User ID:** `{reply_msg.from_user.id}`\n"
     
-    # Agar message kisi Channel/Group se forward hoke aaya tha
     if target_msg.forward_from_chat:
         fwd_chat_id = target_msg.forward_from_chat.id
         fwd_chat_title = target_msg.forward_from_chat.title
@@ -98,7 +91,6 @@ async def extract_and_send_id(target_msg: Message, reply_msg: Message):
         text += f"📝 **Chat Title:** {fwd_chat_title}\n"
         text += f"🏢 **Chat Type:** {chat_type}\n"
         
-    # Agar message kisi normal User ka forwarded tha
     elif target_msg.forward_from:
         fwd_user_id = target_msg.forward_from.id
         first_name = target_msg.forward_from.first_name
@@ -107,12 +99,10 @@ async def extract_and_send_id(target_msg: Message, reply_msg: Message):
         text += f"🔹 **User ID:** `{fwd_user_id}`\n"
         text += f"📝 **Name:** {first_name}\n"
         
-    # Agar User ne privacy lagayi hui hai
     elif target_msg.forward_sender_name:
         text += f"\n⚠️ **Privacy Enabled!**\n"
         text += f"Original User (**{target_msg.forward_sender_name}**) ne apni Forward Privacy ON rakhi hai, isliye ID hide ho chuki hai.\n"
         
-    # Agar message forward kiya hi nahi gaya hai (Normal message)
     else:
         text += f"\nℹ️ **Note:** Ye message forward nahi kiya gaya hai, isliye iske paas kisi aur chat ki ID nahi hai.\n"
 

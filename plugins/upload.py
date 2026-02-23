@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 UPLOAD_STATES = {}
 USER_LOCKS = {}
 
-# 🗑️ Background Task: File ko 2 minute baad delete karne ke liye
+# 🗑️ Background Task: File ko 120 seconds (2 mins) baad delete karne ke liye
 async def delete_after_delay(message: Message, delay: int):
     await asyncio.sleep(delay)
     try:
@@ -22,9 +22,9 @@ async def delete_after_delay(message: Message, delay: int):
 
 # ⏱️ Auto-Close Timer: 5 second inactivity par session band karega
 async def auto_close_upload(client, message: Message, user_id: int):
-    await asyncio.sleep(5) # Ab 5 seconds wait karega
+    await asyncio.sleep(5) 
     
-    # Agar 5 second baad bhi session active hai, toh use automatically close kar do
+    # Agar 5 second baad bhi session active hai, toh close kar do
     if user_id in UPLOAD_STATES:
         sent_count = UPLOAD_STATES[user_id]["forwarded"]
         status_msg = UPLOAD_STATES[user_id]["status_msg"]
@@ -36,14 +36,13 @@ async def auto_close_upload(client, message: Message, user_id: int):
             except Exception:
                 pass
         
-        # Session khatam karo
         del UPLOAD_STATES[user_id]
         
         if sent_count > 0:
             await message.reply(
                 f"✅ **Upload Auto-Completed!**\n\n"
                 f"Total `{sent_count}` videos successfully channel me bhej di gayi hain.\n"
-                f"(Ye videos 2 minute baad aapki chat se delete ho jayengi)."
+                f"(Ye videos 2 minute baad chat se delete ho jayengi)."
             )
 
 @Client.on_message(filters.command("admin_upload") & filters.private)
@@ -53,8 +52,8 @@ async def admin_upload_command(client, message: Message):
     if not TARGET_CHANNEL_ID or TARGET_CHANNEL_ID == -100:
         return await message.reply("❌ **Error:** Kripya pehle `info.py` me `TARGET_CHANNEL_ID` set karein!")
     
-    # Agar pehle se koi timer chal raha ho toh use band kar do
-    if user_id in UPLOAD_STATES and "timer" in UPLOAD_STATES[user_id] and UPLOAD_STATES[user_id]["timer"]:
+    # Purana timer band karo (agar koi chal raha ho)
+    if user_id in UPLOAD_STATES and UPLOAD_STATES[user_id].get("timer"):
         UPLOAD_STATES[user_id]["timer"].cancel()
         
     UPLOAD_STATES[user_id] = {
@@ -70,38 +69,31 @@ async def admin_upload_command(client, message: Message):
     
     await message.reply(
         "📤 **Upload Mode Activated!**\n\n"
-        "🎥 **Sirf Videos** bhej sakte hain (Photo, Sticker, Text aate hi delete ho jayenge).\n"
-        "Main unhe automatically Target Channel me bhej dunga.\n\n"
+        "🎥 **Sirf Videos** bhej sakte hain (Photo, Sticker, Text ignore honge).\n"
         "⚠️ **Limit:** Ek baar me maximum 20 Videos.\n"
-        "*(Aapko koi command dene ki zaroorat nahi hai, 5 second wait karne par bot apne aap session close kar dega)*"
+        "*(5 second wait karne par bot apne aap session close kar dega)*"
     )
 
 @Client.on_message(filters.private & ~filters.command(["admin_upload"]))
 async def receive_and_forward_files(client, message: Message):
     user_id = message.from_user.id
     
-    # Agar session chal raha hai
+    # Agar session active hai
     if user_id in UPLOAD_STATES:
         
-        # ✅ STEP 1: Sirf Video Filter (Ab Album me bhi strong delete karega)
+        # 🚫 Sirf Video/Document allow karega, baaki turant delete
         if not (message.video or message.document):
-            try:
-                await message.delete()
-            except Exception:
-                pass
+            asyncio.create_task(message.delete()) 
             return
             
-        # ✅ STEP 2: Limit check (20 se zyada aate hi turant delete)
+        # 🚫 20 ki limit cross hote hi extra files turant delete
         if UPLOAD_STATES[user_id]["received"] >= 20:
-            try:
-                await message.delete()
-            except Exception:
-                pass
+            asyncio.create_task(message.delete()) 
             return  
             
         UPLOAD_STATES[user_id]["received"] += 1
         
-        # ✅ STEP 3: "Start forward" msg
+        # ⏳ "Start forward" message (Sirf ek baar)
         if not UPLOAD_STATES[user_id]["start_msg_sent"]:
             UPLOAD_STATES[user_id]["start_msg_sent"] = True 
             try:
@@ -113,53 +105,49 @@ async def receive_and_forward_files(client, message: Message):
         if user_id not in USER_LOCKS:
             USER_LOCKS[user_id] = asyncio.Lock()
             
-        # ✅ STEP 4: Forward Queue
+        # 🚀 Forward Queue (Smooth process ke liye)
         async with USER_LOCKS[user_id]:
             while True:
                 try:
                     await message.copy(chat_id=TARGET_CHANNEL_ID)
                     UPLOAD_STATES[user_id]["forwarded"] += 1
                     
+                    # 🗑️ Forward hone ke baad use 2 min me delete hone ke list me daal do
                     asyncio.create_task(delete_after_delay(message, 120))
                     
-                    # Agar 20 files poori ho jayein toh turant close kar do
+                    # ✅ Jab limit (20 files) poori ho jaye
                     if UPLOAD_STATES[user_id]["forwarded"] == 20:
-                        
-                        # Timer band karo
                         if UPLOAD_STATES[user_id]["timer"]:
                             UPLOAD_STATES[user_id]["timer"].cancel()
                             
-                        # 🔄 Edit Message: Start -> Complete
-                        try:
-                            if UPLOAD_STATES[user_id]["status_msg"]:
+                        if UPLOAD_STATES[user_id]["status_msg"]:
+                            try:
                                 await UPLOAD_STATES[user_id]["status_msg"].edit_text("✅ **complete forward**")
-                        except Exception:
-                            pass
-                            
+                            except Exception:
+                                pass
+                                
                         await message.reply(
                             "⚠️ **20 Files Ki Limit Poori Hui!**\n\n"
                             "Sirf 20 files hi forward ki gayi hain. Baki extra files delete kar di gayi hain.\n"
-                            "📅 **Kripya baki ki files Next Day (Agle Din) upload karein.**\n\n"
+                            "📅 **Kripya baki ki files Next Day upload karein.**\n\n"
                             "✅ **Upload Complete!** (Ye videos 2 minute baad chat se hat jayengi)."
                         )
                         del UPLOAD_STATES[user_id]
-                        return # Session turant yahan close ho gaya
+                        return 
                     
+                    # Delay (FloodWait se bachne ke liye)
                     await asyncio.sleep(1.5)
                     break
                     
                 except FloodWait as e:
                     await asyncio.sleep(e.value + 1)
-                except Exception as e:
-                    await message.reply(f"❌ Error: `{e}`")
+                except Exception:
                     break
 
-        # ✅ STEP 5: Har file forward hone ke baad 5 second ka naya timer start karo
+        # ⏱️ Har valid file ke baad naya 5 sec ka timer start
         if user_id in UPLOAD_STATES:
             if UPLOAD_STATES[user_id]["timer"]:
-                UPLOAD_STATES[user_id]["timer"].cancel() # Purana timer cancel
-            # Naya 5 second ka timer lagao
+                UPLOAD_STATES[user_id]["timer"].cancel()
             UPLOAD_STATES[user_id]["timer"] = asyncio.create_task(auto_close_upload(client, message, user_id))
             
-    # ✅ STEP 6: Agar upload session active nahi hai toh bot KOI REPLY nahi dega (Silent Ignore)
-    # (Pichle code mein yahan ek error message tha jise ab hata diya gaya hai)
+    # Agar user bina session ke file bheje toh bot CHUPCHAP ignore karega (No Reply)

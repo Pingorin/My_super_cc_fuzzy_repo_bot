@@ -77,7 +77,6 @@ def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_siz
 async def auto_filter(client, message):
     try:
         # ✅ PM SEARCH CHECK
-        # Agar PM_SEARCH False hai, aur message Private Chat me aaya hai, toh return kar do
         if not PM_SEARCH and message.chat.type == enums.ChatType.PRIVATE:
             return
             
@@ -86,6 +85,13 @@ async def auto_filter(client, message):
         
         if URL_REGEX.search(raw_query): return
         if len(raw_query) < 2: return
+
+        # ✅ NAYA LOGIC: Agar search query me 8 words se zyada hain, toh user ka message turant delete karein
+        if len(raw_query.split()) > 8:
+            try:
+                await message.delete()
+            except Exception:
+                pass # Agar delete karne me error aaye (jaise bot admin na ho) toh chupchap ignore karega
 
         query = CLEAN_REGEX.sub("", raw_query)
         query = WHITESPACE_REGEX.sub(" ", query).strip()

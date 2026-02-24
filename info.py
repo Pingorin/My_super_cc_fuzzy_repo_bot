@@ -69,3 +69,6 @@ AUTH_CHANNEL_4_TEXT = os.environ.get('AUTH_CHANNEL_4_TEXT', '✅ Join Final Chan
 # --- OTHER SETTINGS ---
 USE_CAPTION_FILTER = os.environ.get("USE_CAPTION_FILTER", "True").lower() in ["true", "yes", "1"]
 MONGODB_TIMEOUT = 300 # 5 Minutes
+
+# --- SEARCH SETTINGS ---
+PM_SEARCH = os.environ.get("PM_SEARCH", "False").lower() in ["true", "yes", "1"]

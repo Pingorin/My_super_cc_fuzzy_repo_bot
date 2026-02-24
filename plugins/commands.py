@@ -19,6 +19,14 @@ START_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg"
 
 # --- 🛠️ HELPER FUNCTIONS ---
 
+# ✅ NAYA FUNCTION: Message/File ko kuch seconds baad delete karne ke liye
+async def auto_delete_message(message, delay: int):
+    await asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
 async def send_shortener_alert(client, chat_id, site_domain):
     try:
         try:
@@ -596,13 +604,18 @@ async def start_handler(client, message):
                     
                     reply_markup = InlineKeyboardMarkup(btn_rows) if btn_rows else None
 
-                    await client.send_cached_media(
+                    # ✅ Update: File bhejne ke baad use variable me save karein
+                    sent_media = await client.send_cached_media(
                         chat_id=message.from_user.id,
                         file_id=file_details['file_id'],
                         caption=final_caption,
                         reply_markup=reply_markup,
                         parse_mode=enums.ParseMode.HTML
                     )
+                    
+                    # ✅ Naya: 60 Seconds (1 Min) baad File delete karne ka timer lagayein
+                    asyncio.create_task(auto_delete_message(sent_media, 60))
+
                     sent_count += 1
                     await asyncio.sleep(0.8) # FloodWait Prevention
                     
@@ -611,7 +624,12 @@ async def start_handler(client, message):
                     continue
             
             await msg.delete()
-            await message.reply(f"✅ **Sent {sent_count} files successfully!**")
+            # ✅ Update: Final message me Warning add ki hai aur ise bhi delete karwaya hai
+            summary_msg = await message.reply(
+                f"✅ **Sent {sent_count} files successfully!**\n\n"
+                f"⚠️ **DHYAN DEIN:** Ye saari files theek **1 minute** baad yahan se automatically delete ho jayengi. Kripya jaldi se forward kar lein!"
+            )
+            asyncio.create_task(auto_delete_message(summary_msg, 60))
             return
 
         except Exception as e:
@@ -775,13 +793,24 @@ async def start_handler(client, message):
 
             # --- 4. SEND MEDIA ---
             try: 
-                await client.send_cached_media(
+                # ✅ Update: File bhejne ke baad use variable me save karein
+                sent_media = await client.send_cached_media(
                     chat_id=message.from_user.id, 
                     file_id=file_data.get('file_id'), 
                     caption=final_caption, 
                     reply_markup=reply_markup,
                     parse_mode=enums.ParseMode.HTML
                 )
+                
+                # ✅ Naya: Warning Message bhejein
+                warning_msg = await message.reply(
+                    "⚠️ **DHYAN DEIN:**\n\nYe file theek **1 minute** baad yahan se automatically delete ho jayegi. Kripya isko jaldi se apne Saved Messages me forward kar lein!"
+                )
+                
+                # ✅ Naya: File aur Warning dono ko 60 Seconds baad delete kar dein
+                asyncio.create_task(auto_delete_message(sent_media, 60))
+                asyncio.create_task(auto_delete_message(warning_msg, 60))
+
             except Exception as e: 
                 await message.reply(f"❌ Error sending file: `{e}`")
                 

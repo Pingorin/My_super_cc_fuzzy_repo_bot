@@ -9,7 +9,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait, MessageNotModified
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-from info import SITE_URL
+from info import SITE_URL, PM_SEARCH
 from cachetools import TTLCache 
 
 # ✅ Utils Imports (Now includes arrange_buttons)
@@ -76,6 +76,11 @@ def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_siz
 @Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index", "set_shortner", "settings", "connect", "delreq", "broadcast", "admin_upload", "id", "info"]))
 async def auto_filter(client, message):
     try:
+        # ✅ PM SEARCH CHECK
+        # Agar PM_SEARCH False hai, aur message Private Chat me aaya hai, toh return kar do
+        if not PM_SEARCH and message.chat.type == enums.ChatType.PRIVATE:
+            return
+            
         raw_query = message.text
         if message.forward_from or message.forward_from_chat or message.via_bot: return
         

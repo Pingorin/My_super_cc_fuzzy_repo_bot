@@ -86,12 +86,13 @@ async def auto_filter(client, message):
         if URL_REGEX.search(raw_query): return
         if len(raw_query) < 2: return
 
-        # ✅ NAYA LOGIC: Agar search query me 8 words se zyada hain, toh user ka message turant delete karein
+        # ✅ UPDATE: 1 second delay ke sath delete, taaki reply block na ho
         if len(raw_query.split()) > 8:
-            try:
-                await message.delete()
-            except Exception:
-                pass # Agar delete karne me error aaye (jaise bot admin na ho) toh chupchap ignore karega
+            async def del_msg():
+                await asyncio.sleep(1) # Bot ko pehle movie bhejne ka time dega
+                try: await message.delete()
+                except: pass
+            asyncio.create_task(del_msg()) # Background me delete chalega
 
         query = CLEAN_REGEX.sub("", raw_query)
         query = WHITESPACE_REGEX.sub(" ", query).strip()

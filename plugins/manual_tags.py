@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 async def add_manual_tag(client, message: Message):
     # Check karega ki admin ne kisi file par reply kiya hai ya nahi
     if not message.reply_to_message:
-        return await message.reply("⚠️ **Kripya kisi video ya document par reply karke command dein.**\n\n**Example:** `/addtag Tiger 3, Salman Khan, Hindi Dubbed`")
+        return await message.reply("⚠️ **Kripya kisi video ya document par reply karke command dein.**\n\n**Example:** `/addtag Tiger 3, Salman Khan`")
 
     media = message.reply_to_message.document or message.reply_to_message.video
     if not media:
@@ -33,29 +33,31 @@ async def add_manual_tag(client, message: Message):
 
     link_id = file_data['_id']
 
-    # Search database mein file ka caption update karega (hidden tags add karega)
+    # Search database mein file ka caption update karega
     search_data = await Media.search_col.find_one({"link_id": link_id})
     if not search_data:
         return await status_msg.edit_text("❌ **File ka search data nahi mila!**")
 
     old_caption = search_data.get("caption") or ""
+    file_name = search_data.get("file_name", "Unknown File")
     
-    # Naye tags ko purane caption ke saath jod dega (Taki search me aa jaye)
-    updated_caption = f"{old_caption} {new_tags}"
+    # ✅ FIX: Agar old caption khali hai, toh original file name ko use karega
+    if not old_caption.strip():
+        updated_caption = f"{file_name}\n\n🔍 Tags: {new_tags}"
+    else:
+        updated_caption = f"{old_caption}\n\n🔍 Tags: {new_tags}"
 
     # Database update command
     await Media.search_col.update_one(
         {"link_id": link_id},
         {"$set": {"caption": updated_caption}}
     )
-
-    file_name = search_data.get('file_name', 'Unknown File')
     
     await status_msg.edit_text(
         f"✅ **Tags Successfully Added!**\n\n"
         f"📂 **File:** `{file_name}`\n"
         f"🏷️ **Added Tags:** `{new_tags}`\n\n"
-        f"*(Ab koi bhi user in tags ko search karke ye file le sakta hai)*"
+        f"*(Ab file ka original naam bhi dikhega aur tags bhi kaam karenge)*"
     )
 
 @Client.on_message(filters.command("cleartags") & filters.user(ADMINS))

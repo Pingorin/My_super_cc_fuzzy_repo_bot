@@ -651,10 +651,19 @@ async def start_handler(client, message):
                         reply_markup=reply_markup,
                         parse_mode=enums.ParseMode.HTML
                     )
-                    asyncio.create_task(delete_after_delay(sent_file, 120))
-                    sent_count += 1
-                    await asyncio.sleep(0.8) 
                     
+                    # ✅ Naya: File ko reply karke warning message bhejna
+                    warning_msg = await sent_file.reply_text(
+                        "⚠️ **DHYAN DEIN:**\n\nYe file theek **1 minute** baad yahan se automatically delete ho jayegi. Kripya isko jaldi se apne Saved Messages me forward kar lein!",
+                        quote=True
+                    )
+                    
+                    # File aur Warning Message dono ko 60 seconds (1 minute) me delete karna
+                    asyncio.create_task(delete_after_delay(sent_file, 60))
+                    asyncio.create_task(delete_after_delay(warning_msg, 60))
+                    
+                    sent_count += 1
+                    await asyncio.sleep(0.8)                    
                 except Exception as e:
                     print(f"Send All Error: {e}")
                     continue
@@ -855,7 +864,17 @@ async def start_handler(client, message):
                     reply_markup=reply_markup,
                     parse_mode=enums.ParseMode.HTML
                 )
-                asyncio.create_task(delete_after_delay(sent_file, 120))
+                
+                # ✅ Naya: File ko reply karke warning message bhejna
+                warning_msg = await sent_file.reply_text(
+                    "⚠️ **DHYAN DEIN:**\n\nYe file theek **1 minute** baad yahan se automatically delete ho jayegi. Kripya isko jaldi se apne Saved Messages me forward kar lein!",
+                    quote=True
+                )
+                
+                # File aur Warning Message dono ko 60 seconds (1 minute) me delete karna
+                asyncio.create_task(delete_after_delay(sent_file, 60))
+                asyncio.create_task(delete_after_delay(warning_msg, 60))
+                
             except Exception as e: 
                 await message.reply(f"❌ Error sending file: `{e}`")
                 

@@ -3,9 +3,9 @@ import logging
 import aiohttp_jinja2
 import jinja2
 from database.ia_filterdb import Media
+from plugins.streamer import stream_download, stream_watch  # 👇 NEW IMPORT
 
 logger = logging.getLogger(__name__)
-
 async def handle_home(request):
     return web.Response(text="Bot is Running Successfully! Site Mode Active.")
 
@@ -58,6 +58,8 @@ async def web_server():
     web_app.add_routes([
         web.get('/', handle_home),
         web.get('/results/{key}', handle_search_results),
+        web.get('/{message_id}', stream_download),       # 👇 NAYA: Fast Download Route
+        web.get('/watch/{message_id}', stream_watch)     # 👇 NAYA: Watch Online Route
     ])
     
     return web_app

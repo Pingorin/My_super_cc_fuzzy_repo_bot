@@ -71,5 +71,36 @@ async def media_streamer(request: web.Request, is_watch: bool = False):
         logger.error(f"Internal Server Error: {e}")
         return web.Response(status=500, text="Server Error")
 
-async def stream_download(request): return await media_streamer(request, is_watch=False)
-async def stream_watch(request): return await media_streamer(request, is_watch=True)
+async def stream_download(request): 
+    return await media_streamer(request, is_watch=False)
+
+# ✅ Web Player jisse Telegram ke andar hi movie chale
+async def stream_watch(request):
+    msg_id = request.match_info.get('message_id')
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Watch Online</title>
+        <style>
+            body {{ background-color: #0f0f0f; color: #fff; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; }}
+            video {{ width: 100%; max-width: 800px; max-height: 70vh; outline: none; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }}
+            .btn-container {{ margin-top: 20px; }}
+            .btn {{ background-color: #0088cc; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px; transition: 0.3s; }}
+            .btn:hover {{ background-color: #005f8f; }}
+        </style>
+    </head>
+    <body>
+        <video controls autoplay>
+            <source src="/{msg_id}" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+        <div class="btn-container">
+            <a href="/{msg_id}" class="btn">📥 Download Video</a>
+        </div>
+    </body>
+    </html>
+    """
+    return web.Response(text=html_content, content_type="text/html")

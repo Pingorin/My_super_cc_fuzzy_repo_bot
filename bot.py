@@ -86,6 +86,8 @@ class Bot(Client):
         # 3. Inject Bot Username into Web App Context (For HTML Deep Links)
         curr_web_app['bot_username'] = me.username
         
+        curr_web_app['bot'] = self   # 👇 NAYA: Streaming ke liye bot instance pass kiya
+        
         # 4. Run the App Runner
         runner = web.AppRunner(curr_web_app)
         await runner.setup()

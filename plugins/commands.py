@@ -625,10 +625,22 @@ async def start_handler(client, message):
                     if cap_btn_text and cap_btn_url:
                         btn_rows.append([InlineKeyboardButton(cap_btn_text, url=cap_btn_url)])
                     
+                    # 👇 NAYA: Watch & Download Buttons
+                    try:
+                        bin_msg = await client.send_cached_media(chat_id=info.BIN_CHANNEL, file_id=file_details['file_id'])
+                        base_url = info.SITE_URL.rstrip('/') if info.SITE_URL else "http://127.0.0.1:8080"
+                        btn_rows.append([
+                            InlineKeyboardButton("🍿 Watch Online", url=f"{base_url}/watch/{bin_msg.id}"),
+                            InlineKeyboardButton("⚡ Fast Download", url=f"{base_url}/{bin_msg.id}")
+                        ])
+                    except Exception as e:
+                        print(f"Streaming Button Error: {e}")
+                    # 👆 KHATAM
+                    
                     reply_markup = InlineKeyboardMarkup(btn_rows) if btn_rows else None
 
-                    # ✅ Naya: Sent message ko filesarr me append karna
-                    sent_media = await client.send_cached_media(
+                    # ✅ MODIFIED: Catch message in a variable and schedule deletion
+                    sent_file = await client.send_cached_media(
                         chat_id=message.from_user.id,
                         file_id=file_details['file_id'],
                         caption=final_caption,
@@ -810,6 +822,18 @@ async def start_handler(client, message):
 
             # C) 💎 FREE PREMIUM BUTTON (Below File)
             btn_rows.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
+
+            # 👇 NAYA: Watch & Download Buttons
+            try:
+                bin_msg = await client.send_cached_media(chat_id=info.BIN_CHANNEL, file_id=file_data.get('file_id'))
+                base_url = info.SITE_URL.rstrip('/') if info.SITE_URL else "http://127.0.0.1:8080"
+                btn_rows.append([
+                    InlineKeyboardButton("🍿 Watch Online", url=f"{base_url}/watch/{bin_msg.id}"),
+                    InlineKeyboardButton("⚡ Fast Download", url=f"{base_url}/{bin_msg.id}")
+                ])
+            except Exception as e:
+                print(f"Streaming Button Error: {e}")
+            # 👆 KHATAM
 
             if btn_rows:
                 reply_markup = InlineKeyboardMarkup(btn_rows)

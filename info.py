@@ -27,6 +27,9 @@ CHANNELS = [int(ch) for ch in os.environ.get("CHANNELS", "0").split()] if os.env
 # Yahan -1001234567890 ki jagah apna asli Channel ID daalein
 TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "-1003719921511"))
 
+# 👇 NAYA FEATURE: Streaming ke liye Bin Channel (Apne Database Channel ki ID daalein)
+BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", "-1003173929836"))
+
 # ✅ SITE URL (REQUIRED FOR SITE MODE)
 # Render/Heroku users must set this in Environment Variables (e.g., https://my-app.onrender.com)
 # Do not add a trailing slash (/) at the end.

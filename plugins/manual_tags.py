@@ -8,46 +8,37 @@ logger = logging.getLogger(__name__)
 
 @Client.on_message(filters.command("addtag") & filters.user(ADMINS))
 async def add_manual_tag(client, message: Message):
-    # Check karega ki admin ne kisi file par reply kiya hai ya nahi
     if not message.reply_to_message:
-        return await message.reply("⚠️ **Kripya kisi video ya document par reply karke command dein.**\n\n**Example:** `/addtag Tiger 3, Salman Khan`")
+        return await message.reply("⚠️ **Kripya kisi video ya document par reply karke command dein.**")
 
     media = message.reply_to_message.document or message.reply_to_message.video
     if not media:
-        return await message.reply("⚠️ **Jiss message par aapne reply kiya hai, usme koi video ya file nahi hai!**")
+        return await message.reply("⚠️ **Ye koi video ya file nahi hai!**")
 
-    # Command aur tags ko alag karega
     tags_data = message.text.split(maxsplit=1)
     if len(tags_data) < 2:
-        return await message.reply("⚠️ **Aapne koi tag nahi likha!**\n\n**Example:** `/addtag marvel, hindi, 2024`")
+        return await message.reply("⚠️ **Aapne koi tag nahi likha!**\n\n**Example:** `/addtag marvel, hindi`")
 
     new_tags = tags_data[1].strip()
-
     status_msg = await message.reply("⏳ **Tags add kar raha hoon...**")
 
-    # Database mein file ko uske unique ID se dhundhega
     file_data = await Media.data_col.find_one({"file_unique_id": media.file_unique_id})
-
     if not file_data:
-        return await status_msg.edit_text("❌ **Ye file abhi database mein save nahi hai!**\nPehle is file ko channel me daal kar index hone dein.")
+        return await status_msg.edit_text("❌ **Ye file database mein save nahi hai!**")
 
     link_id = file_data['_id']
-
-    # Search database mein file ka caption update karega
     search_data = await Media.search_col.find_one({"link_id": link_id})
-    if not search_data:
-        return await status_msg.edit_text("❌ **File ka search data nahi mila!**")
-
+    
     old_caption = search_data.get("caption") or ""
     file_name = search_data.get("file_name", "Unknown File")
     
-    # ✅ FIX: Agar old caption khali hai, toh original file name ko use karega
-    if not old_caption.strip():
-        updated_caption = f"{file_name}\n\n🔍 Tags: {new_tags}"
+    # ✅ FIX: Ye code Original Name aur Tags dono ko ek sath jod dega
+    if "[Tags:" in old_caption:
+        base_caption = old_caption.split("[Tags:")[0].strip()
+        updated_caption = f"{base_caption} [Tags: {new_tags}]"
     else:
-        updated_caption = f"{old_caption}\n\n🔍 Tags: {new_tags}"
+        updated_caption = f"{file_name} [Tags: {new_tags}]"
 
-    # Database update command
     await Media.search_col.update_one(
         {"link_id": link_id},
         {"$set": {"caption": updated_caption}}
@@ -55,29 +46,26 @@ async def add_manual_tag(client, message: Message):
     
     await status_msg.edit_text(
         f"✅ **Tags Successfully Added!**\n\n"
-        f"📂 **File:** `{file_name}`\n"
-        f"🏷️ **Added Tags:** `{new_tags}`\n\n"
-        f"*(Ab file ka original naam bhi dikhega aur tags bhi kaam karenge)*"
+        f"📂 **Naya Caption:** `{updated_caption}`\n\n"
+        f"*(Ab search me aur final file me dono naam dikhenge)*"
     )
 
 @Client.on_message(filters.command("cleartags") & filters.user(ADMINS))
 async def clear_manual_tag(client, message: Message):
-    # Agar galti se galat tag lag jaye, toh usko remove karne ke liye
     if not message.reply_to_message:
-        return await message.reply("⚠️ **Kripya us video/document par reply karein jiske tags delete karne hain.**")
+        return await message.reply("⚠️ **Kripya us file par reply karein.**")
 
     media = message.reply_to_message.document or message.reply_to_message.video
-    if not media: return await message.reply("⚠️ **Ye koi video/document nahi hai!**")
+    if not media: return await message.reply("⚠️ **Ye koi video/file nahi hai!**")
 
     file_data = await Media.data_col.find_one({"file_unique_id": media.file_unique_id})
-    if not file_data: return await message.reply("❌ **Ye file database mein save nahi hai!**")
+    if not file_data: return await message.reply("❌ **Database me nahi hai!**")
 
     link_id = file_data['_id']
     
-    # Caption ko completely clear kar dega (Sirf original file name bachega search ke liye)
     await Media.search_col.update_one(
         {"link_id": link_id},
         {"$set": {"caption": ""}}
     )
 
-    await message.reply("🗑️ **Is file ke sabhi manual tags/captions delete kar diye gaye hain.**")
+    await message.reply("🗑️ **Is file ke sabhi manual tags aur caption delete kar diye gaye hain.**\nAb aap wapas `/addtag` use kar sakte hain.")

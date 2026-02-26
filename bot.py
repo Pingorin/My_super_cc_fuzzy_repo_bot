@@ -1,5 +1,6 @@
 import logging
 import logging.config
+import os
 from pyrogram import Client, __version__
 from pyrogram.raw.all import layer
 from database.ia_filterdb import Media
@@ -41,37 +42,14 @@ class Bot(Client):
         temp.START_TIME = st 
         
         # ==================================================================
-        # 🚀 1. START WEB SERVER FIRST (To prevent Render SIGTERM / Timeout)
+        # 1. CONNECT DATABASE & TELEGRAM BOT FIRST
         # ==================================================================
-        # Render ko port turant chahiye, isliye isko sabse pehle rakha gaya hai.
-        try:
-            curr_web_app = await web_server()
-            
-            # Configure Jinja2 Template Loader
-            aiohttp_jinja2.setup(curr_web_app, loader=jinja2.FileSystemLoader('templates'))
-            
-            # Inject bot instance for Streaming Feature
-            curr_web_app['bot'] = self 
-            
-            runner = web.AppRunner(curr_web_app)
-            await runner.setup()
-            bind_address = "0.0.0.0"
-            await web.TCPSite(runner, bind_address, PORT).start()
-            print(f"✅ Web Server Running smoothly on Port {PORT}")
-        except Exception as e:
-            print(f"⚠️ Web Server Error: {e}")
-
-        # ==================================================================
-        # 2. CONNECT DATABASE & TELEGRAM BOT
-        # ==================================================================
+        print("⏳ Connecting to Database & Telegram...", flush=True)
         b_users, b_chats = await db.get_banned()
         temp.BANNED_USERS = b_users
         temp.BANNED_CHATS = b_chats
         
         await super().start()
-        
-        # Ensure Indexes in Background
-        asyncio.create_task(Media.ensure_indexes())   
         
         me = await self.get_me()
         temp.ME = me.id
@@ -79,21 +57,40 @@ class Bot(Client):
         temp.B_NAME = me.first_name
         self.username = '@' + me.username
         
-        # Update web app with actual bot username
+        print(f"🤖 {me.first_name} is started now ❤️", flush=True)
+
+        # Ensure Indexes in Background
+        asyncio.create_task(Media.ensure_indexes())   
+
+        # ==================================================================
+        # 🚀 2. START WEB SERVER (Fixing Deprecation Warning)
+        # ==================================================================
         try:
+            curr_web_app = await web_server()
+            
+            # Configure Jinja2 Template Loader
+            aiohttp_jinja2.setup(curr_web_app, loader=jinja2.FileSystemLoader('templates'))
+            
+            # ✅ Set all variables BEFORE starting the Web Server
+            curr_web_app['bot'] = self 
             curr_web_app['bot_username'] = me.username
-        except: pass
-        
-        print(f"🤖 {me.first_name} is started now ❤️")
+            
+            runner = web.AppRunner(curr_web_app)
+            await runner.setup()
+            bind_address = "0.0.0.0"
+            await web.TCPSite(runner, bind_address, PORT).start()
+            print(f"✅ Web Server Running smoothly on Port {PORT}", flush=True)
+        except Exception as e:
+            print(f"⚠️ Web Server Error: {e}", flush=True)
 
         # ==================================================================
         # 3. START BACKGROUND SCHEDULERS
         # ==================================================================
         asyncio.create_task(auto_mention_scheduler(self))
-        print("⏳ Auto Mention Scheduler Started")
+        print("⏳ Auto Mention Scheduler Started", flush=True)
 
         asyncio.create_task(auto_post_scheduler(self))
-        print("📰 Auto Post Scheduler Started")
+        print("📰 Auto Post Scheduler Started", flush=True)
         
         # Restart Log
         if LOG_CHANNEL:
@@ -104,11 +101,11 @@ class Bot(Client):
                 timee = now.strftime("%H:%M:%S %p")
                 await self.send_message(chat_id=LOG_CHANNEL, text=f"<b>{me.mention} ʀᴇsᴛᴀʀᴛᴇᴅ 🤖\n\n📆 ᴅᴀᴛᴇ - <code>{today}</code>\n🕙 ᴛɪᴍᴇ - <code>{timee}</code></b>")
             except Exception as e:
-                print(f"Log Channel Error: {e}")
+                print(f"Log Channel Error: {e}", flush=True)
 
     async def stop(self, *args):
         await super().stop()
-        print("Bot stopped.")
+        print("Bot stopped.", flush=True)
 
     async def iter_messages(
         self,

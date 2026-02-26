@@ -14,12 +14,9 @@ from aiohttp import web
 from plugins.web_server import web_server
 import asyncio
 import time
-# ✅ New Imports for Site Mode
 import aiohttp_jinja2
 import jinja2
-# ✅ New Import for Auto Mention
 from plugins.auto_mention import auto_mention_scheduler
-# ✅ New Import for Auto Post
 from plugins.auto_post import auto_post_scheduler
 
 # Logging Setup
@@ -43,14 +40,37 @@ class Bot(Client):
         st = time.time()
         temp.START_TIME = st 
         
-        # Database Connect & Banned Data Load
+        # ==================================================================
+        # 🚀 1. START WEB SERVER FIRST (To prevent Render SIGTERM / Timeout)
+        # ==================================================================
+        # Render ko port turant chahiye, isliye isko sabse pehle rakha gaya hai.
+        try:
+            curr_web_app = await web_server()
+            
+            # Configure Jinja2 Template Loader
+            aiohttp_jinja2.setup(curr_web_app, loader=jinja2.FileSystemLoader('templates'))
+            
+            # Inject bot instance for Streaming Feature
+            curr_web_app['bot'] = self 
+            
+            runner = web.AppRunner(curr_web_app)
+            await runner.setup()
+            bind_address = "0.0.0.0"
+            await web.TCPSite(runner, bind_address, PORT).start()
+            print(f"✅ Web Server Running smoothly on Port {PORT}")
+        except Exception as e:
+            print(f"⚠️ Web Server Error: {e}")
+
+        # ==================================================================
+        # 2. CONNECT DATABASE & TELEGRAM BOT
+        # ==================================================================
         b_users, b_chats = await db.get_banned()
         temp.BANNED_USERS = b_users
         temp.BANNED_CHATS = b_chats
         
         await super().start()
         
-        # Indexes Ensure Karna (Background mein taaki Render Time Out na ho)
+        # Ensure Indexes in Background
         asyncio.create_task(Media.ensure_indexes())   
         
         me = await self.get_me()
@@ -59,45 +79,22 @@ class Bot(Client):
         temp.B_NAME = me.first_name
         self.username = '@' + me.username
         
-        print(f"{me.first_name} is started now ❤️")
+        # Update web app with actual bot username
+        try:
+            curr_web_app['bot_username'] = me.username
+        except: pass
+        
+        print(f"🤖 {me.first_name} is started now ❤️")
 
         # ==================================================================
-        # 📣 START BACKGROUND SCHEDULERS
+        # 3. START BACKGROUND SCHEDULERS
         # ==================================================================
-        
-        # 1. Auto Mention Task
         asyncio.create_task(auto_mention_scheduler(self))
-        print("Auto Mention Scheduler Started ⏳")
+        print("⏳ Auto Mention Scheduler Started")
 
-        # 2. Auto Post Task (Ads)
         asyncio.create_task(auto_post_scheduler(self))
-        print("Auto Post Scheduler Started 📰")
+        print("📰 Auto Post Scheduler Started")
         
-        # ==================================================================
-        # 🌐 WEB SERVER & JINJA2 SETUP (For Site Mode)
-        # ==================================================================
-        
-        # 1. Get the Web App instance
-        curr_web_app = await web_server()
-        
-        # 2. Configure Jinja2 Template Loader (Looks in 'templates' folder)
-        aiohttp_jinja2.setup(curr_web_app, loader=jinja2.FileSystemLoader('templates'))
-        
-        # 3. Inject Bot Username into Web App Context (For HTML Deep Links)
-        curr_web_app['bot_username'] = me.username
-        
-        curr_web_app['bot'] = self   # 👇 NAYA: Streaming ke liye bot instance pass kiya
-        
-        # 4. Run the App Runner
-        runner = web.AppRunner(curr_web_app)
-        await runner.setup()
-        bind_address = "0.0.0.0"
-        await web.TCPSite(runner, bind_address, PORT).start()
-        
-        print(f"Web Server Running on Port {PORT} with Jinja2 Templates")
-        
-        # ==================================================================
-
         # Restart Log
         if LOG_CHANNEL:
             try:

@@ -30,28 +30,42 @@ def seconds_to_str(seconds):
     return f"{int(seconds/86400)}days"
 
 # --- /settings COMMAND (PRO DATABASE CACHE MODE) ---
-@Client.on_message(filters.command("settings"))
+# --- /settings COMMAND (PRO DATABASE CACHE MODE) ---
+@Client.on_message(filters.command(["settings", "setting"]))
 async def settings_command(client, message):
-    user_id = message.from_user.id
-    
-    # 1. AGAR GROUP MEIN USE KIYA (Admins ko DB me save karo)
+    # ✅ FIX 1: Anonymous Admin hone par bot crash nahi hoga
+    if message.from_user:
+        user_id = message.from_user.id
+    elif message.sender_chat:
+        user_id = message.sender_chat.id
+    else:
+        return await message.reply("❌ Error: Main aapki ID nahi pehchan paaya.")
+
+    # 1. AGAR GROUP MEIN USE KIYA
     if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         try:
-            member = await client.get_chat_member(message.chat.id, user_id)
-            if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR] and user_id not in ADMINS:
+            # ✅ FIX 2: Anonymous admin bypass and error handling
+            is_admin = False
+            if message.sender_chat and message.sender_chat.id == message.chat.id:
+                is_admin = True # Ye group ka anonymous admin hai
+            else:
+                member = await client.get_chat_member(message.chat.id, user_id)
+                if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
+                    is_admin = True
+
+            if not is_admin and user_id not in ADMINS:
                 return await message.reply_text("❌ **Sirf Admins ye command use kar sakte hain!**")
-        except:
-            return
+        except Exception as e:
+            return await message.reply_text(f"❌ **Error!** Kripya pehle mujhe is group me Admin banayein.\n(`{e}`)")
         
-        # ✅ NEW: Database me saare Admins ki ID save (Cache) karna
+        # Database me saare Admins ki ID save karna
         try:
             admin_ids = []
             async for admin in client.get_chat_members(message.chat.id, filter=enums.ChatMembersFilter.ADMINISTRATORS):
                 admin_ids.append(admin.user.id)
-            # MongoDB update
             await db.groups.update_one({"id": message.chat.id}, {"$set": {"admins": admin_ids}}, upsert=True)
-        except Exception as e:
-            print(f"Admin cache error: {e}")
+        except Exception:
+            pass
 
         await db.add_group(message.chat.id, message.chat.title)
         
@@ -75,13 +89,15 @@ async def settings_command(client, message):
         user_groups = []
         is_bot_admin = user_id in ADMINS
         
-        # ✅ NAYA JADOO: DB se sirf wahi group maango jisme ye user 'admins' list me hai!
         db_query = {} if is_bot_admin else {"admins": user_id}
         
-        async for group in db.groups.find(db_query):
-            chat_id = group.get('id')
-            title = group.get('title', f"Group {chat_id}")
-            user_groups.append((title, chat_id))
+        try:
+            async for group in db.groups.find(db_query):
+                chat_id = group.get('id')
+                title = group.get('title', f"Group {chat_id}")
+                user_groups.append((title, chat_id))
+        except Exception as e:
+            return await msg.edit_text(f"❌ Database connection error: {e}")
 
         await msg.delete()
         

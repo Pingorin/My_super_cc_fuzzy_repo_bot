@@ -87,8 +87,7 @@ async def settings_command(client, message):
     elif message.chat.type == enums.ChatType.PRIVATE:
         msg = await message.reply_text("🔄 **Loading your groups...**")
         user_groups = []
-        is_bot_admin = user_id in ADMINS
-        
+        is_bot_admin = str(user_id) in str(ADMINS)        
         db_query = {} if is_bot_admin else {"admins": user_id}
         
         try:
@@ -2039,7 +2038,7 @@ async def request_feature_ui(client, query):
 @Client.on_callback_query(filters.regex(r"^set_back_home"))
 async def back_to_group_list(client, query):
     user_id = query.from_user.id
-    is_bot_admin = user_id in ADMINS
+    is_bot_admin = str(user_id) in str(ADMINS)
     user_groups = []
     
     db_query = {} if is_bot_admin else {"admins": user_id}

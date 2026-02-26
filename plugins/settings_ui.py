@@ -53,7 +53,7 @@ async def settings_command(client, message):
                 if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
                     is_admin = True
 
-            if not is_admin and user_id not in ADMINS:
+            if not is_admin and str(user_id) not in str(ADMINS):
                 return await message.reply_text("❌ **Sirf Admins ye command use kar sakte hain!**")
         except Exception as e:
             return await message.reply_text(f"❌ **Error!** Kripya pehle mujhe is group me Admin banayein.\n(`{e}`)")

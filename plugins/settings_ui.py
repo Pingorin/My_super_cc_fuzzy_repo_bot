@@ -33,81 +33,92 @@ def seconds_to_str(seconds):
 # --- /settings COMMAND (PRO DATABASE CACHE MODE) ---
 @Client.on_message(filters.command(["settings", "setting"]))
 async def settings_command(client, message):
-    # ✅ FIX 1: Anonymous Admin hone par bot crash nahi hoga
-    if message.from_user:
-        user_id = message.from_user.id
-    elif message.sender_chat:
-        user_id = message.sender_chat.id
-    else:
-        return await message.reply("❌ Error: Main aapki ID nahi pehchan paaya.")
-
-    # 1. AGAR GROUP MEIN USE KIYA
-    if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-        try:
-            # ✅ FIX 2: Anonymous admin bypass and error handling
-            is_admin = False
-            if message.sender_chat and message.sender_chat.id == message.chat.id:
-                is_admin = True # Ye group ka anonymous admin hai
-            else:
-                member = await client.get_chat_member(message.chat.id, user_id)
-                if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-                    is_admin = True
-
-            if not is_admin and str(user_id) not in str(ADMINS):
-                return await message.reply_text("❌ **Sirf Admins ye command use kar sakte hain!**")
-        except Exception as e:
-            return await message.reply_text(f"❌ **Error!** Kripya pehle mujhe is group me Admin banayein.\n(`{e}`)")
+    try:
+        print("🚀 SETTINGS COMMAND TRIGGERED!") # Terminal pe check karne ke liye
         
-        # Database me saare Admins ki ID save karna
-        try:
-            admin_ids = []
-            async for admin in client.get_chat_members(message.chat.id, filter=enums.ChatMembersFilter.ADMINISTRATORS):
-                admin_ids.append(admin.user.id)
-            await db.groups.update_one({"id": message.chat.id}, {"$set": {"admins": admin_ids}}, upsert=True)
-        except Exception:
-            pass
+        # ✅ FIX 1: Anonymous Admin hone par bot crash nahi hoga
+        if message.from_user:
+            user_id = message.from_user.id
+        elif message.sender_chat:
+            user_id = message.sender_chat.id
+        else:
+            return await message.reply("❌ Error: Main aapki ID nahi pehchan paaya.")
 
-        await db.add_group(message.chat.id, message.chat.title)
-        
-        title = message.chat.title
-        buttons = [
-            [InlineKeyboardButton("💰 Earning method", callback_data=f"set_earn#{message.chat.id}"), InlineKeyboardButton("📢 Force Subscribe", callback_data=f"fsub_menu#{message.chat.id}")],
-            [InlineKeyboardButton("📜 Result mode", callback_data=f"set_res_mode#{message.chat.id}"), InlineKeyboardButton("📄 Result per page", callback_data=f"set_page_limit#{message.chat.id}")],
-            [InlineKeyboardButton("🗑️ Auto-Delete", callback_data=f"autodel_menu#{message.chat.id}"), InlineKeyboardButton("👍 Auto Reaction", callback_data=f"autoreact_ui#{message.chat.id}")],
-            [InlineKeyboardButton("👋 Welcome Settings", callback_data=f"welcome_ui#{message.chat.id}"), InlineKeyboardButton("🛡️ Anti-Spam", callback_data=f"antispam_ui#{message.chat.id}")],
-            [InlineKeyboardButton("📢 Auto Post", callback_data=f"autopost_ui#{message.chat.id}"), InlineKeyboardButton("📣 Auto Mention", callback_data=f"automention_ui#{message.chat.id}")],
-            [InlineKeyboardButton("👑 Admin Free Access", callback_data=f"adm_access_ui#{message.chat.id}"), InlineKeyboardButton("📊 Daily Stats", callback_data=f"daily_stats#{message.chat.id}#today")],
-            [InlineKeyboardButton("🧨 Reset Settings", callback_data=f"reset_grp_ui#{message.chat.id}"), InlineKeyboardButton("🔗 Other URLs", callback_data=f"other_urls_ui#{message.chat.id}")],
-            [InlineKeyboardButton("💎 Free Premium", callback_data=f"ref_sys_menu#{message.chat.id}"), InlineKeyboardButton("💡 Request Features", callback_data=f"req_feature#{message.chat.id}")],
-            [InlineKeyboardButton("❌ Close", callback_data="close_data")]
-        ]
-        await message.reply_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
+        # 1. AGAR GROUP MEIN USE KIYA
+        if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+            try:
+                # ✅ FIX 2: Anonymous admin bypass and error handling
+                is_admin = False
+                if message.sender_chat and message.sender_chat.id == message.chat.id:
+                    is_admin = True # Ye group ka anonymous admin hai
+                else:
+                    member = await client.get_chat_member(message.chat.id, user_id)
+                    if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
+                        is_admin = True
 
-    # 2. AGAR PM MEIN USE KIYA (Fast DB Query)
-    elif message.chat.type == enums.ChatType.PRIVATE:
-        msg = await message.reply_text("🔄 **Loading your groups...**")
-        user_groups = []
-        is_bot_admin = str(user_id) in str(ADMINS)        
-        db_query = {} if is_bot_admin else {"admins": user_id}
-        
-        try:
-            async for group in db.groups.find(db_query):
-                chat_id = group.get('id')
-                title = group.get('title', f"Group {chat_id}")
-                user_groups.append((title, chat_id))
-        except Exception as e:
-            return await msg.edit_text(f"❌ Database connection error: {e}")
+                if not is_admin and str(user_id) not in str(ADMINS):
+                    return await message.reply_text("❌ **Sirf Admins ye command use kar sakte hain!**")
+            except Exception as e:
+                return await message.reply_text(f"❌ **Error!** Kripya pehle mujhe is group me Admin banayein.\n(`{e}`)")
+            
+            # Database me saare Admins ki ID save karna
+            try:
+                admin_ids = []
+                async for admin in client.get_chat_members(message.chat.id, filter=enums.ChatMembersFilter.ADMINISTRATORS):
+                    admin_ids.append(admin.user.id)
+                await db.groups.update_one({"id": message.chat.id}, {"$set": {"admins": admin_ids}}, upsert=True)
+            except Exception:
+                pass
 
-        await msg.delete()
-        
-        if not user_groups:
-            return await message.reply_text("❌ **No Groups Found!**\nKripya pehle apne group me ja kar ek baar `/settings` type karein taaki bot aapko pehchan sake.")
+            await db.add_group(message.chat.id, message.chat.title)
+            
+            title = message.chat.title
+            buttons = [
+                [InlineKeyboardButton("💰 Earning method", callback_data=f"set_earn#{message.chat.id}"), InlineKeyboardButton("📢 Force Subscribe", callback_data=f"fsub_menu#{message.chat.id}")],
+                [InlineKeyboardButton("📜 Result mode", callback_data=f"set_res_mode#{message.chat.id}"), InlineKeyboardButton("📄 Result per page", callback_data=f"set_page_limit#{message.chat.id}")],
+                [InlineKeyboardButton("🗑️ Auto-Delete", callback_data=f"autodel_menu#{message.chat.id}"), InlineKeyboardButton("👍 Auto Reaction", callback_data=f"autoreact_ui#{message.chat.id}")],
+                [InlineKeyboardButton("👋 Welcome Settings", callback_data=f"welcome_ui#{message.chat.id}"), InlineKeyboardButton("🛡️ Anti-Spam", callback_data=f"antispam_ui#{message.chat.id}")],
+                [InlineKeyboardButton("📢 Auto Post", callback_data=f"autopost_ui#{message.chat.id}"), InlineKeyboardButton("📣 Auto Mention", callback_data=f"automention_ui#{message.chat.id}")],
+                [InlineKeyboardButton("👑 Admin Free Access", callback_data=f"adm_access_ui#{message.chat.id}"), InlineKeyboardButton("📊 Daily Stats", callback_data=f"daily_stats#{message.chat.id}#today")],
+                [InlineKeyboardButton("🧨 Reset Settings", callback_data=f"reset_grp_ui#{message.chat.id}"), InlineKeyboardButton("🔗 Other URLs", callback_data=f"other_urls_ui#{message.chat.id}")],
+                [InlineKeyboardButton("💎 Free Premium", callback_data=f"ref_sys_menu#{message.chat.id}"), InlineKeyboardButton("💡 Request Features", callback_data=f"req_feature#{message.chat.id}")],
+                [InlineKeyboardButton("❌ Close", callback_data="close_data")]
+            ]
+            await message.reply_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
-        buttons = []
-        for title, chat_id in user_groups:
-            buttons.append([InlineKeyboardButton(f"📂 {title}", callback_data=f"set_main#{chat_id}")])
-        
-        await message.reply_text("⚙️ **Select your Group:**", reply_markup=InlineKeyboardMarkup(buttons))
+        # 2. AGAR PM MEIN USE KIYA (Fast DB Query)
+        elif message.chat.type == enums.ChatType.PRIVATE:
+            msg = await message.reply_text("🔄 **Loading your groups...**")
+            user_groups = []
+            is_bot_admin = str(user_id) in str(ADMINS)
+            
+            db_query = {} if is_bot_admin else {"admins": user_id}
+            
+            try:
+                async for group in db.groups.find(db_query):
+                    chat_id = group.get('id')
+                    title = group.get('title', f"Group {chat_id}")
+                    user_groups.append((title, chat_id))
+            except Exception as e:
+                return await msg.edit_text(f"❌ Database connection error: {e}")
+
+            await msg.delete()
+            
+            if not user_groups:
+                return await message.reply_text("❌ **No Groups Found!**\nKripya pehle apne group me ja kar ek baar `/settings` type karein taaki bot aapko pehchan sake.")
+
+            buttons = []
+            for title, chat_id in user_groups:
+                buttons.append([InlineKeyboardButton(f"📂 {title}", callback_data=f"set_main#{chat_id}")])
+            
+            await message.reply_text("⚙️ **Select your Group:**", reply_markup=InlineKeyboardMarkup(buttons))
+            
+    except Exception as e:
+        # Ye line kisi bhi hidden error ko pakad legi aur Telegram pe bhej degi!
+        import traceback
+        traceback.print_exc()
+        try: await message.reply_text(f"❌ **Unexpected Error in /settings:**\n`{e}`")
+        except: pass
 
 # ==============================================================================
 # ⚙️ MAIN SETTINGS MENU

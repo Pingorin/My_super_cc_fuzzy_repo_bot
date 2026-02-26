@@ -7,7 +7,7 @@ from info import BIN_CHANNEL
 logger = logging.getLogger(__name__)
 
 async def media_streamer(request: web.Request, is_watch: bool = False):
-    bot = request.app['bot'] # Pyrogram Client
+    bot = request.app['bot'] 
     
     try:
         message_id = int(request.match_info.get('message_id'))
@@ -41,6 +41,8 @@ async def media_streamer(request: web.Request, is_watch: bool = False):
                     limit = file_size - offset
 
         status_code = 206 if range_header else 200
+        
+        # Streaming ke liye hamesha inline rakhein taaki browser me play ho
         disposition = "inline" if is_watch else "attachment"
         
         response = web.StreamResponse(
@@ -56,12 +58,12 @@ async def media_streamer(request: web.Request, is_watch: bool = False):
         
         await response.prepare(request)
 
-        # 3. Stream File without downloading to server RAM
+        # 3. Stream File
         try:
             async for chunk in bot.stream_media(media, offset=offset, limit=limit):
                 await response.write(chunk)
         except (ConnectionResetError, asyncio.CancelledError):
-            pass # User closed video player
+            pass 
         except Exception as e:
             logger.error(f"Streaming Error: {e}")
             
@@ -74,32 +76,44 @@ async def media_streamer(request: web.Request, is_watch: bool = False):
 async def stream_download(request): 
     return await media_streamer(request, is_watch=False)
 
-# ✅ Web Player jisse Telegram ke andar hi movie chale
+# ✅ NAYA: Redirect Landing Page (Shorteners jaisa)
 async def stream_watch(request):
     msg_id = request.match_info.get('message_id')
+    base_url = f"{request.scheme}://{request.host}"
+    
     html_content = f"""
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Watch Online</title>
+        <title>Redirecting to Chrome...</title>
         <style>
-            body {{ background-color: #0f0f0f; color: #fff; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; }}
-            video {{ width: 100%; max-width: 800px; max-height: 70vh; outline: none; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }}
-            .btn-container {{ margin-top: 20px; }}
-            .btn {{ background-color: #0088cc; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px; transition: 0.3s; }}
-            .btn:hover {{ background-color: #005f8f; }}
+            body {{ background-color: #0f0f0f; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; text-align: center; margin: 0; }}
+            .box {{ background: #1e1e1e; padding: 40px 30px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); border: 1px solid #333; }}
+            .btn {{ background-color: #0088cc; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 18px; margin-top: 20px; display: inline-block; transition: 0.3s; }}
+            .btn:hover {{ background-color: #005f8f; transform: scale(1.05); }}
+            p {{ color: #bbb; font-size: 14px; margin-top: 20px; }}
         </style>
     </head>
     <body>
-        <video controls autoplay>
-            <source src="/{msg_id}" type="video/mp4">
-            Your browser does not support the video tag.
-        </video>
-        <div class="btn-container">
-            <a href="/{msg_id}" class="btn">📥 Download Video</a>
+        <div class="box">
+            <h2>🎥 Loading Your Video...</h2>
+            <p>If you are not redirected automatically, click the button below to open in Google Chrome or VLC.</p>
+            <a href="{base_url}/{msg_id}" class="btn" target="_blank">🍿 Watch / Download Now</a>
         </div>
+
+        <script>
+            // ✅ Yahi wo jadoo hai jo shorteners use karte hain (Android Chrome Intent)
+            var isAndroid = /android/i.test(navigator.userAgent);
+            var scheme = window.location.protocol.replace(':', '');
+            var hostAndPath = window.location.host + "/{msg_id}";
+            
+            if (isAndroid) {{
+                // Ye script Telegram ko bypass karke direct Chrome khol degi
+                window.location.href = "intent://" + hostAndPath + "#Intent;scheme=" + scheme + ";package=com.android.chrome;end";
+            }}
+        </script>
     </body>
     </html>
     """

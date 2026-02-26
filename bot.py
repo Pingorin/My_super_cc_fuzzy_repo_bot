@@ -1,6 +1,5 @@
 import logging
 import logging.config
-import os
 from pyrogram import Client, __version__
 from pyrogram.raw.all import layer
 from database.ia_filterdb import Media
@@ -17,6 +16,7 @@ import asyncio
 import time
 import aiohttp_jinja2
 import jinja2
+import warnings
 from plugins.auto_mention import auto_mention_scheduler
 from plugins.auto_post import auto_post_scheduler
 
@@ -42,13 +42,33 @@ class Bot(Client):
         temp.START_TIME = st 
         
         # ==================================================================
-        # 1. CONNECT DATABASE & TELEGRAM BOT FIRST
+        # 🚀 1. START WEB SERVER FIRST (Render Timeout Fix)
         # ==================================================================
-        print("⏳ Connecting to Database & Telegram...", flush=True)
+        print("🌐 Starting Web Server...", flush=True)
+        try:
+            curr_web_app = await web_server()
+            aiohttp_jinja2.setup(curr_web_app, loader=jinja2.FileSystemLoader('templates'))
+            
+            # Inject bot early for Streaming
+            curr_web_app['bot'] = self 
+            
+            runner = web.AppRunner(curr_web_app)
+            await runner.setup()
+            bind_address = "0.0.0.0"
+            await web.TCPSite(runner, bind_address, PORT).start()
+            print(f"✅ Web Server is LIVE on Port {PORT}", flush=True)
+        except Exception as e:
+            print(f"⚠️ Web Server Error: {e}", flush=True)
+
+        # ==================================================================
+        # 2. CONNECT TO DATABASE & TELEGRAM
+        # ==================================================================
+        print("⏳ Connecting to Database...", flush=True)
         b_users, b_chats = await db.get_banned()
         temp.BANNED_USERS = b_users
         temp.BANNED_CHATS = b_chats
         
+        print("⏳ Connecting to Telegram...", flush=True)
         await super().start()
         
         me = await self.get_me()
@@ -57,35 +77,18 @@ class Bot(Client):
         temp.B_NAME = me.first_name
         self.username = '@' + me.username
         
+        # ✅ FIX: Warning hide kar di gayi hai
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            curr_web_app['bot_username'] = me.username
+        
         print(f"🤖 {me.first_name} is started now ❤️", flush=True)
 
-        # Ensure Indexes in Background
+        # ==================================================================
+        # 3. START BACKGROUND TASKS
+        # ==================================================================
         asyncio.create_task(Media.ensure_indexes())   
-
-        # ==================================================================
-        # 🚀 2. START WEB SERVER (Fixing Deprecation Warning)
-        # ==================================================================
-        try:
-            curr_web_app = await web_server()
-            
-            # Configure Jinja2 Template Loader
-            aiohttp_jinja2.setup(curr_web_app, loader=jinja2.FileSystemLoader('templates'))
-            
-            # ✅ Set all variables BEFORE starting the Web Server
-            curr_web_app['bot'] = self 
-            curr_web_app['bot_username'] = me.username
-            
-            runner = web.AppRunner(curr_web_app)
-            await runner.setup()
-            bind_address = "0.0.0.0"
-            await web.TCPSite(runner, bind_address, PORT).start()
-            print(f"✅ Web Server Running smoothly on Port {PORT}", flush=True)
-        except Exception as e:
-            print(f"⚠️ Web Server Error: {e}", flush=True)
-
-        # ==================================================================
-        # 3. START BACKGROUND SCHEDULERS
-        # ==================================================================
+        
         asyncio.create_task(auto_mention_scheduler(self))
         print("⏳ Auto Mention Scheduler Started", flush=True)
 

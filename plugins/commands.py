@@ -625,45 +625,21 @@ async def start_handler(client, message):
                     if cap_btn_text and cap_btn_url:
                         btn_rows.append([InlineKeyboardButton(cap_btn_text, url=cap_btn_url)])
                     
-                    # ✅ NAYA: Streaming Buttons aur Link add kar diya (Send All me)
-                    try:
-                        bin_msg = await client.send_cached_media(chat_id=info.BIN_CHANNEL, file_id=file_details['file_id'])
-                        base_url = info.SITE_URL.rstrip('/') if info.SITE_URL else "http://127.0.0.1:8080"
-                        
-                        watch_url = f"{base_url}/watch/{bin_msg.id}"
-                        dl_url = f"{base_url}/{bin_msg.id}"
-                        
-                        btn_rows.append([
-                            InlineKeyboardButton("🍿 Watch Online", url=watch_url),
-                            InlineKeyboardButton("⚡ Fast Download", url=dl_url)
-                        ])
-                        
-                        final_caption += f"\n\n🍿 **Watch Online Link:**\n`{watch_url}`\n\n⚡ **Download Link:**\n`{dl_url}`\n\n_(Link par click karein ya copy karke Chrome/Safari me paste karein)_"
-                    except Exception as e:
-                        print(f"Streaming Button Error: {e}")
-                    
                     reply_markup = InlineKeyboardMarkup(btn_rows) if btn_rows else None
 
-                    sent_file = await client.send_cached_media(
+                    # ✅ Naya: Sent message ko filesarr me append karna
+                    sent_media = await client.send_cached_media(
                         chat_id=message.from_user.id,
                         file_id=file_details['file_id'],
                         caption=final_caption,
                         reply_markup=reply_markup,
                         parse_mode=enums.ParseMode.HTML
                     )
-                    
-                    # ✅ Naya: File ko reply karke warning message bhejna
-                    warning_msg = await sent_file.reply_text(
-                        "⚠️ **DHYAN DEIN:**\n\nYe file theek **1 minute** baad yahan se automatically delete ho jayegi. Kripya isko jaldi se apne Saved Messages me forward kar lein!",
-                        quote=True
-                    )
-                    
-                    # File aur Warning Message dono ko 60 seconds (1 minute) me delete karna
-                    asyncio.create_task(delete_after_delay(sent_file, 60))
-                    asyncio.create_task(delete_after_delay(warning_msg, 60))
+                    filesarr.append(sent_media)
                     
                     sent_count += 1
-                    await asyncio.sleep(0.8)                    
+                    await asyncio.sleep(0.8) # FloodWait Prevention
+                    
                 except Exception as e:
                     print(f"Send All Error: {e}")
                     continue
@@ -835,29 +811,13 @@ async def start_handler(client, message):
             # C) 💎 FREE PREMIUM BUTTON (Below File)
             btn_rows.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
 
-            # ✅ NAYA: Streaming Buttons aur Link add kar diya (Single File me)
-            try:
-                bin_msg = await client.send_cached_media(chat_id=info.BIN_CHANNEL, file_id=file_data.get('file_id'))
-                base_url = info.SITE_URL.rstrip('/') if info.SITE_URL else "http://127.0.0.1:8080"
-                
-                watch_url = f"{base_url}/watch/{bin_msg.id}"
-                dl_url = f"{base_url}/{bin_msg.id}"
-                
-                btn_rows.append([
-                    InlineKeyboardButton("🍿 Watch Online", url=watch_url),
-                    InlineKeyboardButton("⚡ Fast Download", url=dl_url)
-                ])
-                
-                final_caption += f"\n\n🍿 **Watch Online Link:**\n`{watch_url}`\n\n⚡ **Download Link:**\n`{dl_url}`\n\n_(Link par click karein ya copy karke Chrome/Safari me paste karein)_"
-            except Exception as e:
-                print(f"Streaming Button Error: {e}")
-
             if btn_rows:
                 reply_markup = InlineKeyboardMarkup(btn_rows)
 
             # --- 4. SEND MEDIA ---
             try: 
-                sent_file = await client.send_cached_media(
+                # ✅ Naya: File bhej kar variable me save karna
+                sent_media = await client.send_cached_media(
                     chat_id=message.from_user.id, 
                     file_id=file_data.get('file_id'), 
                     caption=final_caption, 
@@ -866,14 +826,13 @@ async def start_handler(client, message):
                 )
                 
                 # ✅ Naya: File ko reply karke warning message bhejna
-                warning_msg = await sent_file.reply_text(
+                warning_msg = await sent_media.reply_text(
                     "⚠️ **DHYAN DEIN:**\n\nYe file theek **1 minute** baad yahan se automatically delete ho jayegi. Kripya isko jaldi se apne Saved Messages me forward kar lein!",
                     quote=True
                 )
                 
-                # File aur Warning Message dono ko 60 seconds (1 minute) me delete karna
-                asyncio.create_task(delete_after_delay(sent_file, 60))
-                asyncio.create_task(delete_after_delay(warning_msg, 60))
+                # ✅ Naya: Auto delete task start (Single mode)
+                asyncio.create_task(auto_delete_single(sent_media, warning_msg, message.command[1]))
                 
             except Exception as e: 
                 await message.reply(f"❌ Error sending file: `{e}`")

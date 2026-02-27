@@ -43,7 +43,7 @@ async def settings_command(client, message):
         except:
             return
         
-        # ✅ Chupchap DB me Admins ko save kar lo taaki PM me "No Group Found" na aaye
+        # Chupchap DB me Admins ko save kar lo taaki PM me "No Group Found" na aaye
         try:
             admin_ids = []
             async for admin in client.get_chat_members(message.chat.id, filter=enums.ChatMembersFilter.ADMINISTRATORS):
@@ -51,7 +51,7 @@ async def settings_command(client, message):
             await db.groups.update_one({"id": message.chat.id}, {"$set": {"admins": admin_ids}}, upsert=True)
             await db.add_group(message.chat.id, message.chat.title)
         except Exception as e:
-            print(f"Admin cache error: {e}")
+            pass
 
         # PM me bhejne ke liye Button
         bot_me = await client.get_me()
@@ -61,18 +61,29 @@ async def settings_command(client, message):
             reply_markup=InlineKeyboardMarkup(btn)
         )
 
-    # 2. AGAR PM MEIN USE KIYA (Fast DB Query - Strict Admin Check)
+    # 2. AGAR PM MEIN USE KIYA (Fast DB Query with Anti-Duplicate & Channel Filter)
     elif message.chat.type == enums.ChatType.PRIVATE:
         msg = await message.reply_text("🔄 **Loading your groups...**")
         user_groups = []
+        seen_chats = set() # Duplicates ko hatane ke liye set use kiya hai
         
-        # ✅ FIX: DB se sirf wahi group maango jisme ye user 'admins' list me hai!
         db_query = {"admins": user_id}
         
         async for group in db.groups.find(db_query):
             chat_id = group.get('id')
-            title = group.get('title', f"Group {chat_id}")
-            user_groups.append((title, chat_id))
+            
+            # Agar duplicate entry hai toh turant skip kardo
+            if chat_id in seen_chats:
+                continue
+                
+            # Live check karo ki ye sach me Group hai, Channel nahi
+            try:
+                chat_info = await client.get_chat(chat_id)
+                if chat_info.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+                    user_groups.append((chat_info.title, chat_id))
+                    seen_chats.add(chat_id)
+            except Exception:
+                pass # Agar bot ko nikal diya hai ya channel hai, toh ignore karo
 
         await msg.delete()
         
@@ -2007,28 +2018,3 @@ async def request_feature_ui(client, query):
         
     except Exception as e:
         pass # Timeout
-
-# ==============================================================================
-# ✅ BACK BUTTON KO BHI FAST BANAYA GAYA HAI
-# ==============================================================================
-@Client.on_callback_query(filters.regex(r"^set_back_home"))
-async def back_to_group_list(client, query):
-    user_id = query.from_user.id
-    user_groups = []
-    
-    # Strict Admin Check: DB se sirf wahi group aayenge jisme aap sach me Admin hain
-    db_query = {"admins": user_id}
-    
-    async for group in db.groups.find(db_query):
-        chat_id = group.get('id')
-        title = group.get('title', f"Group {chat_id}")
-        user_groups.append((title, chat_id))
-
-    if not user_groups:
-        return await query.message.edit_text("❌ **No Groups Found!**")
-
-    buttons = []
-    for title, chat_id in user_groups:
-        buttons.append([InlineKeyboardButton(f"📂 {title}", callback_data=f"set_main#{chat_id}")])
-    
-    await query.message.edit_text("⚙️ **Select your Group:**", reply_markup=InlineKeyboardMarkup(buttons))

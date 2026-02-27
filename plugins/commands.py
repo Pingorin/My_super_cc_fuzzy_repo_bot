@@ -424,7 +424,7 @@ async def start_handler(client, message):
             await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
             return
 
-        if len(message.command) > 1 and not (message.command[1].startswith("verify_") or message.command[1].startswith("get_") or message.command[1].startswith("sendall_")):
+        if len(message.command) > 1 and not (message.command[1].startswith("verify_") or message.command[1].startswith("get_") or message.command[1].startswith("sendall_") or message.command[1] == "settings"):
              if not await check_fsub(client, message.from_user.id, message): return
 
     # -------------------------------------------------------------------------
@@ -795,8 +795,13 @@ async def start_handler(client, message):
         except Exception as e: await message.reply(f"❌ Error: {e}")
         return
 
-    # --- PRIVATE START MESSAGE UI ---
+    # --- PRIVATE START MESSAGE UI (SETTINGS REDIRECT HANDLER ADDED) ---
     if message.chat.type == enums.ChatType.PRIVATE:
+        # If user was redirected from group to use /settings
+        if len(message.command) > 1 and message.command[1] == "settings":
+            from plugins.settings_ui import settings_command
+            return await settings_command(client, message)
+            
         text = f"Hello {message.from_user.mention} 👋,\nI am a Powerul Auto Filter Bot."
         buttons = [
             [InlineKeyboardButton('⇆ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘs ⇆', url=f'http://t.me/{temp.U_NAME}?startgroup=start')],

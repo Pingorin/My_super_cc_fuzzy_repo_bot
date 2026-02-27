@@ -140,7 +140,7 @@ class MediaDB:
             existing_unique_ids = set()
 
         new_items = []
-        seen_in_batch = set() # ✅ FIX: Ek hi list me aane wali duplicate files ko block karega
+        seen_in_batch = set() 
         pre_duplicate_count = 0
         
         for media, msg in items:
@@ -234,7 +234,6 @@ class MediaDB:
             })
             current_id += 1
 
-        # ✅ FIX: Error handling with BulkWriteError
         saved_count = 0
         if data_docs:
             try:
@@ -250,7 +249,7 @@ class MediaDB:
                 try:
                     await self.search_col.insert_many(search_docs, ordered=False)
                 except BulkWriteError:
-                    pass # Ignore if partial failure due to index collision
+                    pass 
                 except Exception as e:
                     print(f"⚠️ Search Index Error: {e}")
                 
@@ -267,7 +266,7 @@ class MediaDB:
                 must_clauses.append({
                     "text": {
                         "query": word,
-                        "path": ["file_name", "search_text", "caption"], # ✅ Now utilizing the Master Search Field
+                        "path": ["file_name", "search_text", "caption"], 
                         "fuzzy": {"maxEdits": 1}
                     }
                 })
@@ -329,11 +328,24 @@ class MediaDB:
             return files
             
         except Exception as e:
-            print(f"⚠️ Index Search Failed: {e}. Switching to Fallback.")
-            safe_query = re.escape(query)
-            regex = re.compile(safe_query, re.IGNORECASE)
+            print(f"⚠️ Index Search Failed: {e}. Switching to Word-by-Word Fallback.")
             
-            fallback_filter = {"$or": [{"file_name": regex}, {"search_text": regex}, {"caption": regex}]}
+            # ✅ NAYA LOGIC: Word-by-Word Fallback Search
+            words = query.split()
+            and_clauses = []
+            
+            for word in words:
+                regex = re.compile(re.escape(word), re.IGNORECASE)
+                and_clauses.append({
+                    "$or": [
+                        {"search_text": regex},
+                        {"file_name": regex}, 
+                        {"caption": regex}
+                    ]
+                })
+
+            fallback_filter = {"$and": and_clauses} if and_clauses else {}
+            
             if file_type and file_type != "none": 
                 fallback_filter["file_type"] = "video" if file_type.lower() == "video" else "document"
 

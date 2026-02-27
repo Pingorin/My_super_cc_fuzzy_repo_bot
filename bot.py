@@ -14,12 +14,10 @@ from aiohttp import web
 from plugins.web_server import web_server
 import asyncio
 import time
-# ✅ New Imports for Site Mode
 import aiohttp_jinja2
 import jinja2
-# ✅ New Import for Auto Mention
+import warnings
 from plugins.auto_mention import auto_mention_scheduler
-# ✅ New Import for Auto Post
 from plugins.auto_post import auto_post_scheduler
 
 # Logging Setup
@@ -43,15 +41,35 @@ class Bot(Client):
         st = time.time()
         temp.START_TIME = st 
         
-        # Database Connect & Banned Data Load
+        # ==================================================================
+        # 🚀 1. START WEB SERVER FIRST (Render Timeout Fix)
+        # ==================================================================
+        print("🌐 Starting Web Server...", flush=True)
+        try:
+            curr_web_app = await web_server()
+            aiohttp_jinja2.setup(curr_web_app, loader=jinja2.FileSystemLoader('templates'))
+            
+            # Inject bot early for Streaming
+            curr_web_app['bot'] = self 
+            
+            runner = web.AppRunner(curr_web_app)
+            await runner.setup()
+            bind_address = "0.0.0.0"
+            await web.TCPSite(runner, bind_address, PORT).start()
+            print(f"✅ Web Server is LIVE on Port {PORT}", flush=True)
+        except Exception as e:
+            print(f"⚠️ Web Server Error: {e}", flush=True)
+
+        # ==================================================================
+        # 2. CONNECT TO DATABASE & TELEGRAM
+        # ==================================================================
+        print("⏳ Connecting to Database...", flush=True)
         b_users, b_chats = await db.get_banned()
         temp.BANNED_USERS = b_users
         temp.BANNED_CHATS = b_chats
         
+        print("⏳ Connecting to Telegram...", flush=True)
         await super().start()
-        
-        # Indexes Ensure Karna 
-        await Media.ensure_indexes()
         
         me = await self.get_me()
         temp.ME = me.id
@@ -59,43 +77,24 @@ class Bot(Client):
         temp.B_NAME = me.first_name
         self.username = '@' + me.username
         
-        print(f"{me.first_name} is started now ❤️")
+        # ✅ FIX: Warning hide kar di gayi hai
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            curr_web_app['bot_username'] = me.username
+        
+        print(f"🤖 {me.first_name} is started now ❤️", flush=True)
 
         # ==================================================================
-        # 📣 START BACKGROUND SCHEDULERS
+        # 3. START BACKGROUND TASKS
         # ==================================================================
+        asyncio.create_task(Media.ensure_indexes())   
         
-        # 1. Auto Mention Task
         asyncio.create_task(auto_mention_scheduler(self))
-        print("Auto Mention Scheduler Started ⏳")
+        print("⏳ Auto Mention Scheduler Started", flush=True)
 
-        # 2. Auto Post Task (Ads)
         asyncio.create_task(auto_post_scheduler(self))
-        print("Auto Post Scheduler Started 📰")
+        print("📰 Auto Post Scheduler Started", flush=True)
         
-        # ==================================================================
-        # 🌐 WEB SERVER & JINJA2 SETUP (For Site Mode)
-        # ==================================================================
-        
-        # 1. Get the Web App instance
-        curr_web_app = await web_server()
-        
-        # 2. Configure Jinja2 Template Loader (Looks in 'templates' folder)
-        aiohttp_jinja2.setup(curr_web_app, loader=jinja2.FileSystemLoader('templates'))
-        
-        # 3. Inject Bot Username into Web App Context (For HTML Deep Links)
-        curr_web_app['bot_username'] = me.username
-        
-        # 4. Run the App Runner
-        runner = web.AppRunner(curr_web_app)
-        await runner.setup()
-        bind_address = "0.0.0.0"
-        await web.TCPSite(runner, bind_address, PORT).start()
-        
-        print(f"Web Server Running on Port {PORT} with Jinja2 Templates")
-        
-        # ==================================================================
-
         # Restart Log
         if LOG_CHANNEL:
             try:
@@ -105,11 +104,11 @@ class Bot(Client):
                 timee = now.strftime("%H:%M:%S %p")
                 await self.send_message(chat_id=LOG_CHANNEL, text=f"<b>{me.mention} ʀᴇsᴛᴀʀᴛᴇᴅ 🤖\n\n📆 ᴅᴀᴛᴇ - <code>{today}</code>\n🕙 ᴛɪᴍᴇ - <code>{timee}</code></b>")
             except Exception as e:
-                print(f"Log Channel Error: {e}")
+                print(f"Log Channel Error: {e}", flush=True)
 
     async def stop(self, *args):
         await super().stop()
-        print("Bot stopped.")
+        print("Bot stopped.", flush=True)
 
     async def iter_messages(
         self,

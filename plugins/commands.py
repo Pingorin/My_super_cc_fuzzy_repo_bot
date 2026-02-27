@@ -987,32 +987,34 @@ async def close_data(client, query):
 # ==============================================================================
 
 async def show_groups_page(client, request_obj, page):
-    all_groups = []
+    LIMIT = 10  # Ek page par 10 groups aayenge
     
-    # Ji haan, ye seedha MONGODB se saare groups nikal raha hai
-    async for group in db.groups.find({}):
-        title = group.get('title', 'Unknown Group')
-        chat_id = group.get('id')
-        if chat_id:
-            all_groups.append((title, chat_id))
+    # 1. Total groups count karna (Ye instant hota hai)
+    total_groups = await db.groups.count_documents({})
 
-    if not all_groups:
+    if total_groups == 0:
         text = "❌ **Database me koi group nahi mila.**"
         if hasattr(request_obj, "edit_text"):
             return await request_obj.edit_text(text)
         else:
             return await request_obj.reply(text)
 
-    LIMIT = 10  # Ek page par 10 groups
-    total_groups = len(all_groups)
+    # 2. Pages calculate karna
     max_pages = (total_groups + LIMIT - 1) // LIMIT
     
     if page >= max_pages: page = max_pages - 1
     if page < 0: page = 0
     
-    start = page * LIMIT
-    end = start + LIMIT
-    current_groups = all_groups[start:end]
+    # 3. MONGODB PAGINATION (Ultra Fast) - Sirf 10 group uthayega page ke hisab se
+    skip_count = page * LIMIT
+    cursor = db.groups.find({}).skip(skip_count).limit(LIMIT)
+    
+    current_groups = []
+    async for group in cursor:
+        title = group.get('title', 'Unknown Group')
+        chat_id = group.get('id')
+        if chat_id:
+            current_groups.append((title, chat_id))
     
     buttons = []
     # Har group ke liye ek button banana
@@ -1020,7 +1022,7 @@ async def show_groups_page(client, request_obj, page):
         short_title = title[:30] + "..." if len(title) > 30 else title
         buttons.append([InlineKeyboardButton(f"📂 {short_title}", callback_data=f"get_grp_link#{chat_id}#{page}")])
         
-    # Pagination Row
+    # Pagination Row (Isse aap Next/Prev karke baki ke saare groups dekh payenge)
     nav_row = []
     if page > 0:
         nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"admin_grp_page#{page-1}"))
@@ -1035,24 +1037,24 @@ async def show_groups_page(client, request_obj, page):
     
     text = f"📊 **Bot's Connected Groups**\n\nTotal Groups: `{total_groups}`\n\nKisi bhi group me join hone ya open karne ke liye uspar click karein:"
     
-    if hasattr(request_obj, "edit_text"):
-        await request_obj.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
-    else:
-        await request_obj.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
+    try:
+        if hasattr(request_obj, "edit_text"):
+            await request_obj.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            await request_obj.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception as e:
+        pass # Ignore minor edit errors
 
 
-# 1️⃣ THE MAIN COMMAND (Ab command /groups ho gayi hai)
+# 1️⃣ THE MAIN COMMAND
 @Client.on_message(filters.command("groups") & filters.private, group=-2)
 async def groups_list_command(client, message):
     user_id = message.from_user.id
     
-    # ✅ Sirf info.py / ENV ke ADMINS se verification
     if user_id not in ADMINS:
         return await message.reply("❌ **Access Denied:** Ye command sirf Bot Owner aur Admins ke liye hai.")
         
-    # Command trigger hote hi ek loading message dega
-    wait_msg = await message.reply("🔄 **Database se groups nikal raha hu...**")
-    
+    wait_msg = await message.reply("🔄 **Loading Groups...**")
     await show_groups_page(client, wait_msg, 0)
 
 

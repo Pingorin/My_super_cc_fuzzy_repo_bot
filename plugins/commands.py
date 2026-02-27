@@ -981,3 +981,121 @@ async def check_status_handler(client, query):
 @Client.on_callback_query(filters.regex(r"^close_data"))
 async def close_data(client, query):
     await query.message.delete()
+
+# ==============================================================================
+# 🕵️ ADMIN COMMAND: ALL GROUPS LIST (/other_group)
+# ==============================================================================
+
+async def show_groups_page(client, request_obj, page):
+    all_groups = []
+    
+    # Database se saare groups nikalna
+    async for group in db.groups.find({}):
+        title = group.get('title', 'Unknown Group')
+        chat_id = group.get('id')
+        if chat_id:
+            all_groups.append((title, chat_id))
+
+    if not all_groups:
+        text = "❌ **Database me koi group nahi mila.**"
+        if hasattr(request_obj, "edit_text"):
+            return await request_obj.edit_text(text)
+        else:
+            return await request_obj.reply(text)
+
+    LIMIT = 10  # Ek page par 10 groups
+    total_groups = len(all_groups)
+    max_pages = (total_groups + LIMIT - 1) // LIMIT
+    
+    if page >= max_pages: page = max_pages - 1
+    if page < 0: page = 0
+    
+    start = page * LIMIT
+    end = start + LIMIT
+    current_groups = all_groups[start:end]
+    
+    buttons = []
+    # Har group ke liye ek button banana
+    for title, chat_id in current_groups:
+        # Title ko thoda chhota kar dete hain taaki button me fit aa jaye
+        short_title = title[:30] + "..." if len(title) > 30 else title
+        buttons.append([InlineKeyboardButton(f"📂 {short_title}", callback_data=f"get_grp_link#{chat_id}#{page}")])
+        
+    # Pagination Row (Next / Prev)
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"admin_grp_page#{page-1}"))
+    nav_row.append(InlineKeyboardButton(f"{page+1}/{max_pages}", callback_data="ignore"))
+    if page < max_pages - 1:
+        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"admin_grp_page#{page+1}"))
+        
+    if nav_row:
+        buttons.append(nav_row)
+        
+    buttons.append([InlineKeyboardButton("❌ Close", callback_data="close_data")])
+    
+    text = f"📊 **Bot's Connected Groups**\n\nTotal Groups: `{total_groups}`\n\nKisi bhi group me join hone ya open karne ke liye uspar click karein:"
+    
+    if hasattr(request_obj, "edit_text"):
+        await request_obj.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    else:
+        await request_obj.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+
+# 1️⃣ THE MAIN COMMAND
+@Client.on_message(filters.command("other_group") & filters.private & filters.user(ADMINS))
+async def other_group_command(client, message):
+    await show_groups_page(client, message, 0)
+
+
+# 2️⃣ PAGINATION CALLBACK
+@Client.on_callback_query(filters.regex(r"^admin_grp_page#") & filters.user(ADMINS))
+async def admin_grp_page_handler(client, query):
+    page = int(query.data.split("#")[1])
+    await show_groups_page(client, query, page)
+
+
+# 3️⃣ GENERATE LINK ON CLICK
+@Client.on_callback_query(filters.regex(r"^get_grp_link#") & filters.user(ADMINS))
+async def get_grp_link_handler(client, query):
+    data = query.data.split("#")
+    chat_id = int(data[1])
+    page = int(data[2])
+    
+    await query.answer("Fetching Invite Link... ⏳", show_alert=False)
+    
+    try:
+        # Check karna ki bot ke paas group me admin rights hain ya nahi
+        chat = await client.get_chat(chat_id)
+        
+        # Link nikalna (Agar pehle se link hai toh wo use karo, nahi toh naya banao)
+        if chat.invite_link:
+            invite_link = chat.invite_link
+        else:
+            invite_link = await client.export_chat_invite_link(chat_id)
+            
+        btn = [
+            [InlineKeyboardButton("🚪 Open / Join Group", url=invite_link)],
+            [InlineKeyboardButton("🔙 Back to List", callback_data=f"admin_grp_page#{page}")]
+        ]
+        
+        await query.message.edit_text(
+            f"✅ **Group Name:** {chat.title}\n"
+            f"🆔 **Group ID:** `{chat_id}`\n"
+            f"👥 **Members:** `{chat.members_count}`\n\n"
+            f"Niche diye gaye button par click karke group open karein:",
+            reply_markup=InlineKeyboardMarkup(btn)
+        )
+        
+    except Exception as e:
+        # Agar bot ko group se nikal diya gaya hai ya permission nahi hai
+        btn = [[InlineKeyboardButton("🔙 Back to List", callback_data=f"admin_grp_page#{page}")]]
+        error_msg = str(e)
+        
+        await query.message.edit_text(
+            f"❌ **Link Generate Nahi Hua!**\n\n"
+            f"🆔 ID: `{chat_id}`\n"
+            f"**Reason:** Bot ko is group se nikal diya gaya hai ya uske paas invite link banane ki Admin Permission nahi hai.\n\n"
+            f"*(Error: {error_msg})*",
+            reply_markup=InlineKeyboardMarkup(btn)
+        )

@@ -39,6 +39,8 @@ class MediaDB:
         try:
             await self.search_col.create_index("file_name")
             await self.search_col.create_index("caption")
+            # Naya master search index
+            await self.search_col.create_index("search_text")
             await self.search_col.create_index("link_id")
             await self.data_col.create_index("file_unique_id", unique=True)
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
@@ -96,13 +98,75 @@ class MediaDB:
             print(f"❌ CRITICAL DB ERROR (Get): {e}")
             return None
 
+    # ==================================================================
+    # 🧹 ADVANCED TEXT CLEANING & METADATA PARSING LOGIC
+    # ==================================================================
+
     @staticmethod
     def clean_text(text):
-        if not text: return ""
-        text = re.sub(r"\[@RunningMoviesHD\]", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"@\w+", "", text)
-        text = re.sub(r"[-_.]", " ", text)
-        return re.sub(r"\s+", " ", text).strip()
+        if not text: 
+            return ""
+        
+        # 1. Remove URLs and Usernames (e.g. [@RunningMoviesHD], @username, links)
+        text = re.sub(r'\[@\w+\]', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'(https?://\S+|www\.\S+)', '', text)
+        text = re.sub(r'@[a-zA-Z0-9_]+', '', text)
+        
+        # 2. Remove File Extensions
+        text = re.sub(r'(?i)\.(mkv|mp4|avi|webm|m4v|flv|zip|rar|tar|pdf)$', '', text)
+        
+        # 3. Replace Brackets, Punctuation, and Symbols with Spaces
+        text = re.sub(r'[._\(\)\[\]{}-]', ' ', text)
+        
+        # 4. Roman Numeral Fix (I, II, III, IV, V -> Append Digits)
+        roman_map = {'I': '1', 'II': '2', 'III': '3', 'IV': '4', 'V': '5'}
+        def replace_roman(match):
+            roman = match.group(0)
+            return f"{roman} {roman_map[roman.upper()]}"
+            
+        text = re.sub(r'(?i)\b(I|II|III|IV|V)\b', replace_roman, text)
+        
+        # 5. Final Whitespace Cleanup
+        return re.sub(r'\s+', ' ', text).strip()
+
+    @staticmethod
+    def parse_file_details(text):
+        details = {'quality': '', 'year': '', 'episodes': '', 'languages': ''}
+        text_lower = text.lower()
+        
+        # A. Quality Extraction
+        q_matches = re.findall(r'\b(480p|720p|1080p|2160p|4k)\b', text_lower)
+        if q_matches: details['quality'] = ' '.join(set(q_matches))
+        
+        # B. Year Extraction (19xx - 20xx)
+        y_matches = re.findall(r'\b((?:19|20)\d{2})\b', text_lower)
+        if y_matches: details['year'] = ' '.join(set(y_matches))
+        
+        # C. Episode Expansion (Matches S01E01, S1 E1, s01ep01)
+        ep_vars = []
+        ep_regex = re.finditer(r'\bs(?:eason)?\s*(\d{1,2})\s*e(?:pisode)?\s*(\d{1,2})\b', text_lower)
+        for m in ep_regex:
+            s, e = m.groups()
+            s_int, e_int = int(s), int(e)
+            ep_vars.extend([f"e{e_int}", f"e{e}", f"season {s_int} episode {e_int}"])
+        details['episodes'] = ' '.join(set(ep_vars))
+        
+        # D. Language & Multi-Audio Logic
+        langs = ["hindi", "english", "tamil", "telugu", "malayalam", "kannada", "bengali", "marathi", "punjabi", "gujarati", "urdu"]
+        found_langs = [l for l in langs if l in text_lower]
+        
+        # Auto-inject Hindi for Multi/Dual/Org files
+        if any(w in text_lower for w in ['multi', 'dual', 'org']):
+            if 'hindi' not in found_langs:
+                found_langs.append('hindi')
+                
+        details['languages'] = ' '.join(set(found_langs))
+        
+        return details
+
+    # ==================================================================
+    # 💾 MASTER DATABASE SAVE BATCH
+    # ==================================================================
 
     async def save_batch(self, items):
         if not items: return 0, 0 
@@ -135,23 +199,56 @@ class MediaDB:
         current_id = start_sequence
         
         for media, message in new_items:
-            file_name = self.clean_text(media.file_name)
-            if not file_name: file_name = "Unknown File"
+            raw_filename = media.file_name or "Unknown File"
+            raw_caption = message.caption.html if message.caption else ""
+            
+            # --- STEP A: Name Swapping (Display Logic) ---
+            clean_name = self.clean_text(raw_filename)
+            clean_caption = self.clean_text(raw_caption)
+            
+            display_name = clean_name
+            
+            generic_patterns = ("vid_", "img_", "tg_")
+            is_generic = raw_filename.lower().startswith(generic_patterns) or len(clean_name) < 5
+            
+            if is_generic and clean_caption:
+                display_name = clean_caption
 
-            caption = message.caption.html if message.caption else None
-            if caption:
-                caption = self.clean_text(caption)
-                regex = r"(?i)(.*?)(\.mkv|\.mp4|\.avi|\.webm|\.m4v|\.flv)"
-                match = re.search(regex, caption, re.DOTALL)
-                if match:
-                    caption = match.group(1) + match.group(2)
+            if not display_name:
+                display_name = "Unknown File"
 
-            file_type = "document" 
-            if message.video:
-                file_type = "video"
-            elif message.document:
-                file_type = "document"
+            # --- STEP B: Spaceless Generation ---
+            spaceless_name = display_name.replace(" ", "")
 
+            # --- STEP C: Smart Merge (Deduplication) ---
+            name_words = set(display_name.lower().split())
+            caption_words = set(clean_caption.lower().split())
+            
+            # Keep only words present in caption but missing in filename
+            extra_words = caption_words - name_words
+            extra_caption_text = " ".join(extra_words)
+
+            # --- STEP D: Master Search Field Construction ---
+            combined_raw_text = display_name + " " + clean_caption
+            file_details = self.parse_file_details(combined_raw_text)
+            
+            search_components = [
+                display_name.lower(),
+                spaceless_name.lower(),
+                file_details['episodes'],
+                file_details['year'],
+                file_details['quality'],
+                file_details['languages'],
+                extra_caption_text
+            ]
+            
+            # Merge all components and remove extra whitespaces
+            master_search_text = " ".join(filter(None, search_components))
+            master_search_text = re.sub(r'\s+', ' ', master_search_text).strip()
+
+            file_type = "video" if message.video else "document"
+
+            # --- STEP E: Database Operations ---
             data_docs.append({
                 '_id': current_id,
                 'msg_id': message.id,
@@ -162,9 +259,10 @@ class MediaDB:
             })
             
             search_docs.append({
-                'file_name': file_name,
+                'file_name': display_name,         # Neat & Clean Display Name
+                'search_text': master_search_text, # Comprehensive hidden text for search engine
+                'caption': clean_caption,          # Saved for fallback/display
                 'file_size': media.file_size, 
-                'caption': caption,
                 'link_id': current_id,
                 'chat_id': message.chat.id,
                 'file_type': file_type 
@@ -204,7 +302,8 @@ class MediaDB:
                 must_clauses.append({
                     "text": {
                         "query": word,
-                        "path": ["file_name", "caption"],
+                        # ✅ UPDATED: Include new 'search_text' field
+                        "path": ["file_name", "search_text", "caption"],
                         "fuzzy": {"maxEdits": 1}
                     }
                 })
@@ -228,17 +327,22 @@ class MediaDB:
                 pattern = LANG_MAP.get(lang, lang)
                 match_filters["$or"] = [
                     {"file_name": {"$regex": pattern, "$options": "i"}},
+                    {"search_text": {"$regex": pattern, "$options": "i"}},
                     {"caption": {"$regex": pattern, "$options": "i"}}
                 ]
 
             if quality and quality != "none":
                 match_filters["$or"] = [
                     {"file_name": {"$regex": quality, "$options": "i"}},
+                    {"search_text": {"$regex": quality, "$options": "i"}},
                     {"caption": {"$regex": quality, "$options": "i"}}
                 ]
             
             if year and year != "none":
-                match_filters["file_name"] = {"$regex": str(year)}
+                match_filters["$or"] = [
+                    {"file_name": {"$regex": str(year)}},
+                    {"search_text": {"$regex": str(year)}}
+                ]
 
             if size_range and size_range != "none":
                 MB_500 = 500 * 1024 * 1024
@@ -254,7 +358,6 @@ class MediaDB:
                 pipeline.append({"$match": match_filters})
 
             # ✅ SORTING LOGIC
-            # keys: relevance, new, old, large, small
             if sort == "new":
                 pipeline.append({"$sort": {"_id": -1}}) # Descending ID = Newest
             elif sort == "old":
@@ -263,7 +366,6 @@ class MediaDB:
                 pipeline.append({"$sort": {"file_size": -1}}) # High to Low
             elif sort == "small":
                 pipeline.append({"$sort": {"file_size": 1}}) # Low to High
-            # "relevance" uses default text score from $search
 
             pipeline.append({"$limit": 100}) 
 
@@ -276,7 +378,8 @@ class MediaDB:
             safe_query = re.escape(query)
             regex = re.compile(safe_query, re.IGNORECASE)
             
-            fallback_filter = {"$or": [{"file_name": regex}, {"caption": regex}]}
+            # ✅ UPDATED Fallback Filter
+            fallback_filter = {"$or": [{"file_name": regex}, {"search_text": regex}, {"caption": regex}]}
             if file_type and file_type != "none": 
                 fallback_filter["file_type"] = "video" if file_type.lower() == "video" else "document"
 
@@ -293,10 +396,10 @@ class MediaDB:
             
             final_files = []
             for f in files:
-                # ... (Same Manual filtering logic as before) ...
                 fname = f.get('file_name', '').lower()
+                search_txt = f.get('search_text', '').lower()
                 caption = (f.get('caption') or "").lower()
-                full_text = fname + " " + caption
+                full_text = fname + " " + search_txt + " " + caption
                 fsize = f.get('file_size', 0)
                 
                 if lang and lang != "none":
@@ -304,7 +407,7 @@ class MediaDB:
                     if not re.search(pattern, full_text): continue
 
                 if quality and quality != "none" and quality.lower() not in full_text: continue
-                if year and year != "none" and str(year) not in fname: continue
+                if year and year != "none" and str(year) not in full_text: continue
                 
                 if size_range == "min500" and fsize >= 500*1024*1024: continue
                 elif size_range == "500-1gb" and not (500*1024*1024 <= fsize < 1024*1024*1024): continue

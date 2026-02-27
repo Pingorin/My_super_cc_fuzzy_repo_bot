@@ -1017,11 +1017,10 @@ async def show_groups_page(client, request_obj, page):
     buttons = []
     # Har group ke liye ek button banana
     for title, chat_id in current_groups:
-        # Title ko thoda chhota kar dete hain taaki button me fit aa jaye
         short_title = title[:30] + "..." if len(title) > 30 else title
         buttons.append([InlineKeyboardButton(f"📂 {short_title}", callback_data=f"get_grp_link#{chat_id}#{page}")])
         
-    # Pagination Row (Next / Prev)
+    # Pagination Row
     nav_row = []
     if page > 0:
         nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"admin_grp_page#{page-1}"))
@@ -1042,22 +1041,34 @@ async def show_groups_page(client, request_obj, page):
         await request_obj.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
-# 1️⃣ THE MAIN COMMAND
-@Client.on_message(filters.command("other_group") & filters.private & filters.user(ADMINS))
+# 1️⃣ THE MAIN COMMAND (Filter hata kar direct check lagaya hai)
+@Client.on_message(filters.command("other_group") & filters.private)
 async def other_group_command(client, message):
+    user_id = message.from_user.id
+    
+    # Check Admin ID explicitly
+    if user_id not in ADMINS:
+        return await message.reply("❌ **Access Denied:** Ye command sirf Bot Owner aur Admins ke liye hai.\n*(Agar aap owner hain, toh info.py me ADMINS list me apni ID check karein)*")
+        
     await show_groups_page(client, message, 0)
 
 
 # 2️⃣ PAGINATION CALLBACK
-@Client.on_callback_query(filters.regex(r"^admin_grp_page#") & filters.user(ADMINS))
+@Client.on_callback_query(filters.regex(r"^admin_grp_page#"))
 async def admin_grp_page_handler(client, query):
+    if query.from_user.id not in ADMINS:
+        return await query.answer("❌ Not Allowed", show_alert=True)
+        
     page = int(query.data.split("#")[1])
     await show_groups_page(client, query, page)
 
 
 # 3️⃣ GENERATE LINK ON CLICK
-@Client.on_callback_query(filters.regex(r"^get_grp_link#") & filters.user(ADMINS))
+@Client.on_callback_query(filters.regex(r"^get_grp_link#"))
 async def get_grp_link_handler(client, query):
+    if query.from_user.id not in ADMINS:
+        return await query.answer("❌ Not Allowed", show_alert=True)
+        
     data = query.data.split("#")
     chat_id = int(data[1])
     page = int(data[2])
@@ -1065,10 +1076,8 @@ async def get_grp_link_handler(client, query):
     await query.answer("Fetching Invite Link... ⏳", show_alert=False)
     
     try:
-        # Check karna ki bot ke paas group me admin rights hain ya nahi
         chat = await client.get_chat(chat_id)
         
-        # Link nikalna (Agar pehle se link hai toh wo use karo, nahi toh naya banao)
         if chat.invite_link:
             invite_link = chat.invite_link
         else:
@@ -1088,7 +1097,6 @@ async def get_grp_link_handler(client, query):
         )
         
     except Exception as e:
-        # Agar bot ko group se nikal diya gaya hai ya permission nahi hai
         btn = [[InlineKeyboardButton("🔙 Back to List", callback_data=f"admin_grp_page#{page}")]]
         error_msg = str(e)
         

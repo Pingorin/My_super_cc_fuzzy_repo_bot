@@ -29,7 +29,7 @@ def seconds_to_str(seconds):
     if seconds < 86400: return f"{int(seconds/3600)}hr"
     return f"{int(seconds/86400)}days"
 
-# --- /settings COMMAND (PM ONLY WITH SMART REDIRECT & PRO DB CACHE) ---
+# --- /settings COMMAND (PM ONLY WITH SMART REDIRECT & ULTRA FAST DB CACHE) ---
 @Client.on_message(filters.command("settings"))
 async def settings_command(client, message):
     user_id = message.from_user.id
@@ -50,10 +50,9 @@ async def settings_command(client, message):
                 admin_ids.append(admin.user.id)
             await db.groups.update_one({"id": message.chat.id}, {"$set": {"admins": admin_ids}}, upsert=True)
             await db.add_group(message.chat.id, message.chat.title)
-        except Exception as e:
+        except Exception:
             pass
 
-        # PM me bhejne ke liye Button
         bot_me = await client.get_me()
         btn = [[InlineKeyboardButton("⚙️ Open Settings in PM", url=f"https://t.me/{bot_me.username}?start=settings")]]
         return await message.reply_text(
@@ -61,13 +60,12 @@ async def settings_command(client, message):
             reply_markup=InlineKeyboardMarkup(btn)
         )
 
-# 2. AGAR PM MEIN USE KIYA (Fast DB Query with Anti-Duplicate & Channel Filter)
+    # 2. AGAR PM MEIN USE KIYA (Ultra-Fast DB Query - NO LIVE CHECK)
     elif message.chat.type == enums.ChatType.PRIVATE:
-        msg = await message.reply_text("🔄 **Loading your groups...**")
         user_groups = []
         seen_chats = set()
         
-        # ✅ Sirf wahi group check karega jisme aap Admin hain
+        # Sirf wahi group check karega jisme aap Admin hain
         db_query = {"admins": user_id}
         
         async for group in db.groups.find(db_query):
@@ -76,23 +74,18 @@ async def settings_command(client, message):
             if chat_id in seen_chats:
                 continue
                 
-            try:
-                # ✅ LIVE CHECK: Asli naam nikalna aur Channel ko block karna
-                chat_info = await client.get_chat(chat_id)
-                if chat_info.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-                    real_title = chat_info.title
-                    user_groups.append((real_title, chat_id))
-                    seen_chats.add(chat_id)
-                    
-                    # Agar DB me naam update nahi hai, toh automatically update kar dega
-                    await db.groups.update_one({"id": chat_id}, {"$set": {"title": real_title}})
-            except Exception:
-                pass # Agar bot group se nikal diya gaya hai, toh list me nahi aayega
-
-        await msg.delete()
+            # ✅ INSTANT FAST: Seedha Database se title uthao, API call mat karo
+            title = group.get('title')
+            
+            # Agar title missing hai, ya ID jaisa dikhta hai (channel error prevention), toh list me mat dikhao
+            if not title or str(title) == str(chat_id) or str(title).startswith("-100"):
+                continue 
+                
+            user_groups.append((title, chat_id))
+            seen_chats.add(chat_id)
         
         if not user_groups:
-            return await message.reply_text("❌ **No Groups Found!**\nKripya pehle apne group me ja kar ek baar `/connect` ya `/settings` type karein taaki bot aapko pehchan sake.")
+            return await message.reply_text("❌ **No Groups Found!**\nKripya apne group me ja kar ek baar `/connect` type karein taaki bot group ko pehchan sake.")
 
         buttons = []
         for title, chat_id in user_groups:

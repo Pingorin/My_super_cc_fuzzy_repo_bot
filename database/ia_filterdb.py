@@ -38,9 +38,8 @@ class MediaDB:
     async def ensure_indexes(self):
         try:
             await self.search_col.create_index("file_name")
+            await self.search_col.create_index("search_text") # ✅ New Index
             await self.search_col.create_index("caption")
-            # Naya master search index
-            await self.search_col.create_index("search_text")
             await self.search_col.create_index("link_id")
             await self.data_col.create_index("file_unique_id", unique=True)
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
@@ -62,63 +61,25 @@ class MediaDB:
             print(f"❌ Error Getting Sequence ID: {e}")
             return None
 
-    async def save_search_query(self, query, user_id, files):
-        try:
-            search_id = await self.get_next_sequence_value("search_id_counter", increment=1)
-            if not search_id: return None
-
-            await self.temp_searches.update_one(
-                {"_id": int(search_id)},
-                {"$set": {
-                    "query": query,
-                    "user_id": int(user_id),
-                    "files": files,
-                    "created_at": datetime.datetime.utcnow()
-                }},
-                upsert=True
-            )
-            return int(search_id)
-        except Exception as e:
-            print(f"❌ CRITICAL DB ERROR (Save): {e}")
-            return None
-
-    async def update_search_cache(self, search_id, files):
-        try:
-            await self.temp_searches.update_one(
-                {"_id": int(search_id)},
-                {"$set": {"files": files}}
-            )
-        except Exception as e:
-            print(f"❌ Cache Update Error: {e}")
-
-    async def get_search_query(self, search_id):
-        try:
-            return await self.temp_searches.find_one({"_id": int(search_id)})
-        except Exception as e:
-            print(f"❌ CRITICAL DB ERROR (Get): {e}")
-            return None
-
     # ==================================================================
-    # 🧹 ADVANCED TEXT CLEANING & METADATA PARSING LOGIC
+    # 🧠 SMART INDEXING HELPERS
     # ==================================================================
-
     @staticmethod
     def clean_text(text):
         if not text: 
             return ""
         
-        # 1. Remove URLs and Usernames (e.g. [@RunningMoviesHD], @username, links)
-        text = re.sub(r'\[@\w+\]', '', text, flags=re.IGNORECASE)
+        # 1. Cleanup: Remove URLs and Usernames
         text = re.sub(r'(https?://\S+|www\.\S+)', '', text)
         text = re.sub(r'@[a-zA-Z0-9_]+', '', text)
         
-        # 2. Remove File Extensions
+        # 2. Extension Removal (from the end only)
         text = re.sub(r'(?i)\.(mkv|mp4|avi|webm|m4v|flv|zip|rar|tar|pdf)$', '', text)
         
-        # 3. Replace Brackets, Punctuation, and Symbols with Spaces
+        # 3. Removal: Replace dots, underscores, brackets, punctuation with spaces
         text = re.sub(r'[._\(\)\[\]{}-]', ' ', text)
         
-        # 4. Roman Numeral Fix (I, II, III, IV, V -> Append Digits)
+        # 4. Roman Numeral Fix (Append digits to standalone I, II, III, IV, V)
         roman_map = {'I': '1', 'II': '2', 'III': '3', 'IV': '4', 'V': '5'}
         def replace_roman(match):
             roman = match.group(0)
@@ -134,15 +95,15 @@ class MediaDB:
         details = {'quality': '', 'year': '', 'episodes': '', 'languages': ''}
         text_lower = text.lower()
         
-        # A. Quality Extraction
+        # 1. Quality Extraction
         q_matches = re.findall(r'\b(480p|720p|1080p|2160p|4k)\b', text_lower)
         if q_matches: details['quality'] = ' '.join(set(q_matches))
         
-        # B. Year Extraction (19xx - 20xx)
+        # 2. Year Extraction (19xx - 20xx)
         y_matches = re.findall(r'\b((?:19|20)\d{2})\b', text_lower)
         if y_matches: details['year'] = ' '.join(set(y_matches))
         
-        # C. Episode Expansion (Matches S01E01, S1 E1, s01ep01)
+        # 3. Episode Expansion (Detects S01E01, S1 E1)
         ep_vars = []
         ep_regex = re.finditer(r'\bs(?:eason)?\s*(\d{1,2})\s*e(?:pisode)?\s*(\d{1,2})\b', text_lower)
         for m in ep_regex:
@@ -151,23 +112,21 @@ class MediaDB:
             ep_vars.extend([f"e{e_int}", f"e{e}", f"season {s_int} episode {e_int}"])
         details['episodes'] = ' '.join(set(ep_vars))
         
-        # D. Language & Multi-Audio Logic
+        # 4. Language & Multi-Audio Logic
         langs = ["hindi", "english", "tamil", "telugu", "malayalam", "kannada", "bengali", "marathi", "punjabi", "gujarati", "urdu"]
         found_langs = [l for l in langs if l in text_lower]
         
-        # Auto-inject Hindi for Multi/Dual/Org files
+        # Multi-Audio Logic
         if any(w in text_lower for w in ['multi', 'dual', 'org']):
             if 'hindi' not in found_langs:
                 found_langs.append('hindi')
                 
         details['languages'] = ' '.join(set(found_langs))
-        
         return details
 
     # ==================================================================
-    # 💾 MASTER DATABASE SAVE BATCH
+    # 💾 MASTER PIPELINE SAVE LOGIC
     # ==================================================================
-
     async def save_batch(self, items):
         if not items: return 0, 0 
         
@@ -208,6 +167,7 @@ class MediaDB:
             
             display_name = clean_name
             
+            # Check for generic filename signatures
             generic_patterns = ("vid_", "img_", "tg_")
             is_generic = raw_filename.lower().startswith(generic_patterns) or len(clean_name) < 5
             
@@ -224,7 +184,7 @@ class MediaDB:
             name_words = set(display_name.lower().split())
             caption_words = set(clean_caption.lower().split())
             
-            # Keep only words present in caption but missing in filename
+            # Extract words present in caption but missing in filename
             extra_words = caption_words - name_words
             extra_caption_text = " ".join(extra_words)
 
@@ -242,7 +202,7 @@ class MediaDB:
                 extra_caption_text
             ]
             
-            # Merge all components and remove extra whitespaces
+            # Merge components and normalize spaces
             master_search_text = " ".join(filter(None, search_components))
             master_search_text = re.sub(r'\s+', ' ', master_search_text).strip()
 
@@ -259,9 +219,9 @@ class MediaDB:
             })
             
             search_docs.append({
-                'file_name': display_name,         # Neat & Clean Display Name
-                'search_text': master_search_text, # Comprehensive hidden text for search engine
-                'caption': clean_caption,          # Saved for fallback/display
+                'file_name': display_name,         # Elegant Display Name
+                'search_text': master_search_text, # Hidden Meta-text for Smart Search
+                'caption': clean_caption,          # Cleaned caption
                 'file_size': media.file_size, 
                 'link_id': current_id,
                 'chat_id': message.chat.id,
@@ -274,8 +234,6 @@ class MediaDB:
             try:
                 await self.data_col.insert_many(data_docs, ordered=False)
                 saved_count = len(data_docs)
-            except BulkWriteError as bwe:
-                saved_count = bwe.details['nInserted']
             except Exception as e:
                 print(f"❌ Critical Error Saving FILES_DATA: {e}")
                 return 0, count + pre_duplicate_count
@@ -288,9 +246,6 @@ class MediaDB:
                 
         return saved_count, pre_duplicate_count
 
-    async def get_file_details(self, link_id):
-        return await self.data_col.find_one({'_id': int(link_id)})
-
     # ==================================================================
     # ⚡ OPTIMIZED SEARCH WITH SORTING
     # ==================================================================
@@ -302,8 +257,7 @@ class MediaDB:
                 must_clauses.append({
                     "text": {
                         "query": word,
-                        # ✅ UPDATED: Include new 'search_text' field
-                        "path": ["file_name", "search_text", "caption"],
+                        "path": ["file_name", "search_text", "caption"], # ✅ Now utilizing the Master Search Field
                         "fuzzy": {"maxEdits": 1}
                     }
                 })
@@ -327,22 +281,17 @@ class MediaDB:
                 pattern = LANG_MAP.get(lang, lang)
                 match_filters["$or"] = [
                     {"file_name": {"$regex": pattern, "$options": "i"}},
-                    {"search_text": {"$regex": pattern, "$options": "i"}},
-                    {"caption": {"$regex": pattern, "$options": "i"}}
+                    {"search_text": {"$regex": pattern, "$options": "i"}}
                 ]
 
             if quality and quality != "none":
                 match_filters["$or"] = [
                     {"file_name": {"$regex": quality, "$options": "i"}},
-                    {"search_text": {"$regex": quality, "$options": "i"}},
-                    {"caption": {"$regex": quality, "$options": "i"}}
+                    {"search_text": {"$regex": quality, "$options": "i"}}
                 ]
             
             if year and year != "none":
-                match_filters["$or"] = [
-                    {"file_name": {"$regex": str(year)}},
-                    {"search_text": {"$regex": str(year)}}
-                ]
+                match_filters["search_text"] = {"$regex": str(year)}
 
             if size_range and size_range != "none":
                 MB_500 = 500 * 1024 * 1024
@@ -358,14 +307,10 @@ class MediaDB:
                 pipeline.append({"$match": match_filters})
 
             # ✅ SORTING LOGIC
-            if sort == "new":
-                pipeline.append({"$sort": {"_id": -1}}) # Descending ID = Newest
-            elif sort == "old":
-                pipeline.append({"$sort": {"_id": 1}}) # Ascending ID = Oldest
-            elif sort == "large":
-                pipeline.append({"$sort": {"file_size": -1}}) # High to Low
-            elif sort == "small":
-                pipeline.append({"$sort": {"file_size": 1}}) # Low to High
+            if sort == "new": pipeline.append({"$sort": {"_id": -1}})
+            elif sort == "old": pipeline.append({"$sort": {"_id": 1}})
+            elif sort == "large": pipeline.append({"$sort": {"file_size": -1}})
+            elif sort == "small": pipeline.append({"$sort": {"file_size": 1}})
 
             pipeline.append({"$limit": 100}) 
 
@@ -378,14 +323,12 @@ class MediaDB:
             safe_query = re.escape(query)
             regex = re.compile(safe_query, re.IGNORECASE)
             
-            # ✅ UPDATED Fallback Filter
             fallback_filter = {"$or": [{"file_name": regex}, {"search_text": regex}, {"caption": regex}]}
             if file_type and file_type != "none": 
                 fallback_filter["file_type"] = "video" if file_type.lower() == "video" else "document"
 
             cursor = self.search_col.find(fallback_filter)
             
-            # Manual Sort for Fallback
             if sort == "new": cursor.sort('_id', -1)
             elif sort == "old": cursor.sort('_id', 1)
             elif sort == "large": cursor.sort('file_size', -1)
@@ -397,9 +340,8 @@ class MediaDB:
             final_files = []
             for f in files:
                 fname = f.get('file_name', '').lower()
-                search_txt = f.get('search_text', '').lower()
-                caption = (f.get('caption') or "").lower()
-                full_text = fname + " " + search_txt + " " + caption
+                meta = f.get('search_text', '').lower()
+                full_text = fname + " " + meta
                 fsize = f.get('file_size', 0)
                 
                 if lang and lang != "none":
@@ -417,6 +359,45 @@ class MediaDB:
                 final_files.append(f)
                 
             return final_files
+
+    async def get_search_query(self, search_id):
+        try:
+            return await self.temp_searches.find_one({"_id": int(search_id)})
+        except Exception as e:
+            print(f"❌ CRITICAL DB ERROR (Get): {e}")
+            return None
+
+    async def save_search_query(self, query, user_id, files):
+        try:
+            search_id = await self.get_next_sequence_value("search_id_counter", increment=1)
+            if not search_id: return None
+
+            await self.temp_searches.update_one(
+                {"_id": int(search_id)},
+                {"$set": {
+                    "query": query,
+                    "user_id": int(user_id),
+                    "files": files,
+                    "created_at": datetime.datetime.utcnow()
+                }},
+                upsert=True
+            )
+            return int(search_id)
+        except Exception as e:
+            print(f"❌ CRITICAL DB ERROR (Save): {e}")
+            return None
+
+    async def update_search_cache(self, search_id, files):
+        try:
+            await self.temp_searches.update_one(
+                {"_id": int(search_id)},
+                {"$set": {"files": files}}
+            )
+        except Exception as e:
+            print(f"❌ Cache Update Error: {e}")
+
+    async def get_file_details(self, link_id):
+        return await self.data_col.find_one({'_id': int(link_id)})
 
     async def total_files_count(self):
         return await self.data_col.count_documents({})

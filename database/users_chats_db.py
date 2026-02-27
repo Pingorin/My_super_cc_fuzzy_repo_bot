@@ -108,7 +108,7 @@ class UserChatDB:
         # Isse kitne bhi message ek sath aayen, duplicate entry kabhi nahi banegi!
         default_settings = {
             'id': int(id),
-            'title': title,
+            # ✅ Yahan se 'title' hata diya hai kyunki wo niche $set me use ho raha hai aur conflict kar raha tha.
             'earning_method': 'shortlink', 
             'shortener_mode': 'dynamic',   
             'shorteners': {},              

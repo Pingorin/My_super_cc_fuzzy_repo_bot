@@ -2018,3 +2018,28 @@ async def request_feature_ui(client, query):
         
     except Exception as e:
         pass # Timeout
+
+# ==============================================================================
+# ✅ BACK BUTTON KO BHI FAST BANAYA GAYA HAI
+# ==============================================================================
+@Client.on_callback_query(filters.regex(r"^set_back_home"))
+async def back_to_group_list(client, query):
+    user_id = query.from_user.id
+    is_bot_admin = user_id in ADMINS
+    user_groups = []
+    
+    db_query = {} if is_bot_admin else {"admins": user_id}
+    
+    async for group in db.groups.find(db_query):
+        chat_id = group.get('id')
+        title = group.get('title', f"Group {chat_id}")
+        user_groups.append((title, chat_id))
+
+    if not user_groups:
+        return await query.message.edit_text("❌ **No Groups Found!**")
+
+    buttons = []
+    for title, chat_id in user_groups:
+        buttons.append([InlineKeyboardButton(f"📂 {title}", callback_data=f"set_main#{chat_id}")])
+    
+    await query.message.edit_text("⚙️ **Select your Group:**", reply_markup=InlineKeyboardMarkup(buttons))

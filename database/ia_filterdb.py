@@ -140,7 +140,7 @@ class MediaDB:
             existing_unique_ids = set()
 
         new_items = []
-        seen_in_batch = set() 
+        seen_in_batch = set() # ✅ FIX: Ek hi list me aane wali duplicate files ko block karega
         pre_duplicate_count = 0
         
         for media, msg in items:
@@ -328,14 +328,19 @@ class MediaDB:
             return files
             
         except Exception as e:
-            print(f"⚠️ Index Search Failed: {e}. Switching to Word-by-Word Fallback.")
+            print(f"⚠️ Index Search Failed: {e}. Switching to Smart Word-by-Word Fallback.")
             
-            # ✅ NAYA LOGIC: Word-by-Word Fallback Search
+            # ✅ ULTRA SMART REGEX: Spiderman -> s\s*p\s*i\s*d\s*e\s*r\s*m\s*a\s*n
+            # Ye "Spiderman" aur "Spider Man" dono ko automatically match kar lega!
             words = query.split()
             and_clauses = []
             
             for word in words:
-                regex = re.compile(re.escape(word), re.IGNORECASE)
+                # Har character ke beech me optional space (\s*) laga do
+                char_list = [re.escape(ch) for ch in word]
+                smart_regex_str = r"\s*".join(char_list)
+                regex = re.compile(smart_regex_str, re.IGNORECASE)
+                
                 and_clauses.append({
                     "$or": [
                         {"search_text": regex},

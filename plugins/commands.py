@@ -10,9 +10,21 @@ from pyrogram.errors import UserNotParticipant
 from database.users_chats_db import db
 from database.ia_filterdb import Media
 import info 
-from info import ADMINS, IS_VERIFY
-from utils import temp, get_shortlink, check_fsub_4_status
+from info import ADMINS
+from utils import temp
 from Script import script 
+
+# ✅ SAFE IMPORTS (Agar ye files me nahi honge, toh bot crash nahi hoga)
+try:
+    from info import IS_VERIFY
+except ImportError:
+    IS_VERIFY = True
+
+try:
+    from utils import get_shortlink
+except ImportError:
+    async def get_shortlink(site, api, link):
+        return link
 
 logger = logging.getLogger(__name__)
 START_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg"

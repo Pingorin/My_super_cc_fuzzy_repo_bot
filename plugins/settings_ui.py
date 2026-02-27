@@ -2024,7 +2024,7 @@ async def request_feature_ui(client, query):
         pass # Timeout
 
 # ==============================================================================
-# ✅ BACK BUTTON KO BHI FAST BANAYA GAYA HAI
+# ✅ BACK BUTTON KO BHI FAST BANAYA GAYA HAI (INSTANT SPEED)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^set_back_home"))
 async def back_to_group_list(client, query):
@@ -2032,7 +2032,7 @@ async def back_to_group_list(client, query):
     user_groups = []
     seen_chats = set()
     
-    # ✅ Sirf wahi group check karega jisme aap Admin hain
+    # Sirf wahi group check karega jisme aap Admin hain
     db_query = {"admins": user_id}
     
     async for group in db.groups.find(db_query):
@@ -2041,18 +2041,18 @@ async def back_to_group_list(client, query):
         if chat_id in seen_chats:
             continue
             
-        try:
-            # ✅ LIVE CHECK: Asli naam nikalna aur Channel ko block karna
-            chat_info = await client.get_chat(chat_id)
-            if chat_info.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-                real_title = chat_info.title
-                user_groups.append((real_title, chat_id))
-                seen_chats.add(chat_id)
-        except Exception:
-            pass
+        # ✅ INSTANT FAST: Seedha Database se title uthao, Telegram API call mat karo
+        title = group.get('title')
+        
+        # Agar galti se title ki jagah ID save hai ya title nahi hai, toh usey list me mat dikhao
+        if not title or str(title) == str(chat_id):
+            continue 
+            
+        user_groups.append((title, chat_id))
+        seen_chats.add(chat_id)
 
     if not user_groups:
-        return await query.message.edit_text("❌ **No Groups Found!**")
+        return await query.message.edit_text("❌ **No Groups Found!**\nKripya apne group me ja kar ek baar `/connect` type karein.")
 
     buttons = []
     for title, chat_id in user_groups:

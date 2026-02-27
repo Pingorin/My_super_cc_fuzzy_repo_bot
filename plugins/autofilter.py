@@ -73,19 +73,14 @@ def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_siz
 # ==============================================================================
 # 1. MAIN SEARCH HANDLER
 # ==============================================================================
-@Client.on_message(filters.text & filters.incoming)
+@Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index", "set_shortner", "settings", "connect", "delreq", "broadcast", "admin_upload", "id", "info"]))
 async def auto_filter(client, message):
     try:
-        raw_query = message.text
-        
-        # ✅ UNIVERSAL COMMAND IGNORER: Agar message "/" se shuru hota hai, toh search rok do
-        if raw_query.startswith("/"):
-            return
-            
         # ✅ PM SEARCH CHECK
         if not PM_SEARCH and message.chat.type == enums.ChatType.PRIVATE:
             return
             
+        raw_query = message.text
         if message.forward_from or message.forward_from_chat or message.via_bot: return
         
         if URL_REGEX.search(raw_query): return

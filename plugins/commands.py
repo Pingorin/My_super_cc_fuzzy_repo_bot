@@ -983,11 +983,8 @@ async def close_data(client, query):
     await query.message.delete()
 
 # ==============================================================================
-# 🕵️ ADMIN COMMAND: ALL GROUPS LIST (/other_group)
+# 🕵️ ADMIN COMMAND: ALL GROUPS LIST (/groups)
 # ==============================================================================
-
-# 🛑 YAHAN APNI TELEGRAM ID DAALEIN (Bina quotes ke, sirf number)
-SUDO_ADMIN_ID = 7245547751 # <--- Isko apni ID se replace karein
 
 async def show_groups_page(client, request_obj, page):
     all_groups = []
@@ -1044,16 +1041,16 @@ async def show_groups_page(client, request_obj, page):
         await request_obj.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
-# 1️⃣ THE MAIN COMMAND (group=-2 Lagaya hai taaki sabse pehle ye chale)
-@Client.on_message(filters.command("other_group") & filters.private, group=-2)
-async def other_group_command(client, message):
+# 1️⃣ THE MAIN COMMAND (Ab command /groups ho gayi hai)
+@Client.on_message(filters.command("groups") & filters.private, group=-2)
+async def groups_list_command(client, message):
     user_id = message.from_user.id
     
-    # ID Verification via Direct Variable or info.py ADMINS
-    if user_id != SUDO_ADMIN_ID and user_id not in ADMINS:
-        return await message.reply("❌ **Access Denied:** Ye command sirf Bot Owner ke liye hai.")
+    # ✅ Sirf info.py / ENV ke ADMINS se verification
+    if user_id not in ADMINS:
+        return await message.reply("❌ **Access Denied:** Ye command sirf Bot Owner aur Admins ke liye hai.")
         
-    # Command trigger hote hi ek loading message dega (Taaki aapko pata chale command chal rahi hai)
+    # Command trigger hote hi ek loading message dega
     wait_msg = await message.reply("🔄 **Database se groups nikal raha hu...**")
     
     await show_groups_page(client, wait_msg, 0)
@@ -1062,7 +1059,7 @@ async def other_group_command(client, message):
 # 2️⃣ PAGINATION CALLBACK
 @Client.on_callback_query(filters.regex(r"^admin_grp_page#"))
 async def admin_grp_page_handler(client, query):
-    if query.from_user.id != SUDO_ADMIN_ID and query.from_user.id not in ADMINS:
+    if query.from_user.id not in ADMINS:
         return await query.answer("❌ Not Allowed", show_alert=True)
         
     page = int(query.data.split("#")[1])
@@ -1072,7 +1069,7 @@ async def admin_grp_page_handler(client, query):
 # 3️⃣ GENERATE LINK ON CLICK
 @Client.on_callback_query(filters.regex(r"^get_grp_link#"))
 async def get_grp_link_handler(client, query):
-    if query.from_user.id != SUDO_ADMIN_ID and query.from_user.id not in ADMINS:
+    if query.from_user.id not in ADMINS:
         return await query.answer("❌ Not Allowed", show_alert=True)
         
     data = query.data.split("#")

@@ -140,11 +140,16 @@ class MediaDB:
             existing_unique_ids = set()
 
         new_items = []
-        for media, msg in items:
-            if media.file_unique_id not in existing_unique_ids:
-                new_items.append((media, msg))
+        seen_in_batch = set() # ✅ FIX: Ek hi list me aane wali duplicate files ko block karega
+        pre_duplicate_count = 0
         
-        pre_duplicate_count = len(items) - len(new_items)
+        for media, msg in items:
+            if media.file_unique_id not in existing_unique_ids and media.file_unique_id not in seen_in_batch:
+                new_items.append((media, msg))
+                seen_in_batch.add(media.file_unique_id)
+            else:
+                pre_duplicate_count += 1
+        
         if not new_items: return 0, pre_duplicate_count 
             
         count = len(new_items)
@@ -229,18 +234,23 @@ class MediaDB:
             })
             current_id += 1
 
+        # ✅ FIX: Error handling with BulkWriteError
         saved_count = 0
         if data_docs:
             try:
                 await self.data_col.insert_many(data_docs, ordered=False)
                 saved_count = len(data_docs)
+            except BulkWriteError as bwe:
+                saved_count = bwe.details['nInserted']
             except Exception as e:
                 print(f"❌ Critical Error Saving FILES_DATA: {e}")
-                return 0, count + pre_duplicate_count
+                return 0, pre_duplicate_count
 
             if saved_count > 0:
                 try:
                     await self.search_col.insert_many(search_docs, ordered=False)
+                except BulkWriteError:
+                    pass # Ignore if partial failure due to index collision
                 except Exception as e:
                     print(f"⚠️ Search Index Error: {e}")
                 

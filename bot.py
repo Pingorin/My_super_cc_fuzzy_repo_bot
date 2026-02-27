@@ -23,7 +23,7 @@ from plugins.auto_post import auto_post_scheduler
 # Logging Setup
 logging.config.fileConfig('logging.conf')
 logging.getLogger().setLevel(logging.INFO)
-logging.getLogger("pyrogram").setLevel(logging.INFO)
+logging.getLogger("pyrogram").setLevel(logging.ERROR)
 
 class Bot(Client):
     def __init__(self):

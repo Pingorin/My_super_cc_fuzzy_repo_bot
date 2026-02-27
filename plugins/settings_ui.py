@@ -29,54 +29,45 @@ def seconds_to_str(seconds):
     if seconds < 86400: return f"{int(seconds/3600)}hr"
     return f"{int(seconds/86400)}days"
 
-# --- /settings COMMAND (PRO DATABASE CACHE MODE) ---
+# --- /settings COMMAND (PM ONLY WITH SMART REDIRECT & PRO DB CACHE) ---
 @Client.on_message(filters.command("settings"))
 async def settings_command(client, message):
     user_id = message.from_user.id
     
-    # 1. AGAR GROUP MEIN USE KIYA (Admins ko DB me save karo)
+    # 1. AGAR GROUP MEIN USE KIYA TOH PM MEIN BHEJ DO
     if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         try:
             member = await client.get_chat_member(message.chat.id, user_id)
             if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR] and user_id not in ADMINS:
-                return await message.reply_text("❌ **Sirf Admins ye command use kar sakte hain!**")
+                return # Normal users ko ignore karega
         except:
             return
         
-        # ✅ NEW: Database me saare Admins ki ID save (Cache) karna
+        # ✅ Chupchap DB me Admins ko save kar lo taaki PM me "No Group Found" na aaye
         try:
             admin_ids = []
             async for admin in client.get_chat_members(message.chat.id, filter=enums.ChatMembersFilter.ADMINISTRATORS):
                 admin_ids.append(admin.user.id)
-            # MongoDB update
             await db.groups.update_one({"id": message.chat.id}, {"$set": {"admins": admin_ids}}, upsert=True)
+            await db.add_group(message.chat.id, message.chat.title)
         except Exception as e:
             print(f"Admin cache error: {e}")
 
-        await db.add_group(message.chat.id, message.chat.title)
-        
-        title = message.chat.title
-        buttons = [
-            [InlineKeyboardButton("💰 Earning method", callback_data=f"set_earn#{message.chat.id}"), InlineKeyboardButton("📢 Force Subscribe", callback_data=f"fsub_menu#{message.chat.id}")],
-            [InlineKeyboardButton("📜 Result mode", callback_data=f"set_res_mode#{message.chat.id}"), InlineKeyboardButton("📄 Result per page", callback_data=f"set_page_limit#{message.chat.id}")],
-            [InlineKeyboardButton("🗑️ Auto-Delete", callback_data=f"autodel_menu#{message.chat.id}"), InlineKeyboardButton("👍 Auto Reaction", callback_data=f"autoreact_ui#{message.chat.id}")],
-            [InlineKeyboardButton("👋 Welcome Settings", callback_data=f"welcome_ui#{message.chat.id}"), InlineKeyboardButton("🛡️ Anti-Spam", callback_data=f"antispam_ui#{message.chat.id}")],
-            [InlineKeyboardButton("📢 Auto Post", callback_data=f"autopost_ui#{message.chat.id}"), InlineKeyboardButton("📣 Auto Mention", callback_data=f"automention_ui#{message.chat.id}")],
-            [InlineKeyboardButton("👑 Admin Free Access", callback_data=f"adm_access_ui#{message.chat.id}"), InlineKeyboardButton("📊 Daily Stats", callback_data=f"daily_stats#{message.chat.id}#today")],
-            [InlineKeyboardButton("🧨 Reset Settings", callback_data=f"reset_grp_ui#{message.chat.id}"), InlineKeyboardButton("🔗 Other URLs", callback_data=f"other_urls_ui#{message.chat.id}")],
-            [InlineKeyboardButton("💎 Free Premium", callback_data=f"ref_sys_menu#{message.chat.id}"), InlineKeyboardButton("💡 Request Features", callback_data=f"req_feature#{message.chat.id}")],
-            [InlineKeyboardButton("❌ Close", callback_data="close_data")]
-        ]
-        await message.reply_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
+        # PM me bhejne ke liye Button
+        bot_me = await client.get_me()
+        btn = [[InlineKeyboardButton("⚙️ Open Settings in PM", url=f"https://t.me/{bot_me.username}?start=settings")]]
+        return await message.reply_text(
+            "⚙️ **Group settings sirf Bot ke PM (Private Message) me manage ki ja sakti hain.**\n\nKripya niche diye gaye button par click karke bot ke inbox me `/settings` type karein:", 
+            reply_markup=InlineKeyboardMarkup(btn)
+        )
 
-    # 2. AGAR PM MEIN USE KIYA (Fast DB Query)
+    # 2. AGAR PM MEIN USE KIYA (Fast DB Query - Strict Admin Check)
     elif message.chat.type == enums.ChatType.PRIVATE:
         msg = await message.reply_text("🔄 **Loading your groups...**")
         user_groups = []
-        is_bot_admin = user_id in ADMINS
         
-        # ✅ NAYA JADOO: DB se sirf wahi group maango jisme ye user 'admins' list me hai!
-        db_query = {} if is_bot_admin else {"admins": user_id}
+        # ✅ FIX: DB se sirf wahi group maango jisme ye user 'admins' list me hai!
+        db_query = {"admins": user_id}
         
         async for group in db.groups.find(db_query):
             chat_id = group.get('id')
@@ -86,7 +77,7 @@ async def settings_command(client, message):
         await msg.delete()
         
         if not user_groups:
-            return await message.reply_text("❌ **No Groups Found!**\nKripya pehle apne group me ja kar ek baar `/settings` type karein taaki bot aapko pehchan sake.")
+            return await message.reply_text("❌ **No Groups Found!**\nKripya pehle apne group me ja kar ek baar `/connect` ya `/settings` type karein taaki bot aapko pehchan sake.")
 
         buttons = []
         for title, chat_id in user_groups:
@@ -1386,7 +1377,7 @@ async def earning_settings(client, query):
     chat_id = int(query.data.split("#")[1])
     group_data = await db.get_group_settings(chat_id)
     if not group_data: 
-        await db.add_group(chat_id)
+        await db.add_group(chat_id, "Unknown Group")
         group_data = await db.get_group_settings(chat_id)
     
     active_mode = "SHORTLINK" if group_data.get('is_shortlink_active', True) else "FSUB (Disable Shortlink)"
@@ -2023,10 +2014,10 @@ async def request_feature_ui(client, query):
 @Client.on_callback_query(filters.regex(r"^set_back_home"))
 async def back_to_group_list(client, query):
     user_id = query.from_user.id
-    is_bot_admin = user_id in ADMINS
     user_groups = []
     
-    db_query = {} if is_bot_admin else {"admins": user_id}
+    # Strict Admin Check: DB se sirf wahi group aayenge jisme aap sach me Admin hain
+    db_query = {"admins": user_id}
     
     async for group in db.groups.find(db_query):
         chat_id = group.get('id')

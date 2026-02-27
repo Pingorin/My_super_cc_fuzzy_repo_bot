@@ -337,7 +337,7 @@ class MediaDB:
             
             for word in words:
                 char_list = [re.escape(ch) for ch in word]
-                smart_regex_str = r"\s*".join(char_list)
+                smart_regex_str = r"[\s\W]*".join(char_list)
                 regex = re.compile(smart_regex_str, re.IGNORECASE)
                 
                 and_clauses.append({
@@ -359,7 +359,7 @@ class MediaDB:
             elif sort == "old": cursor.sort('_id', 1)
             elif sort == "large": cursor.sort('file_size', -1)
             elif sort == "small": cursor.sort('file_size', 1)
-            else: cursor.sort('$natural', -1)
+            else: cursor.sort('_id', -1) # Default to newest for regex
 
             files = await cursor.to_list(length=100)
 

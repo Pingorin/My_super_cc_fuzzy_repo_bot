@@ -38,7 +38,7 @@ class MediaDB:
     async def ensure_indexes(self):
         try:
             await self.search_col.create_index("file_name")
-            await self.search_col.create_index("search_text") # ✅ New Index
+            await self.search_col.create_index("search_text") 
             await self.search_col.create_index("caption")
             await self.search_col.create_index("link_id")
             await self.data_col.create_index("file_unique_id", unique=True)
@@ -76,8 +76,8 @@ class MediaDB:
         # 2. Extension Removal (from the end only)
         text = re.sub(r'(?i)\.(mkv|mp4|avi|webm|m4v|flv|zip|rar|tar|pdf)$', '', text)
         
-        # 3. Removal: Replace dots, underscores, brackets, punctuation with spaces
-        text = re.sub(r'[._\(\)\[\]{}-]', ' ', text)
+        # 3. Removal: Replace ALL Punctuation (including colon :) with spaces
+        text = re.sub(r'[^\w\s]', ' ', text)
         
         # 4. Roman Numeral Fix (Append digits to standalone I, II, III, IV, V)
         roman_map = {'I': '1', 'II': '2', 'III': '3', 'IV': '4', 'V': '5'}
@@ -140,7 +140,7 @@ class MediaDB:
             existing_unique_ids = set()
 
         new_items = []
-        seen_in_batch = set() # ✅ FIX: Ek hi list me aane wali duplicate files ko block karega
+        seen_in_batch = set() 
         pre_duplicate_count = 0
         
         for media, msg in items:
@@ -259,6 +259,7 @@ class MediaDB:
     # ⚡ OPTIMIZED SEARCH WITH SORTING
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
+        files = []
         try:
             must_clauses = []
             words = query.split()
@@ -325,18 +326,16 @@ class MediaDB:
 
             cursor = self.search_col.aggregate(pipeline)
             files = await cursor.to_list(length=100)
-            return files
-            
         except Exception as e:
-            print(f"⚠️ Index Search Failed: {e}. Switching to Smart Word-by-Word Fallback.")
+            # Agar Atlas search configured nahi hai, toh empty list set kardo
+            files = []
             
-            # ✅ ULTRA SMART REGEX: Spiderman -> s\s*p\s*i\s*d\s*e\s*r\s*m\s*a\s*n
-            # Ye "Spiderman" aur "Spider Man" dono ko automatically match kar lega!
+        # ✅ THE ULTIMATE FIX: Agar Atlas ne 0 result diya, tab bhi Smart Regex chalao!
+        if not files:
             words = query.split()
             and_clauses = []
             
             for word in words:
-                # Har character ke beech me optional space (\s*) laga do
                 char_list = [re.escape(ch) for ch in word]
                 smart_regex_str = r"\s*".join(char_list)
                 regex = re.compile(smart_regex_str, re.IGNORECASE)
@@ -363,29 +362,30 @@ class MediaDB:
             else: cursor.sort('$natural', -1)
 
             files = await cursor.to_list(length=100)
-            
-            final_files = []
-            for f in files:
-                fname = f.get('file_name', '').lower()
-                meta = f.get('search_text', '').lower()
-                full_text = fname + " " + meta
-                fsize = f.get('file_size', 0)
-                
-                if lang and lang != "none":
-                    pattern = LANG_MAP.get(lang, lang).lower()
-                    if not re.search(pattern, full_text): continue
 
-                if quality and quality != "none" and quality.lower() not in full_text: continue
-                if year and year != "none" and str(year) not in full_text: continue
-                
-                if size_range == "min500" and fsize >= 500*1024*1024: continue
-                elif size_range == "500-1gb" and not (500*1024*1024 <= fsize < 1024*1024*1024): continue
-                elif size_range == "1gb-2gb" and not (1024*1024*1024 <= fsize < 2*1024*1024*1024): continue
-                elif size_range == "max2gb" and fsize < 2*1024*1024*1024: continue
-                
-                final_files.append(f)
-                
-            return final_files
+        # Apply final Python-level filters for both methods
+        final_files = []
+        for f in files:
+            fname = f.get('file_name', '').lower()
+            meta = f.get('search_text', '').lower()
+            full_text = fname + " " + meta
+            fsize = f.get('file_size', 0)
+            
+            if lang and lang != "none":
+                pattern = LANG_MAP.get(lang, lang).lower()
+                if not re.search(pattern, full_text): continue
+
+            if quality and quality != "none" and quality.lower() not in full_text: continue
+            if year and year != "none" and str(year) not in full_text: continue
+            
+            if size_range == "min500" and fsize >= 500*1024*1024: continue
+            elif size_range == "500-1gb" and not (500*1024*1024 <= fsize < 1024*1024*1024): continue
+            elif size_range == "1gb-2gb" and not (1024*1024*1024 <= fsize < 2*1024*1024*1024): continue
+            elif size_range == "max2gb" and fsize < 2*1024*1024*1024: continue
+            
+            final_files.append(f)
+            
+        return final_files
 
     async def get_search_query(self, search_id):
         try:

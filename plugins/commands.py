@@ -14,7 +14,7 @@ from info import ADMINS
 from utils import temp
 from Script import script 
 
-# ✅ SAFE IMPORTS (Agar ye files me nahi honge, toh bot crash nahi hoga)
+# ✅ SAFE IMPORTS (Agar ye variables/functions nahi hain, toh bot crash nahi hoga)
 try:
     from info import IS_VERIFY
 except ImportError:
@@ -27,7 +27,7 @@ except ImportError:
         return link
 
 logger = logging.getLogger(__name__)
-START_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg"
+START_IMG = getattr(info, 'START_IMG', "https://graph.org/file/4d61886e61dfa37a25945.jpg")
 
 # ==============================================================================
 # 🗑️ AUTO-DELETE HELPER FUNCTIONS
@@ -100,9 +100,12 @@ async def get_active_shorteners(chat_id):
         if active: return active
 
     default_shorteners = {}
-    if info.SHORTLINK_URL_1 and info.SHORTLINK_API_1: default_shorteners['1'] = {'site': info.SHORTLINK_URL_1, 'api': info.SHORTLINK_API_1}
-    if info.SHORTLINK_URL_2 and info.SHORTLINK_API_2: default_shorteners['2'] = {'site': info.SHORTLINK_URL_2, 'api': info.SHORTLINK_API_2}
-    if info.SHORTLINK_URL_3 and info.SHORTLINK_API_3: default_shorteners['3'] = {'site': info.SHORTLINK_URL_3, 'api': info.SHORTLINK_API_3}
+    if getattr(info, 'SHORTLINK_URL_1', None) and getattr(info, 'SHORTLINK_API_1', None): 
+        default_shorteners['1'] = {'site': info.SHORTLINK_URL_1, 'api': info.SHORTLINK_API_1}
+    if getattr(info, 'SHORTLINK_URL_2', None) and getattr(info, 'SHORTLINK_API_2', None): 
+        default_shorteners['2'] = {'site': info.SHORTLINK_URL_2, 'api': info.SHORTLINK_API_2}
+    if getattr(info, 'SHORTLINK_URL_3', None) and getattr(info, 'SHORTLINK_API_3', None): 
+        default_shorteners['3'] = {'site': info.SHORTLINK_URL_3, 'api': info.SHORTLINK_API_3}
     return default_shorteners
 
 @Client.on_message(filters.group, group=-1)
@@ -460,9 +463,9 @@ async def start_handler(client, message):
                     site_domain = shorteners[str(level)]['site']
                 
                 if not site_domain:
-                    if level == 1 and info.SHORTLINK_URL_1: site_domain = info.SHORTLINK_URL_1
-                    elif level == 2 and info.SHORTLINK_URL_2: site_domain = info.SHORTLINK_URL_2
-                    elif level == 3 and info.SHORTLINK_URL_3: site_domain = info.SHORTLINK_URL_3
+                    if level == 1 and getattr(info, 'SHORTLINK_URL_1', None): site_domain = info.SHORTLINK_URL_1
+                    elif level == 2 and getattr(info, 'SHORTLINK_URL_2', None): site_domain = info.SHORTLINK_URL_2
+                    elif level == 3 and getattr(info, 'SHORTLINK_URL_3', None): site_domain = info.SHORTLINK_URL_3
 
                 if site_domain:
                     await db.update_daily_stats(verify_chatid, 'ver', count=1, domain=site_domain)
@@ -585,7 +588,7 @@ async def start_handler(client, message):
                     if cap_url: final_caption = f"<b><a href='{cap_url}'>{caption}</a></b>"
                     else: final_caption = f"<b>{caption}</b>"
                     
-                    final_caption += f"\n\n{script.CUSTOM_FOOTER}"
+                    final_caption += f"\n\n{getattr(script, 'CUSTOM_FOOTER', '')}"
                     
                     btn_rows = []
                     if cap_btn_text and cap_btn_url:
@@ -594,7 +597,7 @@ async def start_handler(client, message):
                     # ✅ Streaming Buttons (Sirf Buttons, No Link in Text)
                     try:
                         bin_msg = await client.send_cached_media(chat_id=info.BIN_CHANNEL, file_id=file_details['file_id'])
-                        base_url = info.SITE_URL.rstrip('/') if info.SITE_URL else "http://127.0.0.1:8080"
+                        base_url = info.SITE_URL.rstrip('/') if getattr(info, 'SITE_URL', None) else "http://127.0.0.1:8080"
                         
                         watch_url = f"{base_url}/watch/{bin_msg.id}"
                         dl_url = f"{base_url}/{bin_msg.id}"
@@ -748,7 +751,7 @@ async def start_handler(client, message):
             else:
                 final_caption = f"<b>{caption}</b>"
 
-            final_caption += f"\n\n{script.CUSTOM_FOOTER}"
+            final_caption += f"\n\n{getattr(script, 'CUSTOM_FOOTER', '')}"
 
             reply_markup = None
             btn_rows = []
@@ -767,7 +770,7 @@ async def start_handler(client, message):
             # ✅ Streaming Buttons - No links in caption text
             try:
                 bin_msg = await client.send_cached_media(chat_id=info.BIN_CHANNEL, file_id=file_data.get('file_id'))
-                base_url = info.SITE_URL.rstrip('/') if info.SITE_URL else "http://127.0.0.1:8080"
+                base_url = info.SITE_URL.rstrip('/') if getattr(info, 'SITE_URL', None) else "http://127.0.0.1:8080"
                 
                 watch_url = f"{base_url}/watch/{bin_msg.id}"
                 dl_url = f"{base_url}/{bin_msg.id}"

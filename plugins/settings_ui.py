@@ -29,36 +29,70 @@ def seconds_to_str(seconds):
     if seconds < 86400: return f"{int(seconds/3600)}hr"
     return f"{int(seconds/86400)}days"
 
-# --- /settings COMMAND ---
-@Client.on_message(filters.command("settings") & filters.private)
+# --- /settings COMMAND (PRO DATABASE CACHE MODE) ---
+@Client.on_message(filters.command("settings"))
 async def settings_command(client, message):
     user_id = message.from_user.id
-    msg = await message.reply_text("🔄 **Loading your groups...**")
     
-    user_groups = []
-    async for group in db.groups.find({}):
+    # 1. AGAR GROUP MEIN USE KIYA (Admins ko DB me save karo)
+    if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         try:
-            chat_id = group['id']
-            try:
-                member = await client.get_chat_member(chat_id, user_id)
-            except: continue 
-            if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-                try: chat_info = await client.get_chat(chat_id)
-                except: chat_info = None
-                
-                title = chat_info.title if chat_info else f"Group {chat_id}"
-                user_groups.append((title, chat_id))
-        except: continue 
+            member = await client.get_chat_member(message.chat.id, user_id)
+            if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR] and user_id not in ADMINS:
+                return await message.reply_text("❌ **Sirf Admins ye command use kar sakte hain!**")
+        except:
+            return
+        
+        # ✅ NEW: Database me saare Admins ki ID save (Cache) karna
+        try:
+            admin_ids = []
+            async for admin in client.get_chat_members(message.chat.id, filter=enums.ChatMembersFilter.ADMINISTRATORS):
+                admin_ids.append(admin.user.id)
+            # MongoDB update
+            await db.groups.update_one({"id": message.chat.id}, {"$set": {"admins": admin_ids}}, upsert=True)
+        except Exception as e:
+            print(f"Admin cache error: {e}")
 
-    await msg.delete()
-    if not user_groups:
-        return await message.reply_text("❌ **No Groups Found!**\nMake sure I am added to your group and you are an Admin there.")
+        await db.add_group(message.chat.id, message.chat.title)
+        
+        title = message.chat.title
+        buttons = [
+            [InlineKeyboardButton("💰 Earning method", callback_data=f"set_earn#{message.chat.id}"), InlineKeyboardButton("📢 Force Subscribe", callback_data=f"fsub_menu#{message.chat.id}")],
+            [InlineKeyboardButton("📜 Result mode", callback_data=f"set_res_mode#{message.chat.id}"), InlineKeyboardButton("📄 Result per page", callback_data=f"set_page_limit#{message.chat.id}")],
+            [InlineKeyboardButton("🗑️ Auto-Delete", callback_data=f"autodel_menu#{message.chat.id}"), InlineKeyboardButton("👍 Auto Reaction", callback_data=f"autoreact_ui#{message.chat.id}")],
+            [InlineKeyboardButton("👋 Welcome Settings", callback_data=f"welcome_ui#{message.chat.id}"), InlineKeyboardButton("🛡️ Anti-Spam", callback_data=f"antispam_ui#{message.chat.id}")],
+            [InlineKeyboardButton("📢 Auto Post", callback_data=f"autopost_ui#{message.chat.id}"), InlineKeyboardButton("📣 Auto Mention", callback_data=f"automention_ui#{message.chat.id}")],
+            [InlineKeyboardButton("👑 Admin Free Access", callback_data=f"adm_access_ui#{message.chat.id}"), InlineKeyboardButton("📊 Daily Stats", callback_data=f"daily_stats#{message.chat.id}#today")],
+            [InlineKeyboardButton("🧨 Reset Settings", callback_data=f"reset_grp_ui#{message.chat.id}"), InlineKeyboardButton("🔗 Other URLs", callback_data=f"other_urls_ui#{message.chat.id}")],
+            [InlineKeyboardButton("💎 Free Premium", callback_data=f"ref_sys_menu#{message.chat.id}"), InlineKeyboardButton("💡 Request Features", callback_data=f"req_feature#{message.chat.id}")],
+            [InlineKeyboardButton("❌ Close", callback_data="close_data")]
+        ]
+        await message.reply_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
 
-    buttons = []
-    for title, chat_id in user_groups:
-        buttons.append([InlineKeyboardButton(f"📂 {title}", callback_data=f"set_main#{chat_id}")])
-    
-    await message.reply_text("⚙️ **Select a Group:**", reply_markup=InlineKeyboardMarkup(buttons))
+    # 2. AGAR PM MEIN USE KIYA (Fast DB Query)
+    elif message.chat.type == enums.ChatType.PRIVATE:
+        msg = await message.reply_text("🔄 **Loading your groups...**")
+        user_groups = []
+        is_bot_admin = user_id in ADMINS
+        
+        # ✅ NAYA JADOO: DB se sirf wahi group maango jisme ye user 'admins' list me hai!
+        db_query = {} if is_bot_admin else {"admins": user_id}
+        
+        async for group in db.groups.find(db_query):
+            chat_id = group.get('id')
+            title = group.get('title', f"Group {chat_id}")
+            user_groups.append((title, chat_id))
+
+        await msg.delete()
+        
+        if not user_groups:
+            return await message.reply_text("❌ **No Groups Found!**\nKripya pehle apne group me ja kar ek baar `/settings` type karein taaki bot aapko pehchan sake.")
+
+        buttons = []
+        for title, chat_id in user_groups:
+            buttons.append([InlineKeyboardButton(f"📂 {title}", callback_data=f"set_main#{chat_id}")])
+        
+        await message.reply_text("⚙️ **Select your Group:**", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
 # ⚙️ MAIN SETTINGS MENU
@@ -98,7 +132,7 @@ async def main_settings_menu(client, query):
         [InlineKeyboardButton("🧨 Reset Settings", callback_data=f"reset_grp_ui#{chat_id}"),
          InlineKeyboardButton("🔗 Other URLs", callback_data=f"other_urls_ui#{chat_id}")],
          
-        # ✅ ROW 8: REFERRAL & REQUEST (NEW)
+        # Row 8: REFERRAL & REQUEST
         [InlineKeyboardButton("💎 Free Premium (Referral)", callback_data=f"ref_sys_menu#{chat_id}"),
          InlineKeyboardButton("💡 Request Features", callback_data=f"req_feature#{chat_id}")],
 
@@ -1342,36 +1376,6 @@ async def remove_norm_all(client, query):
     await query.answer("All Normal Fsub Channels Removed!", show_alert=True)
     await normal_fsub_menu(client, query)
 
-@Client.on_callback_query(filters.regex(r"^set_back_home"))
-async def back_to_group_list(client, query):
-    user_id = query.from_user.id
-    
-    # Reuse the logic from settings_command but for editing
-    user_groups = []
-    async for group in db.groups.find({}):
-        try:
-            chat_id = group['id']
-            # Check Admin Status
-            try:
-                member = await client.get_chat_member(chat_id, user_id)
-            except: continue 
-            
-            if member.status in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
-                try: chat_info = await client.get_chat(chat_id)
-                except: chat_info = None
-                
-                title = chat_info.title if chat_info else f"Group {chat_id}"
-                user_groups.append((title, chat_id))
-        except: continue 
-
-    if not user_groups:
-        return await query.message.edit_text("❌ **No Groups Found!**\nMake sure I am added to your group and you are an Admin there.")
-
-    buttons = []
-    for title, chat_id in user_groups:
-        buttons.append([InlineKeyboardButton(f"📂 {title}", callback_data=f"set_main#{chat_id}")])
-    
-    await query.message.edit_text("⚙️ **Select a Group:**", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
 # 💰 EARNING & SHORTENER SETTINGS
@@ -2012,3 +2016,28 @@ async def request_feature_ui(client, query):
         
     except Exception as e:
         pass # Timeout
+
+# ==============================================================================
+# ✅ BACK BUTTON KO BHI FAST BANAYA GAYA HAI
+# ==============================================================================
+@Client.on_callback_query(filters.regex(r"^set_back_home"))
+async def back_to_group_list(client, query):
+    user_id = query.from_user.id
+    is_bot_admin = user_id in ADMINS
+    user_groups = []
+    
+    db_query = {} if is_bot_admin else {"admins": user_id}
+    
+    async for group in db.groups.find(db_query):
+        chat_id = group.get('id')
+        title = group.get('title', f"Group {chat_id}")
+        user_groups.append((title, chat_id))
+
+    if not user_groups:
+        return await query.message.edit_text("❌ **No Groups Found!**")
+
+    buttons = []
+    for title, chat_id in user_groups:
+        buttons.append([InlineKeyboardButton(f"📂 {title}", callback_data=f"set_main#{chat_id}")])
+    
+    await query.message.edit_text("⚙️ **Select your Group:**", reply_markup=InlineKeyboardMarkup(buttons))

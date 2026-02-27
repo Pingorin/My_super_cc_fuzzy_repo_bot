@@ -104,84 +104,67 @@ class UserChatDB:
     # ==================================================================
 
     async def add_group(self, id, title):
-        group = await self.groups.find_one({'id': int(id)})
+        # ✅ PRO FIX: MongoDB '$setOnInsert' aur 'upsert=True' ka use kiya gaya hai.
+        # Isse kitne bhi message ek sath aayen, duplicate entry kabhi nahi banegi!
+        default_settings = {
+            'id': int(id),
+            'title': title,
+            'earning_method': 'shortlink', 
+            'shortener_mode': 'dynamic',   
+            'shorteners': {},              
+            'fsub_channels': {},           
+            'is_shortlink_active': True,
+            'result_mode': 'hybrid',        
+            'result_page_limit': 10,        
+            'auto_reaction': False,         
+            'auto_delete_time': 300,        
+            'auto_delete_user_msg': False,  
+            'delete_thanks_msg': True,      
+            'welcome_enabled': True,       
+            'welcome_mode': 'default',     
+            'custom_welcome_text': None,   
+            'custom_welcome_photo': None,  
+            'antispam_enabled': False,      
+            'antispam_action': 'mute',      
+            'mute_duration': 600,           
+            'automention_enabled': True,     
+            'mention_interval': 300,         
+            'last_mention_time': 0,          
+            'pending_mentions': [],          
+            'autopost_enabled': False,      
+            'autopost_interval': 1800,      
+            'last_autopost_time': 0,        
+            'autopost_text': None,          
+            'autopost_image': None,         
+            'autopost_buttons': {},         
+            'admin_free_access': False,     
+            'daily_stats_notify': True,     
+            'stats': {},                    
+            'caption_url': None,
+            'caption_btn_text': None,
+            'caption_btn_url': None,
+            'howto_url': None,
+            'group_link': None,
+            'referral_enabled': True,       
+            'referral_target': 5,           
+            'referral_reward_time': 2592000, 
+            'time_dynamic': 86400,
+            'time_smart': 86400,
+            'time_together': 604800,       
+            'time_together_3': 86400,      
+            'time_gap1': 300,
+            'time_gap2': 300
+        }
         
-        if not group:
-            default_settings = {
-                'id': int(id),
-                'title': title,
-                'earning_method': 'shortlink', 
-                'shortener_mode': 'dynamic',   
-                'shorteners': {},              
-                'fsub_channels': {},           
-                'is_shortlink_active': True,
-                
-                # Search Settings
-                'result_mode': 'hybrid',        # Default: hybrid
-                'result_page_limit': 10,        
-                
-                # Auto-Delete & Reaction Defaults
-                'auto_reaction': False,         
-                'auto_delete_time': 300,        
-                'auto_delete_user_msg': False,  
-                'delete_thanks_msg': True,      
-
-                # Welcome Settings Defaults
-                'welcome_enabled': True,       
-                'welcome_mode': 'default',     
-                'custom_welcome_text': None,   
-                'custom_welcome_photo': None,  
-
-                # Anti-Spam Defaults
-                'antispam_enabled': False,      # Default: OFF
-                'antispam_action': 'mute',      # 'mute' (Warn) or 'kick'
-                'mute_duration': 600,           # Default: 10 Minutes (600s)
-
-                # Auto Mention Defaults
-                'automention_enabled': True,     # Default: ON
-                'mention_interval': 300,         # Default: 5 min
-                'last_mention_time': 0,          
-                'pending_mentions': [],          # List of IDs
-
-                # Auto Post Defaults
-                'autopost_enabled': False,      # Default: OFF
-                'autopost_interval': 1800,      # Default: 30 min (1800s)
-                'last_autopost_time': 0,        
-                'autopost_text': None,          
-                'autopost_image': None,         
-                'autopost_buttons': {},         
-                
-                # Admin Free Access Default
-                'admin_free_access': False,     # Default: Disabled
-                
-                # Daily Stats
-                'daily_stats_notify': True,     # Default: ON
-                'stats': {},                    # Stores daily data
-
-                # ✅ OTHER URLS DEFAULTS
-                'caption_url': None,
-                'caption_btn_text': None,
-                'caption_btn_url': None,
-                'howto_url': None,
-                'group_link': None,
-
-                # ✅ REFERRAL DEFAULTS (NEW)
-                'referral_enabled': True,       # Default: Enabled
-                'referral_target': 5,           # 5 Invites needed
-                'referral_reward_time': 2592000, # 30 Days (in seconds)
-
-                # Time Defaults
-                'time_dynamic': 86400,
-                'time_smart': 86400,
-                'time_together': 604800,       
-                'time_together_3': 86400,      
-                'time_gap1': 300,
-                'time_gap2': 300
-            }
-            await self.groups.insert_one(default_settings)
-        else:
-            # Update Title if changed
-            await self.groups.update_one({'id': int(id)}, {'$set': {'title': title}})
+        # Agar ID pehle se hai toh sirf title update hoga, naya hai toh defaults save honge
+        await self.groups.update_one(
+            {'id': int(id)}, 
+            {
+                '$setOnInsert': default_settings,
+                '$set': {'title': title}
+            }, 
+            upsert=True
+        )
 
     # --- ⚙️ GROUP SETTINGS HELPERS (WITH CACHING) ---
     
@@ -556,7 +539,7 @@ class UserChatDB:
             'admin_free_access': False,
             'daily_stats_notify': True,
 
-            # ✅ OTHER URLS DEFAULTS
+            # ✅ OTHER URLs DEFAULTS
             'caption_url': None,
             'caption_btn_text': None,
             'caption_btn_url': None,

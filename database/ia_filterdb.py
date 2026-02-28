@@ -224,9 +224,9 @@ class MediaDB:
             })
             
             search_docs.append({
-                'file_name': display_name,         # Elegant Display Name
-                'search_text': master_search_text, # Hidden Meta-text for Smart Search
-                'caption': clean_caption,          # Cleaned caption
+                'file_name': display_name,         
+                'search_text': master_search_text, 
+                'caption': clean_caption,          
                 'file_size': media.file_size, 
                 'link_id': current_id,
                 'chat_id': message.chat.id,
@@ -256,136 +256,72 @@ class MediaDB:
         return saved_count, pre_duplicate_count
 
     # ==================================================================
-    # ⚡ OPTIMIZED SEARCH WITH SORTING
+    # ⚡ PURE SMART REGEX PRIMARY SEARCH (100% ACCURATE FOR SPACELESS & SIZE)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
-        files = []
-        try:
-            must_clauses = []
-            words = query.split()
-            for word in words:
-                must_clauses.append({
-                    "text": {
-                        "query": word,
-                        "path": ["file_name", "search_text", "caption"], 
-                        "fuzzy": {"maxEdits": 1}
-                    }
-                })
-
-            pipeline = []
-            pipeline.append({
-                "$search": {
-                    "index": "default", 
-                    "compound": {"must": must_clauses}
-                }
+        words = query.split()
+        and_clauses = []
+        
+        # 1. Main Keyword Search
+        for word in words:
+            char_list = [re.escape(ch) for ch in word]
+            smart_regex_str = r"[\s\W]*".join(char_list)
+            regex = re.compile(smart_regex_str, re.IGNORECASE)
+            
+            and_clauses.append({
+                "$or": [
+                    {"search_text": regex},
+                    {"file_name": regex}, 
+                    {"caption": regex}
+                ]
             })
 
-            # Stage 2: Filter ($match)
-            match_filters = {}
+        # 2. Language Filter
+        if lang and lang != "none":
+            pattern = LANG_MAP.get(lang, lang)
+            lang_regex = re.compile(pattern, re.IGNORECASE)
+            and_clauses.append({"$or": [{"search_text": lang_regex}, {"file_name": lang_regex}]})
+
+        # 3. Quality Filter
+        if quality and quality != "none":
+            qual_regex = re.compile(re.escape(quality), re.IGNORECASE)
+            and_clauses.append({"$or": [{"search_text": qual_regex}, {"file_name": qual_regex}]})
+
+        # 4. Year Filter
+        if year and year != "none":
+            year_regex = re.compile(re.escape(str(year)), re.IGNORECASE)
+            and_clauses.append({"search_text": year_regex})
+
+        # Combine ALL text clauses
+        filter_query = {"$and": and_clauses} if and_clauses else {}
+        
+        # 5. File Type Filter
+        if file_type and file_type != "none": 
+            filter_query["file_type"] = "video" if file_type.lower() == "video" else "document"
+
+        # 6. Size Range Filter (✅ FIXED: Ab MongoDB Native Filtering Use Karega)
+        if size_range and size_range != "none":
+            MB_500 = 500 * 1024 * 1024
+            GB_1 = 1024 * 1024 * 1024
+            GB_2 = 2 * 1024 * 1024 * 1024
             
-            if file_type and file_type != "none":
-                capital_type = "video" if file_type.lower() == "video" else "document"
-                match_filters["file_type"] = capital_type
+            if size_range == "min500": filter_query["file_size"] = {"$lt": MB_500}
+            elif size_range == "500-1gb": filter_query["file_size"] = {"$gte": MB_500, "$lt": GB_1}
+            elif size_range == "1gb-2gb": filter_query["file_size"] = {"$gte": GB_1, "$lt": GB_2}
+            elif size_range == "max2gb": filter_query["file_size"] = {"$gte": GB_2}
 
-            if lang and lang != "none":
-                pattern = LANG_MAP.get(lang, lang)
-                match_filters["$or"] = [
-                    {"file_name": {"$regex": pattern, "$options": "i"}},
-                    {"search_text": {"$regex": pattern, "$options": "i"}}
-                ]
+        # Query MongoDB (Filters applied directly to DB, extremely fast)
+        cursor = self.search_col.find(filter_query)
+        
+        # 7. Sorting Logic
+        if sort == "new": cursor.sort('_id', -1)
+        elif sort == "old": cursor.sort('_id', 1)
+        elif sort == "large": cursor.sort('file_size', -1)
+        elif sort == "small": cursor.sort('file_size', 1)
+        else: cursor.sort('_id', -1) # Default to newest
 
-            if quality and quality != "none":
-                match_filters["$or"] = [
-                    {"file_name": {"$regex": quality, "$options": "i"}},
-                    {"search_text": {"$regex": quality, "$options": "i"}}
-                ]
-            
-            if year and year != "none":
-                match_filters["search_text"] = {"$regex": str(year)}
-
-            if size_range and size_range != "none":
-                MB_500 = 500 * 1024 * 1024
-                GB_1 = 1024 * 1024 * 1024
-                GB_2 = 2 * 1024 * 1024 * 1024
-                
-                if size_range == "min500": match_filters["file_size"] = {"$lt": MB_500}
-                elif size_range == "500-1gb": match_filters["file_size"] = {"$gte": MB_500, "$lt": GB_1}
-                elif size_range == "1gb-2gb": match_filters["file_size"] = {"$gte": GB_1, "$lt": GB_2}
-                elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
-
-            if match_filters:
-                pipeline.append({"$match": match_filters})
-
-            # ✅ SORTING LOGIC
-            if sort == "new": pipeline.append({"$sort": {"_id": -1}})
-            elif sort == "old": pipeline.append({"$sort": {"_id": 1}})
-            elif sort == "large": pipeline.append({"$sort": {"file_size": -1}})
-            elif sort == "small": pipeline.append({"$sort": {"file_size": 1}})
-
-            pipeline.append({"$limit": 100}) 
-
-            cursor = self.search_col.aggregate(pipeline)
-            files = await cursor.to_list(length=100)
-        except Exception as e:
-            # Agar Atlas search configured nahi hai, toh empty list set kardo
-            files = []
-            
-        # ✅ THE ULTIMATE FIX: Agar Atlas ne 0 result diya, tab bhi Smart Regex chalao!
-        if not files:
-            words = query.split()
-            and_clauses = []
-            
-            for word in words:
-                char_list = [re.escape(ch) for ch in word]
-                smart_regex_str = r"[\s\W]*".join(char_list)
-                regex = re.compile(smart_regex_str, re.IGNORECASE)
-                
-                and_clauses.append({
-                    "$or": [
-                        {"search_text": regex},
-                        {"file_name": regex}, 
-                        {"caption": regex}
-                    ]
-                })
-
-            fallback_filter = {"$and": and_clauses} if and_clauses else {}
-            
-            if file_type and file_type != "none": 
-                fallback_filter["file_type"] = "video" if file_type.lower() == "video" else "document"
-
-            cursor = self.search_col.find(fallback_filter)
-            
-            if sort == "new": cursor.sort('_id', -1)
-            elif sort == "old": cursor.sort('_id', 1)
-            elif sort == "large": cursor.sort('file_size', -1)
-            elif sort == "small": cursor.sort('file_size', 1)
-            else: cursor.sort('_id', -1) # Default to newest for regex
-
-            files = await cursor.to_list(length=100)
-
-        # Apply final Python-level filters for both methods
-        final_files = []
-        for f in files:
-            fname = f.get('file_name', '').lower()
-            meta = f.get('search_text', '').lower()
-            full_text = fname + " " + meta
-            fsize = f.get('file_size', 0)
-            
-            if lang and lang != "none":
-                pattern = LANG_MAP.get(lang, lang).lower()
-                if not re.search(pattern, full_text): continue
-
-            if quality and quality != "none" and quality.lower() not in full_text: continue
-            if year and year != "none" and str(year) not in full_text: continue
-            
-            if size_range == "min500" and fsize >= 500*1024*1024: continue
-            elif size_range == "500-1gb" and not (500*1024*1024 <= fsize < 1024*1024*1024): continue
-            elif size_range == "1gb-2gb" and not (1024*1024*1024 <= fsize < 2*1024*1024*1024): continue
-            elif size_range == "max2gb" and fsize < 2*1024*1024*1024: continue
-            
-            final_files.append(f)
-            
-        return final_files
+        files = await cursor.to_list(length=100)
+        return files
 
     async def get_search_query(self, search_id):
         try:

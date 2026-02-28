@@ -105,12 +105,10 @@ class MediaDB:
         if not text:
             return ""
 
-        # Step 1: Remove HTML Tags (Fixes the "b b b" issue caused by <b> tags)
+        # Step 1: Remove HTML Tags (Fixes <b>, <i>, <code> tags)
         text = re.sub(r"<[^>]+>", "", text)
 
         # Step 2: EXTENSION CUT-OFF 
-        # Sirf extension (.mkv, .mp4, etc.) tak ka text rakhega, baaki sab uda dega
-        # Updated to handle both dotted (.mkv) and dotless (mkv) extensions across newlines
         ext_regex = r"(?i)(.*?(?:\.(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)|\b(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)\b))"
         match = re.search(ext_regex, text, flags=re.DOTALL)
         if match:
@@ -127,7 +125,41 @@ class MediaDB:
         # Step 5: Invisible Characters
         text = re.sub(r"[\u200b\u200c\u200d\u200e\u200f\ufeff\u202a-\u202e]", "", text)
 
-        # Step 6: Spam Words and Tags (Added 'code' to remove "Code Spiderman")
+        # ==========================================================
+        # 🔥 STEP 6: STANDARDIZE TAGS & EXPAND RANGES
+        # ==========================================================
+        
+        # 1. Alias Normalization (Part, Vol, Volume, Chapter -> S)
+        text = re.sub(r"(?i)\b(part|vol|volume|chapter)\s*(\d+)\b", r"S\2", text)
+        
+        # 2. XxY format standardization (e.g., 1x05 -> S1 E05)
+        text = re.sub(r"(?i)\b(\d{1,2})\s*x\s*(\d{1,4})\b", r"S\1 E\2", text)
+        
+        # 3. Standardize Words to S and E
+        text = re.sub(r"(?i)\b(?:season|s)\s*(\d+)\b", r"S\1", text)
+        text = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", text)
+        
+        # 4. Expand Season Ranges (e.g., S1-3 -> S01 S02 S03)
+        def expand_season(match):
+            start, end = int(match.group(1)), int(match.group(2))
+            if start > end or end - start > 50: return match.group(0)
+            return " ".join([f"S{str(i).zfill(2)}" for i in range(start, end + 1)])
+        text = re.sub(r"(?i)\bS(\d+)\s*(?:-|to)\s*(?:S)?(\d+)\b", expand_season, text)
+        
+        # 5. Expand Episode Ranges (e.g., E05-08 -> E05 E06 E07 E08)
+        def expand_episode(match):
+            start, end = int(match.group(1)), int(match.group(2))
+            if start > end or end - start > 200: return match.group(0)
+            return " ".join([f"E{str(i).zfill(2)}" for i in range(start, end + 1)])
+        text = re.sub(r"(?i)\bE(\d+)\s*(?:-|to)\s*(?:E)?(\d+)\b", expand_episode, text)
+        
+        # 6. Zero-Padding (e.g., S1 -> S01, E5 -> E05)
+        text = re.sub(r"(?i)\bS(\d+)\b", lambda m: f"S{m.group(1).zfill(2)}", text)
+        text = re.sub(r"(?i)\bE(\d+)\b", lambda m: f"E{m.group(1).zfill(2)}", text)
+
+        # ==========================================================
+
+        # Step 7: Spam Words and Tags
         spam_and_tags = [
             r"download", r"full movie", r"free", r"watch online", r"join",
             r"esub", r"hc-esub", r"x264", r"x265", r"code"
@@ -135,13 +167,10 @@ class MediaDB:
         pattern = r"\b(" + "|".join(spam_and_tags) + r")\b"
         text = re.sub(pattern, "", text, flags=re.IGNORECASE)
 
-        # Step 7: Emojis, Symbols, Punctuation
-        # Whitelisted: Words (\w), spaces (\s), colon (:), hyphen (-), and all brackets () [] {}
-        # Underscore (_) is explicitly removed since \w originally includes it.
+        # Step 8: Emojis, Symbols, Punctuation
         text = re.sub(r"[^\w\s:()\[\]{}\-]|_", " ", text)
 
-        # Step 8: Space Management
-        # Replaces multiple consecutive spaces with a single space
+        # Step 9: Space Management
         text = re.sub(r"\s+", " ", text)
 
         return text.strip()
@@ -187,11 +216,30 @@ class MediaDB:
                 cap_text = caption
 
             # ==========================================================
-            # ✅ STEP 1: SPACELESS GENERATION & MASTER SEARCH TEXT
+            # ✅ GENERATE ALIASES FOR SEASON & EPISODE
+            # ==========================================================
+            variations = []
+            
+            seasons = re.findall(r"(?i)\bS(\d+)\b", display_name)
+            for s in seasons:
+                s_num = int(s)
+                s_pad = str(s_num).zfill(2)
+                variations.append(f"s{s_num} s{s_pad} so{s_num} season{s_num} s{s_num}season{s_num}")
+
+            episodes = re.findall(r"(?i)\bE(\d+)\b", display_name)
+            for e in episodes:
+                e_num = int(e)
+                e_pad = str(e_num).zfill(2)
+                variations.append(f"e{e_num} e{e_pad} eo{e_num} ep{e_num} episode{e_num} e{e_num}episode{e_num}")
+
+            variation_text = " ".join(variations)
+
+            # ==========================================================
+            # ✅ SPACELESS GENERATION & MASTER SEARCH TEXT
             # ==========================================================
             spaceless_name = display_name.replace(" ", "").replace("-", "").replace(".", "")
             spaceless_cap = cap_text.replace(" ", "").replace("-", "").replace(".", "")
-            master_search_text = f"{display_name} {spaceless_name} {spaceless_cap}".lower()
+            master_search_text = f"{display_name} {spaceless_name} {spaceless_cap} {variation_text}".lower()
             # ==========================================================
 
             file_type = "document" 
@@ -213,7 +261,7 @@ class MediaDB:
                 'file_name': display_name,
                 'file_size': media.file_size, 
                 'caption': caption,
-                'search_text': master_search_text, # ✅ NEW HIDDEN FIELD
+                'search_text': master_search_text,
                 'link_id': current_id,
                 'chat_id': message.chat.id,
                 'file_type': file_type 
@@ -248,7 +296,7 @@ class MediaDB:
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         try:
             # ==========================================================
-            # ✅ STEP 2: QUERY PROCESSING (SMART REGEX SEARCH)
+            # ✅ QUERY PROCESSING (SMART REGEX SEARCH)
             # ==========================================================
             and_clauses = []
             words = query.split()

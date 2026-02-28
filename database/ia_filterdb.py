@@ -40,6 +40,9 @@ class MediaDB:
             await self.search_col.create_index("file_name")
             await self.search_col.create_index("caption")
             await self.search_col.create_index("search_text") # ✅ Naya index fast search ke liye
+            await self.search_col.create_index("quality_tags") # ✅ Fast filtering index
+            await self.search_col.create_index("language_tags") # ✅ Fast filtering index
+            await self.search_col.create_index("year_tags") # ✅ Fast filtering index
             await self.search_col.create_index("link_id")
             await self.data_col.create_index("file_unique_id", unique=True)
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
@@ -146,6 +149,81 @@ class MediaDB:
 
         return text.strip()
 
+    # ==================================================================
+    # ✅ EXTRACT STRUCTURED METADATA (QUALITY, LANG, YEAR, SOURCE)
+    # ==================================================================
+    @staticmethod
+    def parse_metadata(text):
+        if not text:
+            return {"cleaned_title": "", "quality": [], "languages": [], "source": [], "year": []}
+
+        # Extension Cut-off
+        ext_regex = r"(?i)(.*?(?:\.(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)|\b(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)\b))"
+        match = re.search(ext_regex, text, flags=re.DOTALL)
+        if match:
+            text = match.group(1)
+
+        cleaned_title = text
+        metadata = {
+            "quality": set(),
+            "languages": set(),
+            "source": set(),
+            "year": set()
+        }
+
+        # 1. Quality (Standardize 4K/UHD to 2160p)
+        res_pattern = r"(?i)\b(480p|720p|1080p|2160p|4k|uhd)\b"
+        for m in re.finditer(res_pattern, cleaned_title):
+            val = m.group(1).lower()
+            if val in ['4k', 'uhd']: val = '2160p'
+            metadata['quality'].add(val)
+        cleaned_title = re.sub(res_pattern, "", cleaned_title)
+
+        # 2. Print Source
+        src_pattern = r"(?i)\b(web-dl|webrip|bluray|brrip|hdrip|hdcam|predvdrip)\b"
+        for m in re.finditer(src_pattern, cleaned_title):
+            metadata['source'].add(m.group(1).upper()) 
+        cleaned_title = re.sub(src_pattern, "", cleaned_title)
+
+        # 3. Languages Mapping & Extraction
+        lang_map = {
+            'hin': 'Hindi', 'hindi': 'Hindi',
+            'tam': 'Tamil', 'tamil': 'Tamil',
+            'tel': 'Telugu', 'telugu': 'Telugu',
+            'mal': 'Malayalam', 'malayalam': 'Malayalam',
+            'kan': 'Kannada', 'kannada': 'Kannada',
+            'eng': 'English', 'english': 'English',
+            'multi': 'Multi Audio', 'dual': 'Dual Audio'
+        }
+        lang_pattern = r"(?i)\b(hindi|hin|tamil|tam|telugu|tel|malayalam|mal|kannada|kan|english|eng|multi[\s\-]?audio|dual[\s\-]?audio)\b"
+        for m in re.finditer(lang_pattern, cleaned_title):
+            val = m.group(1).lower().replace('-', ' ').replace('audio', '').strip()
+            if val in lang_map:
+                metadata['languages'].add(lang_map[val])
+        cleaned_title = re.sub(lang_pattern, "", cleaned_title)
+
+        # 4. Extract & Remove Years (19XX or 20XX)
+        year_pattern = r"\b(19\d{2}|20\d{2})\b"
+        for m in re.finditer(year_pattern, cleaned_title):
+            metadata['year'].add(m.group(1))
+        cleaned_title = re.sub(year_pattern, "", cleaned_title)
+
+        # 5. Final Cleanup for the "Cleaned Title String"
+        promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
+        cleaned_title = re.sub(r"<[^>]+>", "", cleaned_title)
+        cleaned_title = re.sub(promo_patterns, "", cleaned_title, flags=re.IGNORECASE)
+        cleaned_title = re.sub(r"\[[\s\+\-\|]*\]|\([\s\+\-\|]*\)", "", cleaned_title)
+        cleaned_title = re.sub(r"[^\w\s:()\[\]{}\-]|_", " ", cleaned_title)
+        cleaned_title = re.sub(r"\s+", " ", cleaned_title).strip()
+
+        return {
+            "cleaned_title": cleaned_title,
+            "quality": list(metadata["quality"]),
+            "languages": list(metadata["languages"]),
+            "source": list(metadata["source"]),
+            "year": list(metadata["year"])
+        }
+
     async def save_batch(self, items):
         if not items: return 0, 0 
         
@@ -177,6 +255,7 @@ class MediaDB:
         current_id = start_sequence
         
         for media, message in new_items:
+            # Aesthetic Display Name
             display_name = self.clean_text(media.file_name)
             if not display_name: display_name = "Unknown File"
 
@@ -185,6 +264,9 @@ class MediaDB:
             if caption:
                 caption = self.clean_text(caption)
                 cap_text = caption
+                
+            # ✅ NEW: Extract Metadata arrays for advanced DB filtering later
+            parsed_meta = self.parse_metadata(media.file_name)
 
             # ==========================================================
             # 🔥 HIDDEN SEARCH INDEXING (User Ko Nahi Dikhega) 🔥
@@ -277,7 +359,11 @@ class MediaDB:
                 'file_name': display_name,
                 'file_size': media.file_size, 
                 'caption': caption,
-                'search_text': master_search_text, # ✅ NEW HIDDEN FIELD
+                'search_text': master_search_text, 
+                'quality_tags': parsed_meta['quality'],     # ✅ Fast JSON Tag
+                'language_tags': parsed_meta['languages'],  # ✅ Fast JSON Tag
+                'year_tags': parsed_meta['year'],           # ✅ Fast JSON Tag
+                'source_tags': parsed_meta['source'],       # ✅ Fast JSON Tag
                 'link_id': current_id,
                 'chat_id': message.chat.id,
                 'file_type': file_type 

@@ -105,61 +105,30 @@ class MediaDB:
         if not text:
             return ""
 
-        # Step 1: Remove HTML Tags (Fixes <b>, <i>, <code> tags)
+        # Step 1: Remove HTML Tags (Fixes the "b b b" issue caused by <b> tags)
         text = re.sub(r"<[^>]+>", "", text)
 
         # Step 2: EXTENSION CUT-OFF 
+        # Sirf extension (.mkv, .mp4, etc.) tak ka text rakhega, baaki sab uda dega
         ext_regex = r"(?i)(.*?(?:\.(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)|\b(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)\b))"
         match = re.search(ext_regex, text, flags=re.DOTALL)
         if match:
             text = match.group(1)
 
-        # Step 3: Remove Brackets ONLY if they contain @, t.me, or URLs
-        text = re.sub(r"\[[^\]]*(?:@|t\.me/|https?://|www\.)[^\]]*\]", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\([^)]*(?:@|t\.me/|https?://|www\.)[^)]*\)", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\{[^}]*(?:@|t\.me/|https?://|www\.)[^}]*\}", "", text, flags=re.IGNORECASE)
+        # Step 3: ADVANCED BRACKET REMOVER (Promo & Domains)
+        # Ye un sabhi brackets ko uda dega jisme @, t.me, URLs, ya websites/domains (.vip, .com, etc.) likhe honge.
+        promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
+        text = re.sub(r"\[[^\]]*(?:" + promo_patterns + r")[^\]]*\]", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\([^)]*(?:" + promo_patterns + r")[^)]*\)", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\{[^}]*(?:" + promo_patterns + r")[^}]*\}", "", text, flags=re.IGNORECASE)
 
-        # Step 4: Remove standalone URLs and Handles
-        text = re.sub(r"(https?://\S+|www\.\S+|t\.me/\S+|@\w+)", "", text, flags=re.IGNORECASE)
+        # Step 4: Remove standalone URLs and Handles (outside brackets)
+        text = re.sub(r"(https?://\S+|www\.\S+|t\.me/\S+|@\w+|\b\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b)", "", text, flags=re.IGNORECASE)
 
         # Step 5: Invisible Characters
         text = re.sub(r"[\u200b\u200c\u200d\u200e\u200f\ufeff\u202a-\u202e]", "", text)
 
-        # ==========================================================
-        # 🔥 STEP 6: STANDARDIZE TAGS & EXPAND RANGES
-        # ==========================================================
-        
-        # 1. Alias Normalization (Part, Vol, Volume, Chapter -> S)
-        text = re.sub(r"(?i)\b(part|vol|volume|chapter)\s*(\d+)\b", r"S\2", text)
-        
-        # 2. XxY format standardization (e.g., 1x05 -> S1 E05)
-        text = re.sub(r"(?i)\b(\d{1,2})\s*x\s*(\d{1,4})\b", r"S\1 E\2", text)
-        
-        # 3. Standardize Words to S and E
-        text = re.sub(r"(?i)\b(?:season|s)\s*(\d+)\b", r"S\1", text)
-        text = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", text)
-        
-        # 4. Expand Season Ranges (e.g., S1-3 -> S01 S02 S03)
-        def expand_season(match):
-            start, end = int(match.group(1)), int(match.group(2))
-            if start > end or end - start > 50: return match.group(0)
-            return " ".join([f"S{str(i).zfill(2)}" for i in range(start, end + 1)])
-        text = re.sub(r"(?i)\bS(\d+)\s*(?:-|to)\s*(?:S)?(\d+)\b", expand_season, text)
-        
-        # 5. Expand Episode Ranges (e.g., E05-08 -> E05 E06 E07 E08)
-        def expand_episode(match):
-            start, end = int(match.group(1)), int(match.group(2))
-            if start > end or end - start > 200: return match.group(0)
-            return " ".join([f"E{str(i).zfill(2)}" for i in range(start, end + 1)])
-        text = re.sub(r"(?i)\bE(\d+)\s*(?:-|to)\s*(?:E)?(\d+)\b", expand_episode, text)
-        
-        # 6. Zero-Padding (e.g., S1 -> S01, E5 -> E05)
-        text = re.sub(r"(?i)\bS(\d+)\b", lambda m: f"S{m.group(1).zfill(2)}", text)
-        text = re.sub(r"(?i)\bE(\d+)\b", lambda m: f"E{m.group(1).zfill(2)}", text)
-
-        # ==========================================================
-
-        # Step 7: Spam Words and Tags
+        # Step 6: Spam Words and Tags (Added 'code')
         spam_and_tags = [
             r"download", r"full movie", r"free", r"watch online", r"join",
             r"esub", r"hc-esub", r"x264", r"x265", r"code"
@@ -167,10 +136,12 @@ class MediaDB:
         pattern = r"\b(" + "|".join(spam_and_tags) + r")\b"
         text = re.sub(pattern, "", text, flags=re.IGNORECASE)
 
-        # Step 8: Emojis, Symbols, Punctuation
+        # Step 7: Emojis, Symbols, Punctuation
+        # Whitelisted: Words (\w), spaces (\s), colon (:), hyphen (-), and all brackets () [] {}
+        # Underscore (_) is explicitly removed.
         text = re.sub(r"[^\w\s:()\[\]{}\-]|_", " ", text)
 
-        # Step 9: Space Management
+        # Step 8: Space Management
         text = re.sub(r"\s+", " ", text)
 
         return text.strip()
@@ -216,30 +187,75 @@ class MediaDB:
                 cap_text = caption
 
             # ==========================================================
-            # ✅ GENERATE ALIASES FOR SEASON & EPISODE
+            # 🔥 HIDDEN SEARCH INDEXING (User Ko Nahi Dikhega) 🔥
             # ==========================================================
-            variations = []
+            hidden_search_data = display_name
+
+            # 0. Fix Merged Tags (S01E06 -> S01 E06) taaki bot number nikal sake
+            hidden_search_data = re.sub(r"(?i)\bS(\d+)\s*E(\d+)\b", r"S\1 E\2", hidden_search_data)
+
+            # 1. Expand Season Ranges (S01-03 -> S01 S02 S03)
+            def expand_season(match):
+                start, end = int(match.group(1)), int(match.group(2))
+                if start > end or end - start > 50: return match.group(0)
+                return " ".join([f"S{str(i).zfill(2)}" for i in range(start, end + 1)])
+            hidden_search_data = re.sub(r"(?i)\bS(\d+)\s*(?:-|to)\s*(?:S)?(\d+)\b", expand_season, hidden_search_data)
             
-            seasons = re.findall(r"(?i)\bS(\d+)\b", display_name)
+            # 2. Expand Episode Ranges (E05-08 -> E05 E06 E07 E08)
+            def expand_episode(match):
+                start, end = int(match.group(1)), int(match.group(2))
+                if start > end or end - start > 200: return match.group(0)
+                return " ".join([f"E{str(i).zfill(2)}" for i in range(start, end + 1)])
+            hidden_search_data = re.sub(r"(?i)\bE(\d+)\s*(?:-|to)\s*(?:E)?(\d+)\b", expand_episode, hidden_search_data)
+
+            # 3. Alias Normalization (1x05 -> S01 E05)
+            hidden_search_data = re.sub(r"(?i)\b(\d{1,2})\s*x\s*(\d{1,4})\b", r"S\1 E\2", hidden_search_data)
+            hidden_search_data = re.sub(r"(?i)\b(?:season|s)\s*(\d+)\b", r"S\1", hidden_search_data)
+            hidden_search_data = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", hidden_search_data)
+
+            # 4. Generate Variations (S1, S01, sO1, season 1, ep 6, s01e06 etc.)
+            variations = []
+            orig_raw = media.file_name.lower()
+            
+            seasons = re.findall(r"(?i)\bS(\d+)\b", hidden_search_data)
+            episodes = re.findall(r"(?i)\bE(\d+)\b", hidden_search_data)
+
+            s_nums = []
             for s in seasons:
                 s_num = int(s)
                 s_pad = str(s_num).zfill(2)
-                variations.append(f"s{s_num} s{s_pad} so{s_num} season{s_num} s{s_num}season{s_num}")
+                s_nums.append((s_num, s_pad))
+                variations.append(f"s{s_num} s{s_pad} so{s_num} season{s_num} season {s_num}")
 
-            episodes = re.findall(r"(?i)\bE(\d+)\b", display_name)
+            e_nums = []
             for e in episodes:
                 e_num = int(e)
                 e_pad = str(e_num).zfill(2)
-                variations.append(f"e{e_num} e{e_pad} eo{e_num} ep{e_num} episode{e_num} e{e_num}episode{e_num}")
+                e_nums.append((e_num, e_pad))
+                variations.append(f"e{e_num} e{e_pad} eo{e_num} ep{e_num} ep {e_num} episode{e_num} episode {e_num}")
 
-            variation_text = " ".join(variations)
+            for s_num, s_pad in s_nums:
+                for e_num, e_pad in e_nums:
+                    variations.append(f"s{s_num}e{e_num} s{s_pad}e{e_pad} season {s_num} episode {e_num}")
 
-            # ==========================================================
-            # ✅ SPACELESS GENERATION & MASTER SEARCH TEXT
-            # ==========================================================
+            if "part" in orig_raw:
+                parts = re.findall(r"(?i)part\s*(\d+)", orig_raw)
+                for p in parts: variations.append(f"part{p} p{p}")
+            if "vol" in orig_raw:
+                vols = re.findall(r"(?i)vol(?:ume)?\s*(\d+)", orig_raw)
+                for v in vols: variations.append(f"vol{v} volume{v} v{v}")
+            if "chapter" in orig_raw or "ch" in orig_raw:
+                chaps = re.findall(r"(?i)(?:chapter|ch)\s*(\d+)", orig_raw)
+                for c in chaps: variations.append(f"chapter{c} ch{c}")
+
+            variation_text = " ".join(list(set(variations)))
+
+            # 5. Spaceless Names
             spaceless_name = display_name.replace(" ", "").replace("-", "").replace(".", "")
             spaceless_cap = cap_text.replace(" ", "").replace("-", "").replace(".", "")
-            master_search_text = f"{display_name} {spaceless_name} {spaceless_cap} {variation_text}".lower()
+
+            # 6. Combine all into Master Search Text (Hidden from user)
+            master_search_text = f"{display_name} {hidden_search_data} {spaceless_name} {spaceless_cap} {variation_text}".lower()
             # ==========================================================
 
             file_type = "document" 
@@ -261,7 +277,7 @@ class MediaDB:
                 'file_name': display_name,
                 'file_size': media.file_size, 
                 'caption': caption,
-                'search_text': master_search_text,
+                'search_text': master_search_text, # ✅ NEW HIDDEN FIELD
                 'link_id': current_id,
                 'chat_id': message.chat.id,
                 'file_type': file_type 

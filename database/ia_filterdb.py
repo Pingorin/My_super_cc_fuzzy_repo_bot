@@ -97,38 +97,45 @@ class MediaDB:
             print(f"❌ CRITICAL DB ERROR (Get): {e}")
             return None
 
+    # ==================================================================
+    # ✅ HIGHLY OPTIMIZED CLEAN_TEXT
+    # ==================================================================
     @staticmethod
     def clean_text(text):
         if not text:
             return ""
 
-        # Step 1: URLs & Handles
-        # Removes http://, https://, www.something, t.me/something, and @usernames
+        # Step 1: Remove HTML Tags (Fixes the "b b b" issue caused by <b> tags)
+        text = re.sub(r"<[^>]+>", "", text)
+
+        # Step 2: Remove Brackets ONLY if they contain @, t.me, or URLs
+        text = re.sub(r"\[[^\]]*(?:@|t\.me/|https?://|www\.)[^\]]*\]", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\([^)]*(?:@|t\.me/|https?://|www\.)[^)]*\)", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\{[^}]*(?:@|t\.me/|https?://|www\.)[^}]*\}", "", text, flags=re.IGNORECASE)
+
+        # Step 3: Remove standalone URLs and Handles
         text = re.sub(r"(https?://\S+|www\.\S+|t\.me/\S+|@\w+)", "", text, flags=re.IGNORECASE)
 
-        # Step 5: Invisible Characters
-        # Removes zero-width spaces and formatting characters
+        # Step 4: Invisible Characters
         text = re.sub(r"[\u200b\u200c\u200d\u200e\u200f\ufeff\u202a-\u202e]", "", text)
 
-        # Step 3 & 4: Spam Words and Tags 
-        # (bluray, web-dl, and hevc stay in the file name)
+        # Step 5: Spam Words and Tags (Added 'code' to remove "Code Spiderman")
         spam_and_tags = [
             r"download", r"full movie", r"free", r"watch online", r"join",
-            r"esub", r"hc-esub", r"x264", r"x265"
+            r"esub", r"hc-esub", r"x264", r"x265", r"code"
         ]
         pattern = r"\b(" + "|".join(spam_and_tags) + r")\b"
         text = re.sub(pattern, "", text, flags=re.IGNORECASE)
 
-        # Step 2 & Step 6: Emojis, Symbols, Punctuation & Brackets
-        # [^\w\s:()] matches anything that is NOT a letter/number, NOT a space, NOT a colon (:), and NOT parentheses ().
-        # We explicitly add |_ to ensure underscores are still removed.
-        text = re.sub(r"[^\w\s:()]|_", " ", text)
+        # Step 6: Emojis, Symbols, Punctuation
+        # Whitelisted: Words (\w), spaces (\s), colon (:), hyphen (-), and all brackets () [] {}
+        # Underscore (_) is explicitly removed since \w originally includes it.
+        text = re.sub(r"[^\w\s:()\[\]{}\-]|_", " ", text)
 
         # Step 7: Space Management
         # Replaces multiple consecutive spaces with a single space
         text = re.sub(r"\s+", " ", text)
 
-        # Return final cleaned string stripped of leading/trailing spaces
         return text.strip()
 
     async def save_batch(self, items):
@@ -265,7 +272,9 @@ class MediaDB:
 
             if lang and lang != "none":
                 pattern = LANG_MAP.get(lang, lang)
-                and_clauses.append({
+                if "$and" not in match_filters:
+                    match_filters["$and"] = []
+                match_filters["$and"].append({
                     "$or": [
                         {"file_name": {"$regex": pattern, "$options": "i"}},
                         {"search_text": {"$regex": pattern, "$options": "i"}},
@@ -274,7 +283,9 @@ class MediaDB:
                 })
 
             if quality and quality != "none":
-                and_clauses.append({
+                if "$and" not in match_filters:
+                    match_filters["$and"] = []
+                match_filters["$and"].append({
                     "$or": [
                         {"file_name": {"$regex": quality, "$options": "i"}},
                         {"search_text": {"$regex": quality, "$options": "i"}},
@@ -294,10 +305,6 @@ class MediaDB:
                 elif size_range == "500-1gb": match_filters["file_size"] = {"$gte": MB_500, "$lt": GB_1}
                 elif size_range == "1gb-2gb": match_filters["file_size"] = {"$gte": GB_1, "$lt": GB_2}
                 elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
-
-            # Update match filters if new and clauses were added
-            if and_clauses:
-                match_filters["$and"] = and_clauses
 
             pipeline.append({"$match": match_filters})
 

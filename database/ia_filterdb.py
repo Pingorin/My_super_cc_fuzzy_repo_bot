@@ -110,8 +110,9 @@ class MediaDB:
 
         # Step 2: EXTENSION CUT-OFF 
         # Sirf extension (.mkv, .mp4, etc.) tak ka text rakhega, baaki sab uda dega
-        ext_regex = r"(?i)(.*?(?:\.mkv|\.mp4|\.avi|\.webm|\.m4v|\.flv|\.zip|\.rar|\.pdf|\.mka))"
-        match = re.search(ext_regex, text)
+        # Updated to handle both dotted (.mkv) and dotless (mkv) extensions across newlines
+        ext_regex = r"(?i)(.*?(?:\.(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)|\b(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)\b))"
+        match = re.search(ext_regex, text, flags=re.DOTALL)
         if match:
             text = match.group(1)
 

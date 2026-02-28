@@ -99,11 +99,37 @@ class MediaDB:
 
     @staticmethod
     def clean_text(text):
-        if not text: return ""
-        text = re.sub(r"\[@RunningMoviesHD\]", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"@\w+", "", text)
-        text = re.sub(r"[-_.]", " ", text)
-        return re.sub(r"\s+", " ", text).strip()
+        if not text:
+            return ""
+
+        # Step 1: URLs & Handles
+        # Removes http://, https://, www.something, t.me/something, and @usernames
+        text = re.sub(r"(https?://\S+|www\.\S+|t\.me/\S+|@\w+)", "", text, flags=re.IGNORECASE)
+
+        # Step 5: Invisible Characters
+        # Removes zero-width spaces and formatting characters
+        text = re.sub(r"[\u200b\u200c\u200d\u200e\u200f\ufeff\u202a-\u202e]", "", text)
+
+        # Step 3 & 4: Spam Words and Tags 
+        # (bluray, web-dl, and hevc stay in the file name)
+        spam_and_tags = [
+            r"download", r"full movie", r"free", r"watch online", r"join",
+            r"esub", r"hc-esub", r"x264", r"x265"
+        ]
+        pattern = r"\b(" + "|".join(spam_and_tags) + r")\b"
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+
+        # Step 2 & Step 6: Emojis, Symbols, Punctuation & Brackets
+        # [^\w\s:()] matches anything that is NOT a letter/number, NOT a space, NOT a colon (:), and NOT parentheses ().
+        # We explicitly add |_ to ensure underscores are still removed.
+        text = re.sub(r"[^\w\s:()]|_", " ", text)
+
+        # Step 7: Space Management
+        # Replaces multiple consecutive spaces with a single space
+        text = re.sub(r"\s+", " ", text)
+
+        # Return final cleaned string stripped of leading/trailing spaces
+        return text.strip()
 
     async def save_batch(self, items):
         if not items: return 0, 0 

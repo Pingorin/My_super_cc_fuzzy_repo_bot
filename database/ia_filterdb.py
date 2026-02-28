@@ -108,18 +108,25 @@ class MediaDB:
         # Step 1: Remove HTML Tags (Fixes the "b b b" issue caused by <b> tags)
         text = re.sub(r"<[^>]+>", "", text)
 
-        # Step 2: Remove Brackets ONLY if they contain @, t.me, or URLs
+        # Step 2: EXTENSION CUT-OFF 
+        # Sirf extension (.mkv, .mp4, etc.) tak ka text rakhega, baaki sab uda dega
+        ext_regex = r"(?i)(.*?(?:\.mkv|\.mp4|\.avi|\.webm|\.m4v|\.flv|\.zip|\.rar|\.pdf|\.mka))"
+        match = re.search(ext_regex, text)
+        if match:
+            text = match.group(1)
+
+        # Step 3: Remove Brackets ONLY if they contain @, t.me, or URLs
         text = re.sub(r"\[[^\]]*(?:@|t\.me/|https?://|www\.)[^\]]*\]", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\([^)]*(?:@|t\.me/|https?://|www\.)[^)]*\)", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\{[^}]*(?:@|t\.me/|https?://|www\.)[^}]*\}", "", text, flags=re.IGNORECASE)
 
-        # Step 3: Remove standalone URLs and Handles
+        # Step 4: Remove standalone URLs and Handles
         text = re.sub(r"(https?://\S+|www\.\S+|t\.me/\S+|@\w+)", "", text, flags=re.IGNORECASE)
 
-        # Step 4: Invisible Characters
+        # Step 5: Invisible Characters
         text = re.sub(r"[\u200b\u200c\u200d\u200e\u200f\ufeff\u202a-\u202e]", "", text)
 
-        # Step 5: Spam Words and Tags (Added 'code' to remove "Code Spiderman")
+        # Step 6: Spam Words and Tags (Added 'code' to remove "Code Spiderman")
         spam_and_tags = [
             r"download", r"full movie", r"free", r"watch online", r"join",
             r"esub", r"hc-esub", r"x264", r"x265", r"code"
@@ -127,12 +134,12 @@ class MediaDB:
         pattern = r"\b(" + "|".join(spam_and_tags) + r")\b"
         text = re.sub(pattern, "", text, flags=re.IGNORECASE)
 
-        # Step 6: Emojis, Symbols, Punctuation
+        # Step 7: Emojis, Symbols, Punctuation
         # Whitelisted: Words (\w), spaces (\s), colon (:), hyphen (-), and all brackets () [] {}
         # Underscore (_) is explicitly removed since \w originally includes it.
         text = re.sub(r"[^\w\s:()\[\]{}\-]|_", " ", text)
 
-        # Step 7: Space Management
+        # Step 8: Space Management
         # Replaces multiple consecutive spaces with a single space
         text = re.sub(r"\s+", " ", text)
 
@@ -176,10 +183,6 @@ class MediaDB:
             cap_text = ""
             if caption:
                 caption = self.clean_text(caption)
-                regex = r"(?i)(.*?)(\.mkv|\.mp4|\.avi|\.webm|\.m4v|\.flv)"
-                match = re.search(regex, caption, re.DOTALL)
-                if match:
-                    caption = match.group(1) + match.group(2)
                 cap_text = caption
 
             # ==========================================================

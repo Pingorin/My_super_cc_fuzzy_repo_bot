@@ -18,7 +18,7 @@ except: AUTH_CHANNEL_4 = None
 logger = logging.getLogger(__name__)
 
 # ✅ CONSTANTS
-LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu"]
+LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu", "Dual Audio", "Multi Audio"]
 QUALITIES = ["Bluray", "4k", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
 
 # ✅ REGEX (Kept as Fallback for Old Data)
@@ -33,7 +33,9 @@ LANG_REGEX = {
     "Punjabi": re.compile(r"\b(punjabi|pun)\b", re.IGNORECASE),
     "Marathi": re.compile(r"\b(marathi|mar)\b", re.IGNORECASE),
     "Gujarati": re.compile(r"\b(gujarati|guj)\b", re.IGNORECASE),
-    "Urdu": re.compile(r"\b(urdu)\b", re.IGNORECASE)
+    "Urdu": re.compile(r"\b(urdu)\b", re.IGNORECASE),
+    "Dual Audio": re.compile(r"\b(dual[\s\-]?audio)\b", re.IGNORECASE),
+    "Multi Audio": re.compile(r"\b(multi[\s\-]?audio)\b", re.IGNORECASE)
 }
 
 QUALITY_REGEX = {

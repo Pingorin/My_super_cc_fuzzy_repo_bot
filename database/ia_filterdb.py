@@ -339,19 +339,31 @@ class MediaDB:
                 'file_type': file_type 
             })
             
-            search_docs.append({
+            # ✅ Base Search Document
+            search_doc = {
                 'file_name': display_name,
                 'file_size': media.file_size, 
                 'caption': caption,
                 'search_text': master_search_text, 
-                'quality_tags': parsed_meta['quality'],     # ✅ Ab dono me se lega
-                'language_tags': parsed_meta['languages'],  # ✅ Ab dono me se lega
-                'year_tags': parsed_meta['year'],           # ✅ Ab dono me se lega
-                'source_tags': parsed_meta['source'],       
                 'link_id': current_id,
                 'chat_id': message.chat.id,
                 'file_type': file_type 
-            })
+            }
+
+            # ✅ MEMORY OPTIMIZATION: Sirf tabhi add karo jab list empty na ho
+            if parsed_meta['quality']:
+                search_doc['quality_tags'] = parsed_meta['quality']
+            
+            if parsed_meta['languages']:
+                search_doc['language_tags'] = parsed_meta['languages']
+                
+            if parsed_meta['year']:
+                search_doc['year_tags'] = parsed_meta['year']
+                
+            if parsed_meta['source']:
+                search_doc['source_tags'] = parsed_meta['source']
+
+            search_docs.append(search_doc)
             current_id += 1
 
         saved_count = 0

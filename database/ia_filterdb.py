@@ -21,7 +21,9 @@ LANG_MAP = {
     "Punjabi": "Punjabi|Pun",
     "Marathi": "Marathi|Mar",
     "Gujarati": "Gujarati|Guj",
-    "Urdu": "Urdu"
+    "Urdu": "Urdu",
+    "Dual Audio": "Dual Audio|Dual-Audio",
+    "Multi Audio": "Multi Audio|Multi-Audio"
 }
 
 class MediaDB:

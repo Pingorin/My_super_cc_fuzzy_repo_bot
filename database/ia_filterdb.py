@@ -265,8 +265,19 @@ class MediaDB:
                 caption = self.clean_text(caption)
                 cap_text = caption
                 
-            # ✅ NEW: Extract Metadata arrays for advanced DB filtering later
-            parsed_meta = self.parse_metadata(media.file_name)
+            # ✅ NEW: Extract Metadata arrays from BOTH file_name and caption
+            meta_name = self.parse_metadata(media.file_name)
+            
+            raw_caption = message.caption.html if message.caption else ""
+            meta_cap = self.parse_metadata(raw_caption)
+
+            # Merge the lists (file_name + caption) and remove duplicates using set()
+            parsed_meta = {
+                "quality": list(set(meta_name['quality'] + meta_cap['quality'])),
+                "languages": list(set(meta_name['languages'] + meta_cap['languages'])),
+                "year": list(set(meta_name['year'] + meta_cap['year'])),
+                "source": list(set(meta_name['source'] + meta_cap['source']))
+            }
 
             # ==========================================================
             # 🔥 HIDDEN SEARCH INDEXING (User Ko Nahi Dikhega) 🔥

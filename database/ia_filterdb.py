@@ -42,9 +42,9 @@ class MediaDB:
             await self.search_col.create_index("file_name")
             await self.search_col.create_index("caption")
             await self.search_col.create_index("search_text") 
-            await self.search_col.create_index("quality_tags") 
-            await self.search_col.create_index("language_tags") 
-            await self.search_col.create_index("year_tags") 
+            await self.search_col.create_index("quality") # ✅ Simple Name
+            await self.search_col.create_index("languages") # ✅ Simple Name
+            await self.search_col.create_index("year") # ✅ Simple Name
             await self.search_col.create_index("link_id")
             await self.data_col.create_index("file_unique_id", unique=True)
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
@@ -247,7 +247,7 @@ class MediaDB:
                 caption = self.clean_text(caption)
                 cap_text = caption
                 
-            # ✅ CAPTION BUG FIXED: Ab dono me check karega tags ke liye
+            # ✅ Meta data collection
             meta_name = self.parse_metadata(media.file_name)
             raw_caption = message.caption.html if message.caption else ""
             meta_cap = self.parse_metadata(raw_caption)
@@ -350,18 +350,18 @@ class MediaDB:
                 'file_type': file_type 
             }
 
-            # ✅ MEMORY OPTIMIZATION: Sirf tabhi add karo jab list empty na ho
+            # ✅ MEMORY OPTIMIZATION: Simple Keys
             if parsed_meta['quality']:
-                search_doc['quality_tags'] = parsed_meta['quality']
+                search_doc['quality'] = parsed_meta['quality']
             
             if parsed_meta['languages']:
-                search_doc['language_tags'] = parsed_meta['languages']
+                search_doc['languages'] = parsed_meta['languages']
                 
             if parsed_meta['year']:
-                search_doc['year_tags'] = parsed_meta['year']
+                search_doc['year'] = parsed_meta['year']
                 
             if parsed_meta['source']:
-                search_doc['source_tags'] = parsed_meta['source']
+                search_doc['source'] = parsed_meta['source']
 
             search_docs.append(search_doc)
             current_id += 1
@@ -416,13 +416,13 @@ class MediaDB:
                 capital_type = "video" if file_type.lower() == "video" else "document"
                 match_filters["file_type"] = capital_type
 
-            # ✅ FAST BUTTON FILTERS (Applies only when user clicks Inline Buttons)
+            # ✅ FAST BUTTON FILTERS (Simple Keys)
             if lang and lang != "none":
                 pattern = LANG_MAP.get(lang, lang)
                 if "$and" not in match_filters: match_filters["$and"] = []
                 match_filters["$and"].append({
                     "$or": [
-                        {"language_tags": lang},
+                        {"languages": lang},
                         {"file_name": {"$regex": pattern, "$options": "i"}},
                         {"caption": {"$regex": pattern, "$options": "i"}}
                     ]
@@ -432,7 +432,7 @@ class MediaDB:
                 if "$and" not in match_filters: match_filters["$and"] = []
                 match_filters["$and"].append({
                     "$or": [
-                        {"quality_tags": quality},
+                        {"quality": quality},
                         {"file_name": {"$regex": quality, "$options": "i"}},
                         {"caption": {"$regex": quality, "$options": "i"}}
                     ]
@@ -442,7 +442,7 @@ class MediaDB:
                 if "$and" not in match_filters: match_filters["$and"] = []
                 match_filters["$and"].append({
                     "$or": [
-                        {"year_tags": str(year)},
+                        {"year": str(year)},
                         {"file_name": {"$regex": str(year)}}
                     ]
                 })
@@ -514,7 +514,7 @@ class MediaDB:
                 full_text = fname + " " + caption + " " + search_txt
                 fsize = f.get('file_size', 0)
                 
-                db_langs = f.get('language_tags', [])
+                db_langs = f.get('languages', [])
                 if lang and lang != "none":
                     if db_langs:
                         if lang not in db_langs: continue
@@ -522,14 +522,14 @@ class MediaDB:
                         pattern = LANG_MAP.get(lang, lang).lower()
                         if not re.search(pattern, full_text): continue
 
-                db_quals = f.get('quality_tags', [])
+                db_quals = f.get('quality', [])
                 if quality and quality != "none":
                     if db_quals:
                         if quality not in db_quals: continue
                     else:
                         if quality.lower() not in full_text: continue
 
-                db_years = f.get('year_tags', [])
+                db_years = f.get('year', [])
                 if year and year != "none":
                     if db_years:
                         if str(year) not in db_years: continue

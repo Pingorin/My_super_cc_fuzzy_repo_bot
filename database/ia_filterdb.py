@@ -39,10 +39,10 @@ class MediaDB:
         try:
             await self.search_col.create_index("file_name")
             await self.search_col.create_index("caption")
-            await self.search_col.create_index("search_text") # ✅ Naya index fast search ke liye
-            await self.search_col.create_index("quality_tags") # ✅ Fast filtering index
-            await self.search_col.create_index("language_tags") # ✅ Fast filtering index
-            await self.search_col.create_index("year_tags") # ✅ Fast filtering index
+            await self.search_col.create_index("search_text") 
+            await self.search_col.create_index("quality_tags") 
+            await self.search_col.create_index("language_tags") 
+            await self.search_col.create_index("year_tags") 
             await self.search_col.create_index("link_id")
             await self.data_col.create_index("file_unique_id", unique=True)
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
@@ -108,30 +108,22 @@ class MediaDB:
         if not text:
             return ""
 
-        # Step 1: Remove HTML Tags (Fixes the "b b b" issue caused by <b> tags)
         text = re.sub(r"<[^>]+>", "", text)
 
-        # Step 2: EXTENSION CUT-OFF 
-        # Sirf extension (.mkv, .mp4, etc.) tak ka text rakhega, baaki sab uda dega
         ext_regex = r"(?i)(.*?(?:\.(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)|\b(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)\b))"
         match = re.search(ext_regex, text, flags=re.DOTALL)
         if match:
             text = match.group(1)
 
-        # Step 3: ADVANCED BRACKET REMOVER (Promo & Domains)
-        # Ye un sabhi brackets ko uda dega jisme @, t.me, URLs, ya websites/domains (.vip, .com, etc.) likhe honge.
         promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
         text = re.sub(r"\[[^\]]*(?:" + promo_patterns + r")[^\]]*\]", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\([^)]*(?:" + promo_patterns + r")[^)]*\)", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\{[^}]*(?:" + promo_patterns + r")[^}]*\}", "", text, flags=re.IGNORECASE)
 
-        # Step 4: Remove standalone URLs and Handles (outside brackets)
         text = re.sub(r"(https?://\S+|www\.\S+|t\.me/\S+|@\w+|\b\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b)", "", text, flags=re.IGNORECASE)
 
-        # Step 5: Invisible Characters
         text = re.sub(r"[\u200b\u200c\u200d\u200e\u200f\ufeff\u202a-\u202e]", "", text)
 
-        # Step 6: Spam Words and Tags (Added 'code')
         spam_and_tags = [
             r"download", r"full movie", r"free", r"watch online", r"join",
             r"esub", r"hc-esub", r"x264", r"x265", r"code"
@@ -139,25 +131,19 @@ class MediaDB:
         pattern = r"\b(" + "|".join(spam_and_tags) + r")\b"
         text = re.sub(pattern, "", text, flags=re.IGNORECASE)
 
-        # Step 7: Emojis, Symbols, Punctuation
-        # Whitelisted: Words (\w), spaces (\s), colon (:), hyphen (-), and all brackets () [] {}
-        # Underscore (_) is explicitly removed.
         text = re.sub(r"[^\w\s:()\[\]{}\-]|_", " ", text)
-
-        # Step 8: Space Management
         text = re.sub(r"\s+", " ", text)
 
         return text.strip()
 
     # ==================================================================
-    # ✅ EXTRACT STRUCTURED METADATA (QUALITY, LANG, YEAR, SOURCE)
+    # ✅ EXTRACT STRUCTURED METADATA
     # ==================================================================
     @staticmethod
     def parse_metadata(text):
         if not text:
             return {"cleaned_title": "", "quality": [], "languages": [], "source": [], "year": []}
 
-        # Extension Cut-off
         ext_regex = r"(?i)(.*?(?:\.(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)|\b(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)\b))"
         match = re.search(ext_regex, text, flags=re.DOTALL)
         if match:
@@ -171,7 +157,6 @@ class MediaDB:
             "year": set()
         }
 
-        # 1. Quality (Standardize 4K/UHD to 2160p)
         res_pattern = r"(?i)\b(480p|720p|1080p|2160p|4k|uhd)\b"
         for m in re.finditer(res_pattern, cleaned_title):
             val = m.group(1).lower()
@@ -179,13 +164,11 @@ class MediaDB:
             metadata['quality'].add(val)
         cleaned_title = re.sub(res_pattern, "", cleaned_title)
 
-        # 2. Print Source
         src_pattern = r"(?i)\b(web-dl|webrip|bluray|brrip|hdrip|hdcam|predvdrip)\b"
         for m in re.finditer(src_pattern, cleaned_title):
             metadata['source'].add(m.group(1).upper()) 
         cleaned_title = re.sub(src_pattern, "", cleaned_title)
 
-        # 3. Languages Mapping & Extraction
         lang_map = {
             'hin': 'Hindi', 'hindi': 'Hindi',
             'tam': 'Tamil', 'tamil': 'Tamil',
@@ -202,13 +185,11 @@ class MediaDB:
                 metadata['languages'].add(lang_map[val])
         cleaned_title = re.sub(lang_pattern, "", cleaned_title)
 
-        # 4. Extract & Remove Years (19XX or 20XX)
         year_pattern = r"\b(19\d{2}|20\d{2})\b"
         for m in re.finditer(year_pattern, cleaned_title):
             metadata['year'].add(m.group(1))
         cleaned_title = re.sub(year_pattern, "", cleaned_title)
 
-        # 5. Final Cleanup for the "Cleaned Title String"
         promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
         cleaned_title = re.sub(r"<[^>]+>", "", cleaned_title)
         cleaned_title = re.sub(promo_patterns, "", cleaned_title, flags=re.IGNORECASE)
@@ -255,7 +236,6 @@ class MediaDB:
         current_id = start_sequence
         
         for media, message in new_items:
-            # Aesthetic Display Name
             display_name = self.clean_text(media.file_name)
             if not display_name: display_name = "Unknown File"
 
@@ -265,13 +245,11 @@ class MediaDB:
                 caption = self.clean_text(caption)
                 cap_text = caption
                 
-            # ✅ NEW: Extract Metadata arrays from BOTH file_name and caption
+            # ✅ CAPTION BUG FIXED: Ab dono me check karega tags ke liye
             meta_name = self.parse_metadata(media.file_name)
-            
             raw_caption = message.caption.html if message.caption else ""
             meta_cap = self.parse_metadata(raw_caption)
 
-            # Merge the lists (file_name + caption) and remove duplicates using set()
             parsed_meta = {
                 "quality": list(set(meta_name['quality'] + meta_cap['quality'])),
                 "languages": list(set(meta_name['languages'] + meta_cap['languages'])),
@@ -284,29 +262,24 @@ class MediaDB:
             # ==========================================================
             hidden_search_data = display_name
 
-            # 0. Fix Merged Tags (S01E06 -> S01 E06) taaki bot number nikal sake
             hidden_search_data = re.sub(r"(?i)\bS(\d+)\s*E(\d+)\b", r"S\1 E\2", hidden_search_data)
 
-            # 1. Expand Season Ranges (S01-03 -> S01 S02 S03)
             def expand_season(match):
                 start, end = int(match.group(1)), int(match.group(2))
                 if start > end or end - start > 50: return match.group(0)
                 return " ".join([f"S{str(i).zfill(2)}" for i in range(start, end + 1)])
             hidden_search_data = re.sub(r"(?i)\bS(\d+)\s*(?:-|to)\s*(?:S)?(\d+)\b", expand_season, hidden_search_data)
             
-            # 2. Expand Episode Ranges (E05-08 -> E05 E06 E07 E08)
             def expand_episode(match):
                 start, end = int(match.group(1)), int(match.group(2))
                 if start > end or end - start > 200: return match.group(0)
                 return " ".join([f"E{str(i).zfill(2)}" for i in range(start, end + 1)])
             hidden_search_data = re.sub(r"(?i)\bE(\d+)\s*(?:-|to)\s*(?:E)?(\d+)\b", expand_episode, hidden_search_data)
 
-            # 3. Alias Normalization (1x05 -> S01 E05)
             hidden_search_data = re.sub(r"(?i)\b(\d{1,2})\s*x\s*(\d{1,4})\b", r"S\1 E\2", hidden_search_data)
             hidden_search_data = re.sub(r"(?i)\b(?:season|s)\s*(\d+)\b", r"S\1", hidden_search_data)
             hidden_search_data = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", hidden_search_data)
 
-            # 4. Generate Variations (S1, S01, sO1, season 1, ep 6, s01e06 etc.)
             variations = []
             orig_raw = media.file_name.lower()
             
@@ -343,11 +316,9 @@ class MediaDB:
 
             variation_text = " ".join(list(set(variations)))
 
-            # 5. Spaceless Names
             spaceless_name = display_name.replace(" ", "").replace("-", "").replace(".", "")
             spaceless_cap = cap_text.replace(" ", "").replace("-", "").replace(".", "")
 
-            # 6. Combine all into Master Search Text (Hidden from user)
             master_search_text = f"{display_name} {hidden_search_data} {spaceless_name} {spaceless_cap} {variation_text}".lower()
             # ==========================================================
 
@@ -371,10 +342,10 @@ class MediaDB:
                 'file_size': media.file_size, 
                 'caption': caption,
                 'search_text': master_search_text, 
-                'quality_tags': parsed_meta['quality'],     # ✅ Fast JSON Tag
-                'language_tags': parsed_meta['languages'],  # ✅ Fast JSON Tag
-                'year_tags': parsed_meta['year'],           # ✅ Fast JSON Tag
-                'source_tags': parsed_meta['source'],       # ✅ Fast JSON Tag
+                'quality_tags': parsed_meta['quality'],     # ✅ Ab dono me se lega
+                'language_tags': parsed_meta['languages'],  # ✅ Ab dono me se lega
+                'year_tags': parsed_meta['year'],           # ✅ Ab dono me se lega
+                'source_tags': parsed_meta['source'],       
                 'link_id': current_id,
                 'chat_id': message.chat.id,
                 'file_type': file_type 
@@ -404,13 +375,11 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ OPTIMIZED SMART REGEX SEARCH WITH SORTING
+    # ⚡ OPTIMIZED SMART REGEX SEARCH WITH BUTTON FILTERS
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         try:
-            # ==========================================================
-            # ✅ QUERY PROCESSING (SMART REGEX SEARCH)
-            # ==========================================================
+            # ✅ QUERY PROCESSING (Safest Approach: Regex for query text)
             and_clauses = []
             words = query.split()
             
@@ -427,15 +396,13 @@ class MediaDB:
                 })
 
             pipeline = []
-            
-            # Stage 1: Match Filters
             match_filters = {"$and": and_clauses} if and_clauses else {}
             
             if file_type and file_type != "none":
                 capital_type = "video" if file_type.lower() == "video" else "document"
                 match_filters["file_type"] = capital_type
 
-            # ✅ Checks Fast JSON Array for New Files OR Fallback Regex for Old Files
+            # ✅ FAST BUTTON FILTERS (Applies only when user clicks Inline Buttons)
             if lang and lang != "none":
                 pattern = LANG_MAP.get(lang, lang)
                 if "$and" not in match_filters: match_filters["$and"] = []
@@ -480,15 +447,15 @@ class MediaDB:
 
             # ✅ SORTING LOGIC
             if sort == "new":
-                pipeline.append({"$sort": {"_id": -1}}) # Descending ID = Newest
+                pipeline.append({"$sort": {"_id": -1}}) 
             elif sort == "old":
-                pipeline.append({"$sort": {"_id": 1}}) # Ascending ID = Oldest
+                pipeline.append({"$sort": {"_id": 1}}) 
             elif sort == "large":
-                pipeline.append({"$sort": {"file_size": -1}}) # High to Low
+                pipeline.append({"$sort": {"file_size": -1}}) 
             elif sort == "small":
-                pipeline.append({"$sort": {"file_size": 1}}) # Low to High
+                pipeline.append({"$sort": {"file_size": 1}}) 
             else:
-                pipeline.append({"$sort": {"_id": -1}}) # Default relevance replaced by Newest
+                pipeline.append({"$sort": {"_id": -1}}) 
 
             pipeline.append({"$limit": 100}) 
 
@@ -499,7 +466,6 @@ class MediaDB:
         except Exception as e:
             print(f"⚠️ Index Search Failed: {e}. Switching to Fallback.")
             
-            # ✅ Apply Same Smart Regex Logic in Fallback
             and_clauses_fallback = []
             for word in query.split():
                 char_array = [re.escape(c) for c in word]
@@ -518,7 +484,6 @@ class MediaDB:
 
             cursor = self.search_col.find(fallback_filter)
             
-            # Manual Sort for Fallback
             if sort == "new": cursor.sort('_id', -1)
             elif sort == "old": cursor.sort('_id', 1)
             elif sort == "large": cursor.sort('file_size', -1)
@@ -535,7 +500,6 @@ class MediaDB:
                 full_text = fname + " " + caption + " " + search_txt
                 fsize = f.get('file_size', 0)
                 
-                # Check DB Arrays if present, else fallback to text search
                 db_langs = f.get('language_tags', [])
                 if lang and lang != "none":
                     if db_langs:

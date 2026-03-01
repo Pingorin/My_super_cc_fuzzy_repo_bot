@@ -79,7 +79,7 @@ def filter_by_lang(files, lang):
     regex = LANG_REGEX.get(lang)
     for f in files:
         # Check DB List first (Fast)
-        if lang in f.get('languages', []):
+        if lang in f.get('language_tags', []):
             filtered.append(f)
         # Fallback for old files
         else:
@@ -95,7 +95,7 @@ def filter_by_quality(files, quality):
     regex = QUALITY_REGEX.get(quality)
     for f in files:
         # Check DB List first (Fast)
-        if quality in f.get('quality', []):
+        if quality in f.get('quality_tags', []):
             filtered.append(f)
         # Fallback for old files
         else:
@@ -111,7 +111,7 @@ def filter_by_year(files, year):
     target_year = str(year)
     for f in files:
         # Check DB List first (Fast)
-        if target_year in f.get('year', []):
+        if target_year in f.get('year_tags', []):
             filtered.append(f)
         # Fallback for old files
         else:
@@ -159,7 +159,7 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
         elif ftype == 'document': has_docs = True
         
         # Languages Check (Array -> Regex)
-        if f.get('languages'): has_lang_data = True
+        if f.get('language_tags'): has_lang_data = True
         elif not has_lang_data:
             for lang, regex in LANG_REGEX.items():
                 if regex.search(full_text):
@@ -167,7 +167,7 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
                     break
                     
         # Quality Check (Array -> Regex)
-        if f.get('quality'): has_qual_data = True
+        if f.get('quality_tags'): has_qual_data = True
         elif not has_qual_data:
             for qual, regex in QUALITY_REGEX.items():
                 if regex.search(fname):
@@ -175,7 +175,7 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
                     break
                     
         # Year Check (Array -> Regex)
-        if f.get('year'): has_year_data = True
+        if f.get('year_tags'): has_year_data = True
         elif not has_year_data:
             if YEAR_REGEX.search(fname):
                 has_year_data = True
@@ -291,7 +291,7 @@ def get_language_buttons(search_id, files, active_type=None, active_qual=None, a
 
     stats = {lang: 0 for lang in LANGUAGES}
     for file in files:
-        langs = file.get('languages', [])
+        langs = file.get('language_tags', [])
         # High Speed DB Check
         if langs:
             for lang in langs:
@@ -328,7 +328,7 @@ def get_quality_buttons(search_id, files, active_type=None, active_lang=None, ac
 
     stats = {qual: 0 for qual in QUALITIES}
     for file in files:
-        quals = file.get('quality', [])
+        quals = file.get('quality_tags', [])
         # High Speed DB Check
         if quals:
             for qual in quals:
@@ -365,7 +365,7 @@ def get_year_buttons(search_id, files, active_type=None, active_lang=None, activ
 
     years = set()
     for file in files:
-        yrs = file.get('year', [])
+        yrs = file.get('year_tags', [])
         # High Speed DB Check
         if yrs:
             for y in yrs: years.add(y)
@@ -474,8 +474,8 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         
         # High Speed DB Extraction
-        db_quals = file.get('quality', [])
-        db_langs = file.get('languages', [])
+        db_quals = file.get('quality_tags', [])
+        db_langs = file.get('language_tags', [])
         
         if db_quals:
             quality = ", ".join(db_quals)

@@ -424,31 +424,17 @@ class MediaDB:
                 capital_type = "video" if file_type.lower() == "video" else "document"
                 match_filters["file_type"] = capital_type
 
+            # ✅ Now checks direct array for lightning fast matching
             if lang and lang != "none":
-                pattern = LANG_MAP.get(lang, lang)
-                if "$and" not in match_filters:
-                    match_filters["$and"] = []
-                match_filters["$and"].append({
-                    "$or": [
-                        {"file_name": {"$regex": pattern, "$options": "i"}},
-                        {"search_text": {"$regex": pattern, "$options": "i"}},
-                        {"caption": {"$regex": pattern, "$options": "i"}}
-                    ]
-                })
+                match_filters["language_tags"] = lang
 
+            # ✅ Now checks direct array for lightning fast matching
             if quality and quality != "none":
-                if "$and" not in match_filters:
-                    match_filters["$and"] = []
-                match_filters["$and"].append({
-                    "$or": [
-                        {"file_name": {"$regex": quality, "$options": "i"}},
-                        {"search_text": {"$regex": quality, "$options": "i"}},
-                        {"caption": {"$regex": quality, "$options": "i"}}
-                    ]
-                })
+                match_filters["quality_tags"] = quality
             
+            # ✅ Now checks direct array for lightning fast matching
             if year and year != "none":
-                match_filters["file_name"] = {"$regex": str(year)}
+                match_filters["year_tags"] = str(year)
 
             if size_range and size_range != "none":
                 MB_500 = 500 * 1024 * 1024
@@ -519,12 +505,28 @@ class MediaDB:
                 full_text = fname + " " + caption + " " + search_txt
                 fsize = f.get('file_size', 0)
                 
+                # Check DB Arrays if present, else fallback to text search
+                db_langs = f.get('language_tags', [])
                 if lang and lang != "none":
-                    pattern = LANG_MAP.get(lang, lang).lower()
-                    if not re.search(pattern, full_text): continue
+                    if db_langs:
+                        if lang not in db_langs: continue
+                    else:
+                        pattern = LANG_MAP.get(lang, lang).lower()
+                        if not re.search(pattern, full_text): continue
 
-                if quality and quality != "none" and quality.lower() not in full_text: continue
-                if year and year != "none" and str(year) not in fname: continue
+                db_quals = f.get('quality_tags', [])
+                if quality and quality != "none":
+                    if db_quals:
+                        if quality not in db_quals: continue
+                    else:
+                        if quality.lower() not in full_text: continue
+
+                db_years = f.get('year_tags', [])
+                if year and year != "none":
+                    if db_years:
+                        if str(year) not in db_years: continue
+                    else:
+                        if str(year) not in fname: continue
                 
                 if size_range == "min500" and fsize >= 500*1024*1024: continue
                 elif size_range == "500-1gb" and not (500*1024*1024 <= fsize < 1024*1024*1024): continue

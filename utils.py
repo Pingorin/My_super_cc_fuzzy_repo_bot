@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu"]
 QUALITIES = ["Bluray", "4k", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
 
-# ✅ REGEX
+# ✅ REGEX (Kept as Fallback for Old Data)
 LANG_REGEX = {
     "English": re.compile(r"\b(english|eng)\b", re.IGNORECASE),
     "Hindi": re.compile(r"\b(hindi|hin)\b", re.IGNORECASE),
@@ -76,10 +76,15 @@ def filter_by_lang(files, lang):
     filtered = []
     regex = LANG_REGEX.get(lang)
     for f in files:
-        text = (f.get('file_name', '') + " " + (f.get('caption') or "")).lower()
-        if regex:
-            if regex.search(text): filtered.append(f)
-        elif lang.lower() in text: filtered.append(f)
+        # Check DB List first (Fast)
+        if lang in f.get('languages', []):
+            filtered.append(f)
+        # Fallback for old files
+        else:
+            text = (f.get('file_name', '') + " " + (f.get('caption') or "")).lower()
+            if regex:
+                if regex.search(text): filtered.append(f)
+            elif lang.lower() in text: filtered.append(f)
     return filtered
 
 def filter_by_quality(files, quality):
@@ -87,10 +92,15 @@ def filter_by_quality(files, quality):
     filtered = []
     regex = QUALITY_REGEX.get(quality)
     for f in files:
-        fname = f.get('file_name', '')
-        if regex:
-            if regex.search(fname): filtered.append(f)
-        elif quality.lower() in fname.lower(): filtered.append(f)
+        # Check DB List first (Fast)
+        if quality in f.get('quality', []):
+            filtered.append(f)
+        # Fallback for old files
+        else:
+            fname = f.get('file_name', '')
+            if regex:
+                if regex.search(fname): filtered.append(f)
+            elif quality.lower() in fname.lower(): filtered.append(f)
     return filtered
 
 def filter_by_year(files, year):
@@ -98,8 +108,13 @@ def filter_by_year(files, year):
     filtered = []
     target_year = str(year)
     for f in files:
-        fname = f.get('file_name', '')
-        if target_year in fname: filtered.append(f)
+        # Check DB List first (Fast)
+        if target_year in f.get('year', []):
+            filtered.append(f)
+        # Fallback for old files
+        else:
+            fname = f.get('file_name', '')
+            if target_year in fname: filtered.append(f)
     return filtered
 
 def filter_by_size(files, size_range):
@@ -141,22 +156,29 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
         if ftype == 'video': has_video = True
         elif ftype == 'document': has_docs = True
         
-        if not has_lang_data:
+        # Languages Check (Array -> Regex)
+        if f.get('languages'): has_lang_data = True
+        elif not has_lang_data:
             for lang, regex in LANG_REGEX.items():
                 if regex.search(full_text):
                     has_lang_data = True
                     break
-        if not has_qual_data:
+                    
+        # Quality Check (Array -> Regex)
+        if f.get('quality'): has_qual_data = True
+        elif not has_qual_data:
             for qual, regex in QUALITY_REGEX.items():
                 if regex.search(fname):
                     has_qual_data = True
                     break
-        if not has_year_data:
+                    
+        # Year Check (Array -> Regex)
+        if f.get('year'): has_year_data = True
+        elif not has_year_data:
             if YEAR_REGEX.search(fname):
                 has_year_data = True
 
     # -----------------------------------------------------------
-    
     buttons = []
     
     curr_type = active_filter if active_filter else "none"
@@ -267,10 +289,17 @@ def get_language_buttons(search_id, files, active_type=None, active_qual=None, a
 
     stats = {lang: 0 for lang in LANGUAGES}
     for file in files:
-        text = (file.get('file_name', '') + " " + (file.get('caption') or "")).lower()
-        for lang, regex in LANG_REGEX.items():
-            if regex.search(text):
-                stats[lang] += 1
+        langs = file.get('languages', [])
+        # High Speed DB Check
+        if langs:
+            for lang in langs:
+                stats[lang] = stats.get(lang, 0) + 1
+        # Fallback for old files
+        else:
+            text = (file.get('file_name', '') + " " + (file.get('caption') or "")).lower()
+            for lang, regex in LANG_REGEX.items():
+                if regex.search(text):
+                    stats[lang] += 1
                 
     for lang, count in stats.items():
         if count > 0:
@@ -297,10 +326,17 @@ def get_quality_buttons(search_id, files, active_type=None, active_lang=None, ac
 
     stats = {qual: 0 for qual in QUALITIES}
     for file in files:
-        fname = file.get('file_name', '')
-        for qual, regex in QUALITY_REGEX.items():
-            if regex.search(fname):
-                stats[qual] += 1
+        quals = file.get('quality', [])
+        # High Speed DB Check
+        if quals:
+            for qual in quals:
+                stats[qual] = stats.get(qual, 0) + 1
+        # Fallback for old files
+        else:
+            fname = file.get('file_name', '')
+            for qual, regex in QUALITY_REGEX.items():
+                if regex.search(fname):
+                    stats[qual] += 1
                 
     for qual, count in stats.items():
         if count > 0:
@@ -327,10 +363,16 @@ def get_year_buttons(search_id, files, active_type=None, active_lang=None, activ
 
     years = set()
     for file in files:
-        fname = file.get('file_name', '')
-        matches = YEAR_REGEX.findall(fname)
-        for year in matches:
-            years.add(year)
+        yrs = file.get('year', [])
+        # High Speed DB Check
+        if yrs:
+            for y in yrs: years.add(y)
+        # Fallback for old files
+        else:
+            fname = file.get('file_name', '')
+            matches = YEAR_REGEX.findall(fname)
+            for year in matches:
+                years.add(year)
 
     sorted_years = sorted(list(years), reverse=True)
     for year in sorted_years:
@@ -429,16 +471,25 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         
         link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
         
-        q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
-        quality = q_match.group(0) if q_match else "N/A"
+        # High Speed DB Extraction
+        db_quals = file.get('quality', [])
+        db_langs = file.get('languages', [])
         
-        langs_found = []
-        text_to_check = (f_name + " " + caption).lower()
-        for lang, regex in LANG_REGEX.items():
-            if regex.search(text_to_check):
-                langs_found.append(lang)
-        
-        lang_str = ", ".join(sorted(set(langs_found))) if langs_found else "N/A"
+        if db_quals:
+            quality = ", ".join(db_quals)
+        else:
+            q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
+            quality = q_match.group(0) if q_match else "N/A"
+            
+        if db_langs:
+            lang_str = ", ".join(db_langs)
+        else:
+            langs_found = []
+            text_to_check = (f_name + " " + caption).lower()
+            for lang, regex in LANG_REGEX.items():
+                if regex.search(text_to_check):
+                    langs_found.append(lang)
+            lang_str = ", ".join(sorted(set(langs_found))) if langs_found else "N/A"
 
         text += f"📂 <a href='{link}'>Click to get this file 📥</a>\n"
         text += f"🖥 Name: {f_name}\n"

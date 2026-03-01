@@ -424,17 +424,36 @@ class MediaDB:
                 capital_type = "video" if file_type.lower() == "video" else "document"
                 match_filters["file_type"] = capital_type
 
-            # ✅ Now checks direct array for lightning fast matching
+            # ✅ Checks Fast JSON Array for New Files OR Fallback Regex for Old Files
             if lang and lang != "none":
-                match_filters["language_tags"] = lang
+                pattern = LANG_MAP.get(lang, lang)
+                if "$and" not in match_filters: match_filters["$and"] = []
+                match_filters["$and"].append({
+                    "$or": [
+                        {"language_tags": lang},
+                        {"file_name": {"$regex": pattern, "$options": "i"}},
+                        {"caption": {"$regex": pattern, "$options": "i"}}
+                    ]
+                })
 
-            # ✅ Now checks direct array for lightning fast matching
             if quality and quality != "none":
-                match_filters["quality_tags"] = quality
+                if "$and" not in match_filters: match_filters["$and"] = []
+                match_filters["$and"].append({
+                    "$or": [
+                        {"quality_tags": quality},
+                        {"file_name": {"$regex": quality, "$options": "i"}},
+                        {"caption": {"$regex": quality, "$options": "i"}}
+                    ]
+                })
             
-            # ✅ Now checks direct array for lightning fast matching
             if year and year != "none":
-                match_filters["year_tags"] = str(year)
+                if "$and" not in match_filters: match_filters["$and"] = []
+                match_filters["$and"].append({
+                    "$or": [
+                        {"year_tags": str(year)},
+                        {"file_name": {"$regex": str(year)}}
+                    ]
+                })
 
             if size_range and size_range != "none":
                 MB_500 = 500 * 1024 * 1024

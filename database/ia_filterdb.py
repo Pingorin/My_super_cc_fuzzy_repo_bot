@@ -424,17 +424,31 @@ class MediaDB:
                 capital_type = "video" if file_type.lower() == "video" else "document"
                 match_filters["file_type"] = capital_type
 
-            # ✅ Check direct array instead of Regex
             if lang and lang != "none":
-                match_filters["language_tags"] = lang
+                pattern = LANG_MAP.get(lang, lang)
+                if "$and" not in match_filters:
+                    match_filters["$and"] = []
+                match_filters["$and"].append({
+                    "$or": [
+                        {"file_name": {"$regex": pattern, "$options": "i"}},
+                        {"search_text": {"$regex": pattern, "$options": "i"}},
+                        {"caption": {"$regex": pattern, "$options": "i"}}
+                    ]
+                })
 
-            # ✅ Check direct array instead of Regex
             if quality and quality != "none":
-                match_filters["quality_tags"] = quality
+                if "$and" not in match_filters:
+                    match_filters["$and"] = []
+                match_filters["$and"].append({
+                    "$or": [
+                        {"file_name": {"$regex": quality, "$options": "i"}},
+                        {"search_text": {"$regex": quality, "$options": "i"}},
+                        {"caption": {"$regex": quality, "$options": "i"}}
+                    ]
+                })
             
-            # ✅ Check direct array instead of Regex
             if year and year != "none":
-                match_filters["year_tags"] = str(year)
+                match_filters["file_name"] = {"$regex": str(year)}
 
             if size_range and size_range != "none":
                 MB_500 = 500 * 1024 * 1024
@@ -485,14 +499,6 @@ class MediaDB:
             fallback_filter = {"$and": and_clauses_fallback} if and_clauses_fallback else {}
             if file_type and file_type != "none": 
                 fallback_filter["file_type"] = "video" if file_type.lower() == "video" else "document"
-            
-            # Apply array filters in fallback too
-            if lang and lang != "none":
-                fallback_filter["language_tags"] = lang
-            if quality and quality != "none":
-                fallback_filter["quality_tags"] = quality
-            if year and year != "none":
-                fallback_filter["year_tags"] = str(year)
 
             cursor = self.search_col.find(fallback_filter)
             
@@ -507,7 +513,18 @@ class MediaDB:
             
             final_files = []
             for f in files:
+                fname = f.get('file_name', '').lower()
+                caption = (f.get('caption') or "").lower()
+                search_txt = f.get('search_text', '').lower()
+                full_text = fname + " " + caption + " " + search_txt
                 fsize = f.get('file_size', 0)
+                
+                if lang and lang != "none":
+                    pattern = LANG_MAP.get(lang, lang).lower()
+                    if not re.search(pattern, full_text): continue
+
+                if quality and quality != "none" and quality.lower() not in full_text: continue
+                if year and year != "none" and str(year) not in fname: continue
                 
                 if size_range == "min500" and fsize >= 500*1024*1024: continue
                 elif size_range == "500-1gb" and not (500*1024*1024 <= fsize < 1024*1024*1024): continue

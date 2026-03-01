@@ -42,9 +42,9 @@ class MediaDB:
             await self.search_col.create_index("file_name")
             await self.search_col.create_index("caption")
             await self.search_col.create_index("search_text") 
-            await self.search_col.create_index("quality") # ✅ Simple Name
-            await self.search_col.create_index("languages") # ✅ Simple Name
-            await self.search_col.create_index("year") # ✅ Simple Name
+            await self.search_col.create_index("quality") 
+            await self.search_col.create_index("languages") 
+            await self.search_col.create_index("year") 
             await self.search_col.create_index("link_id")
             await self.data_col.create_index("file_unique_id", unique=True)
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
@@ -247,7 +247,7 @@ class MediaDB:
                 caption = self.clean_text(caption)
                 cap_text = caption
                 
-            # ✅ Meta data collection
+            # ✅ CAPTION BUG FIXED & METADATA MERGED
             meta_name = self.parse_metadata(media.file_name)
             raw_caption = message.caption.html if message.caption else ""
             meta_cap = self.parse_metadata(raw_caption)
@@ -260,7 +260,7 @@ class MediaDB:
             }
 
             # ==========================================================
-            # 🔥 HIDDEN SEARCH INDEXING (User Ko Nahi Dikhega) 🔥
+            # 🔥 HIDDEN SEARCH INDEXING
             # ==========================================================
             hidden_search_data = display_name
 
@@ -389,11 +389,28 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ OPTIMIZED SMART REGEX SEARCH WITH BUTTON FILTERS
+    # ⚡ OPTIMIZED SMART REGEX SEARCH
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         try:
-            # ✅ QUERY PROCESSING (Safest Approach: Regex for query text)
+            # ==========================================================
+            # 🔥 COMPLETE LANGUAGE TYPO FIXER (Spell Checker)
+            # ==========================================================
+            query = re.sub(r"(?i)\b(englsh|engls|engish|egnlish)\b", "english", query)
+            query = re.sub(r"(?i)\b(hndi|hind|hni)\b", "hindi", query)
+            query = re.sub(r"(?i)\b(tmal|taml|tmil)\b", "tamil", query)
+            query = re.sub(r"(?i)\b(telgu|tlgu|telug|telegu)\b", "telugu", query)
+            query = re.sub(r"(?i)\b(malyalam|malaylam|malyalm|malalam)\b", "malayalam", query)
+            query = re.sub(r"(?i)\b(kanada|kanda|kannad)\b", "kannada", query)
+            query = re.sub(r"(?i)\b(bengli|bangali|bngali)\b", "bengali", query)
+            query = re.sub(r"(?i)\b(punjbi|panjabi|pnjabi)\b", "punjabi", query)
+            query = re.sub(r"(?i)\b(marthi|mrathi)\b", "marathi", query)
+            query = re.sub(r"(?i)\b(gujrati|gujrti)\b", "gujarati", query)
+            query = re.sub(r"(?i)\b(daul\s*audio|dualaudio|dual\s*adiuo)\b", "dual audio", query)
+            query = re.sub(r"(?i)\b(mlti\s*audio|multiaudio|multi\s*adiuo)\b", "multi audio", query)
+            # ==========================================================
+
+            # ✅ QUERY PROCESSING
             and_clauses = []
             words = query.split()
             

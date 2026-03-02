@@ -264,6 +264,17 @@ class MediaDB:
             # ==========================================================
             hidden_search_data = display_name
 
+            # 🚀 SUPER SMART ROMAN TO DIGIT CONVERTER
+            # (?<=\s) Ensures Roman numeral is NOT the very first word 
+            roman_map = {
+                r'I': '1', r'II': '2', r'III': '3', r'IV': '4', r'V': '5',
+                r'VI': '6', r'VII': '7', r'VIII': '8', r'IX': '9', r'X': '10'
+            }
+            
+            for roman, digit in roman_map.items():
+                # \b ensures standalone word, (?<=\s) ensures there's a space before it
+                hidden_search_data = re.sub(rf"(?i)(?<=\s)\b{roman}\b", digit, hidden_search_data)
+
             hidden_search_data = re.sub(r"(?i)\bS(\d+)\s*E(\d+)\b", r"S\1 E\2", hidden_search_data)
 
             def expand_season(match):

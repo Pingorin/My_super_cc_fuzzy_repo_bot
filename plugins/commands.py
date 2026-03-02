@@ -1064,9 +1064,13 @@ async def admin_grp_page_handler(client, query):
     if query.from_user.id not in ADMINS:
         return await query.answer("❌ Not Allowed", show_alert=True)
         
+    # ✅ FIX 1: Button ka loading animation rokne ke liye
+    await query.answer() 
+    
     page = int(query.data.split("#")[1])
-    await show_groups_page(client, query, page)
-
+    
+    # ✅ FIX 2: 'query' ki jagah 'query.message' pass karna hai
+    await show_groups_page(client, query.message, page)
 
 # 3️⃣ GENERATE LINK ON CLICK
 @Client.on_callback_query(filters.regex(r"^get_grp_link#"))

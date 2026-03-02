@@ -293,8 +293,9 @@ class MediaDB:
             hidden_search_data = re.sub(r"(?i)\b(?:season|s)\s*(\d+)\b", r"S\1", hidden_search_data)
             hidden_search_data = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", hidden_search_data)
 
+            # 4. Generate Variations (S1, S01, sO1, season 1, ep 6, s01e06 etc.)
             variations = []
-            orig_raw = media.file_name.lower()
+            orig_raw = (media.file_name or "").lower() # ✅ FIX: Agar file name nahi hai, toh crash nahi hoga
             
             seasons = re.findall(r"(?i)\bS(\d+)\b", hidden_search_data)
             episodes = re.findall(r"(?i)\bE(\d+)\b", hidden_search_data)

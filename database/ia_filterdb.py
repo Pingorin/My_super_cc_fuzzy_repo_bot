@@ -589,8 +589,12 @@ class MediaDB:
     async def get_db_size(self):
         try:
             stats = await self.db.command("dbstats")
-            return stats['dataSize']
-        except: return 0
+            # Storage + Index Size = Total used in Atlas Free Tier
+            total_bytes = stats.get('storageSize', 0) + stats.get('totalIndexSize', 0)
+            return total_bytes
+        except Exception as e:
+            print(f"Error getting DB Size: {e}")
+            return 0
 
     async def save_search_results(self, query, files, chat_id):
         unique_id = str(uuid.uuid4())[:8]

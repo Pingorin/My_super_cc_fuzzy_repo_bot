@@ -848,13 +848,45 @@ async def set_shortner_dynamic(client, message):
 @Client.on_message(filters.command("stats") & filters.user(ADMINS))
 async def stats_handler(client, message):
     try:
-        msg = await message.reply("Fetching stats...")
+        msg = await message.reply("🔄 Fetching stats...")
+        
+        # Purana data (Users, Groups, Files)
         users = await db.total_users_count()
         groups = await db.total_groups_count()
         files = await Media.total_files_count()
-        await msg.edit(f"📊 **BOT STATISTICS**\n\n👤 **Users:** {users}\n👥 **Groups:** {groups}\n📂 **Files Indexed:** {files}")
+        
+        # Naya DB Size data
+        db_size_bytes = await Media.get_db_size()
+        
+        # Memory Calculation (Bytes to MB) for 512 MB limit
+        used_mb = db_size_bytes / (1024 * 1024)
+        total_limit_mb = 512.0
+        free_mb = total_limit_mb - used_mb
+        percentage = (used_mb / total_limit_mb) * 100
+        
+        # Progress bar design
+        filled_blocks = int(percentage / 10)
+        empty_blocks = 10 - filled_blocks
+        progress_bar = "🟩" * filled_blocks + "⬜" * empty_blocks
+        
+        # Final Message Text
+        text = f"📊 **BOT STATISTICS**\n\n"
+        text += f"👤 **Users:** {users}\n"
+        text += f"👥 **Groups:** {groups}\n"
+        text += f"📂 **Files Indexed:** {files}\n\n"
+        text += f"💽 **Database Used:** `{used_mb:.2f} MB` / `512 MB`\n"
+        text += f"🟢 **Free Space:** `{free_mb:.2f} MB`\n"
+        text += f"📈 **Usage:** `{percentage:.2f}%`\n"
+        text += f"[{progress_bar}]\n"
+        
+        # Agar 90% se zyada bhar jaye toh warning
+        if percentage >= 90:
+            text += "\n⚠️ **WARNING: Database is almost full!**"
+            
+        await msg.edit(text)
+        
     except Exception as e: 
-        await message.reply(f"Error: {e}")
+        await message.reply(f"❌ Error: {e}")
 
 # ==============================================================================
 # 💎 PREMIUM & REFERRAL UI CALLBACKS

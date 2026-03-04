@@ -42,6 +42,8 @@ class MediaDB:
             await self.search_col.create_index("file_name")
             await self.search_col.create_index("caption")
             await self.search_col.create_index("search_text") 
+            # 🚀 TEXT INDEX ADDED FOR ADVANCED SCORING (Required for $text)
+            await self.search_col.create_index([("search_text", "text")])
             await self.search_col.create_index("quality") 
             await self.search_col.create_index("languages") 
             await self.search_col.create_index("year") 
@@ -247,7 +249,6 @@ class MediaDB:
                 caption = self.clean_text(caption)
                 cap_text = caption
                 
-            # ✅ CAPTION BUG FIXED & METADATA MERGED
             meta_name = self.parse_metadata(media.file_name)
             raw_caption = message.caption.html if message.caption else ""
             meta_cap = self.parse_metadata(raw_caption)
@@ -259,20 +260,13 @@ class MediaDB:
                 "source": list(set(meta_name['source'] + meta_cap['source']))
             }
 
-            # ==========================================================
-            # 🔥 HIDDEN SEARCH INDEXING
-            # ==========================================================
             hidden_search_data = display_name
 
-            # 🚀 SUPER SMART ROMAN TO DIGIT CONVERTER
-            # (?<=\s) Ensures Roman numeral is NOT the very first word 
             roman_map = {
                 r'I': '1', r'II': '2', r'III': '3', r'IV': '4', r'V': '5',
                 r'VI': '6', r'VII': '7', r'VIII': '8', r'IX': '9', r'X': '10'
             }
-            
             for roman, digit in roman_map.items():
-                # \b ensures standalone word, (?<=\s) ensures there's a space before it
                 hidden_search_data = re.sub(rf"(?i)(?<=\s)\b{roman}\b", digit, hidden_search_data)
 
             hidden_search_data = re.sub(r"(?i)\bS(\d+)\s*E(\d+)\b", r"S\1 E\2", hidden_search_data)
@@ -293,9 +287,8 @@ class MediaDB:
             hidden_search_data = re.sub(r"(?i)\b(?:season|s)\s*(\d+)\b", r"S\1", hidden_search_data)
             hidden_search_data = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", hidden_search_data)
 
-            # 4. Generate Variations (S1, S01, sO1, season 1, ep 6, s01e06 etc.)
             variations = []
-            orig_raw = (media.file_name or "").lower() # ✅ FIX: Agar file name nahi hai, toh crash nahi hoga
+            orig_raw = (media.file_name or "").lower()
             
             seasons = re.findall(r"(?i)\bS(\d+)\b", hidden_search_data)
             episodes = re.findall(r"(?i)\bE(\d+)\b", hidden_search_data)
@@ -329,12 +322,10 @@ class MediaDB:
                 for c in chaps: variations.append(f"chapter{c} ch{c}")
 
             variation_text = " ".join(list(set(variations)))
-
             spaceless_name = display_name.replace(" ", "").replace("-", "").replace(".", "")
             spaceless_cap = cap_text.replace(" ", "").replace("-", "").replace(".", "")
 
             master_search_text = f"{display_name} {hidden_search_data} {spaceless_name} {spaceless_cap} {variation_text}".lower()
-            # ==========================================================
 
             file_type = "document" 
             if message.video:
@@ -351,7 +342,6 @@ class MediaDB:
                 'file_type': file_type 
             })
             
-            # ✅ Base Search Document
             search_doc = {
                 'file_name': display_name,
                 'file_size': media.file_size, 
@@ -362,18 +352,10 @@ class MediaDB:
                 'file_type': file_type 
             }
 
-            # ✅ MEMORY OPTIMIZATION: Simple Keys
-            if parsed_meta['quality']:
-                search_doc['quality'] = parsed_meta['quality']
-            
-            if parsed_meta['languages']:
-                search_doc['languages'] = parsed_meta['languages']
-                
-            if parsed_meta['year']:
-                search_doc['year'] = parsed_meta['year']
-                
-            if parsed_meta['source']:
-                search_doc['source'] = parsed_meta['source']
+            if parsed_meta['quality']: search_doc['quality'] = parsed_meta['quality']
+            if parsed_meta['languages']: search_doc['languages'] = parsed_meta['languages']
+            if parsed_meta['year']: search_doc['year'] = parsed_meta['year']
+            if parsed_meta['source']: search_doc['source'] = parsed_meta['source']
 
             search_docs.append(search_doc)
             current_id += 1
@@ -401,13 +383,14 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ OPTIMIZED SMART REGEX SEARCH
+    # ⚡ SMART SEARCH: SMART TITLE EXTRACTOR + TEXTSCORE RANKING
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
+        if not query or not query.strip():
+            return []
+
         try:
-            # ==========================================================
-            # 🔥 COMPLETE LANGUAGE TYPO FIXER (Spell Checker)
-            # ==========================================================
+            # ✅ TYPO FIXER
             query = re.sub(r"(?i)\b(englsh|engls|engish|egnlish)\b", "english", query)
             query = re.sub(r"(?i)\b(hndi|hind|hni)\b", "hindi", query)
             query = re.sub(r"(?i)\b(tmal|taml|tmil)\b", "tamil", query)
@@ -420,35 +403,50 @@ class MediaDB:
             query = re.sub(r"(?i)\b(gujrati|gujrti)\b", "gujarati", query)
             query = re.sub(r"(?i)\b(daul\s*audio|dualaudio|dual\s*adiuo)\b", "dual audio", query)
             query = re.sub(r"(?i)\b(mlti\s*audio|multiaudio|multi\s*adiuo)\b", "multi audio", query)
+
+            clean_query = query.strip().lower()
+            words = clean_query.split()
+            if not words: return []
+
             # ==========================================================
+            # 🚀 SUPER SMART TITLE EXTRACTOR
+            # ==========================================================
+            meta_keywords = {
+                "hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", 
+                "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4"
+            }
 
-            # ✅ QUERY PROCESSING
-            and_clauses = []
-            words = query.split()
-            
+            title_words = []
             for word in words:
-                char_array = [re.escape(c) for c in word]
-                smart_regex = r"[\s\W]*".join(char_array)
-                
-                and_clauses.append({
-                    "$or": [
-                        {"file_name": {"$regex": smart_regex, "$options": "i"}},
-                        {"search_text": {"$regex": smart_regex, "$options": "i"}},
-                        {"caption": {"$regex": smart_regex, "$options": "i"}}
-                    ]
-                })
+                # Break if it's a year (19xx, 20xx) or a metadata keyword
+                if re.match(r"^(19|20)\d{2}$", word) or word in meta_keywords:
+                    break
+                title_words.append(word)
 
-            pipeline = []
-            match_filters = {"$and": and_clauses} if and_clauses else {}
+            if not title_words:
+                title_words = [words[0]] # Fallback
+
+            # 1. Base $match stage: Order-independent text search for scoring
+            match_filters = {
+                "$text": {"$search": clean_query}
+            }
+
+            # 2. STRICT RULE: Every word of the MOVIE TITLE must exist in the file exactly
+            strict_and_clauses = []
+            for t_word in title_words:
+                safe_word = re.escape(t_word)
+                strict_and_clauses.append(
+                    {"search_text": {"$regex": rf"(?i)\b{safe_word}\b"}}
+                )
             
-            if file_type and file_type != "none":
-                capital_type = "video" if file_type.lower() == "video" else "document"
-                match_filters["file_type"] = capital_type
+            match_filters["$and"] = strict_and_clauses
 
-            # ✅ FAST BUTTON FILTERS (Simple Keys)
+            # ✅ FAST BUTTON FILTERS
+            if file_type and file_type != "none":
+                match_filters["file_type"] = "video" if file_type.lower() == "video" else "document"
+
             if lang and lang != "none":
                 pattern = LANG_MAP.get(lang, lang)
-                if "$and" not in match_filters: match_filters["$and"] = []
                 match_filters["$and"].append({
                     "$or": [
                         {"languages": lang},
@@ -458,7 +456,6 @@ class MediaDB:
                 })
 
             if quality and quality != "none":
-                if "$and" not in match_filters: match_filters["$and"] = []
                 match_filters["$and"].append({
                     "$or": [
                         {"quality": quality},
@@ -468,7 +465,6 @@ class MediaDB:
                 })
             
             if year and year != "none":
-                if "$and" not in match_filters: match_filters["$and"] = []
                 match_filters["$and"].append({
                     "$or": [
                         {"year": str(year)},
@@ -480,15 +476,26 @@ class MediaDB:
                 MB_500 = 500 * 1024 * 1024
                 GB_1 = 1024 * 1024 * 1024
                 GB_2 = 2 * 1024 * 1024 * 1024
-                
                 if size_range == "min500": match_filters["file_size"] = {"$lt": MB_500}
                 elif size_range == "500-1gb": match_filters["file_size"] = {"$gte": MB_500, "$lt": GB_1}
                 elif size_range == "1gb-2gb": match_filters["file_size"] = {"$gte": GB_1, "$lt": GB_2}
                 elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
-            pipeline.append({"$match": match_filters})
+            # ==========================================================
+            # 🚀 PIPELINE CONSTRUCTION WITH TEXTSCORE SORTING
+            # ==========================================================
+            pipeline = [
+                {"$match": match_filters},
+                # Expose the textScore for ranking
+                {"$project": {
+                    "file_name": 1, "file_size": 1, "caption": 1, 
+                    "search_text": 1, "quality": 1, "languages": 1, 
+                    "year": 1, "source": 1, "link_id": 1, "chat_id": 1, 
+                    "file_type": 1,
+                    "score": {"$meta": "textScore"}
+                }}
+            ]
 
-            # ✅ SORTING LOGIC
             if sort == "new":
                 pipeline.append({"$sort": {"_id": -1}}) 
             elif sort == "old":
@@ -498,7 +505,8 @@ class MediaDB:
             elif sort == "small":
                 pipeline.append({"$sort": {"file_size": 1}}) 
             else:
-                pipeline.append({"$sort": {"_id": -1}}) 
+                # 🥇 PERFECT SORT: Highest TextScore First, Then Newest File
+                pipeline.append({"$sort": {"score": {"$meta": "textScore"}, "_id": -1}}) 
 
             pipeline.append({"$limit": 100}) 
 
@@ -509,6 +517,7 @@ class MediaDB:
         except Exception as e:
             print(f"⚠️ Index Search Failed: {e}. Switching to Fallback.")
             
+            # ✅ FALLBACK LOGIC
             and_clauses_fallback = []
             for word in query.split():
                 char_array = [re.escape(c) for c in word]

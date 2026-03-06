@@ -383,7 +383,7 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ SMART SEARCH: SMART TITLE EXTRACTOR + CUSTOM WORD COUNTER + TEXTSCORE RANKING
+    # ⚡ SMART SEARCH: SMART TITLE EXTRACTOR + ALIAS COUNTER + TEXTSCORE
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip():
@@ -497,12 +497,22 @@ class MediaDB:
             ]
 
             # 🔥 NEW MAGIC STAGE: CUSTOM WORD COUNTER 🔥
-            # Ye stage count karegi ki user ke kitne words file me practically exact match huye hain.
             match_conditions = []
+            
+            # 🚀 ALIAS MAP: Taki 'hindi' search karne par 'HIN' wali files ko bhi point mile!
+            alias_map = {
+                "hindi": r"\b(hindi|hin)\b",
+                "english": r"\b(english|eng)\b",
+                "tamil": r"\b(tamil|tam)\b",
+                "telugu": r"\b(telugu|tel)\b",
+                "malayalam": r"\b(malayalam|mal)\b",
+                "kannada": r"\b(kannada|kan)\b"
+            }
+
             for w in words:
-                safe_w = re.escape(w)
+                regex_pattern = alias_map.get(w, re.escape(w))
                 match_conditions.append({
-                    "$cond": [{"$regexMatch": {"input": "$search_text", "regex": safe_w, "options": "i"}}, 1, 0]
+                    "$cond": [{"$regexMatch": {"input": "$search_text", "regex": regex_pattern, "options": "i"}}, 1, 0]
                 })
             
             if match_conditions:

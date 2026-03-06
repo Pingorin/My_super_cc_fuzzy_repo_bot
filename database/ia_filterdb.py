@@ -383,7 +383,7 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ SMART SEARCH: SMART TITLE EXTRACTOR + TEXTSCORE RANKING
+    # ⚡ SMART SEARCH: SMART TITLE EXTRACTOR + CUSTOM WORD COUNTER + TEXTSCORE RANKING
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip():
@@ -482,7 +482,7 @@ class MediaDB:
                 elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
             # ==========================================================
-            # 🚀 PIPELINE CONSTRUCTION WITH TEXTSCORE SORTING
+            # 🚀 PIPELINE CONSTRUCTION WITH CUSTOM WORD COUNTER & TEXTSCORE
             # ==========================================================
             pipeline = [
                 {"$match": match_filters},
@@ -496,6 +496,22 @@ class MediaDB:
                 }}
             ]
 
+            # 🔥 NEW MAGIC STAGE: CUSTOM WORD COUNTER 🔥
+            # Ye stage count karegi ki user ke kitne words file me practically exact match huye hain.
+            match_conditions = []
+            for w in words:
+                safe_w = re.escape(w)
+                match_conditions.append({
+                    "$cond": [{"$regexMatch": {"input": "$search_text", "regex": safe_w, "options": "i"}}, 1, 0]
+                })
+            
+            if match_conditions:
+                pipeline.append({
+                    "$addFields": {
+                        "custom_score": {"$add": match_conditions}
+                    }
+                })
+
             if sort == "new":
                 pipeline.append({"$sort": {"_id": -1}}) 
             elif sort == "old":
@@ -505,8 +521,11 @@ class MediaDB:
             elif sort == "small":
                 pipeline.append({"$sort": {"file_size": 1}}) 
             else:
-                # 🥇 PERFECT SORT: Highest TextScore First, Then Newest File
-                pipeline.append({"$sort": {"score": {"$meta": "textScore"}, "_id": -1}}) 
+                # 🥇 PERFECT ULTIMATE SORT: 
+                # 1st Priority: Jisme sabse zyada words (Leo+2023+Hindi) milein (custom_score)
+                # 2nd Priority: MongoDB ka textScore
+                # 3rd Priority: Nayi file (Newest First)
+                pipeline.append({"$sort": {"custom_score": -1, "score": {"$meta": "textScore"}, "_id": -1}}) 
 
             pipeline.append({"$limit": 100}) 
 

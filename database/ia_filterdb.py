@@ -53,6 +53,7 @@ class MediaDB:
             await self.search_col.create_index("year") 
             await self.search_col.create_index("link_id")
             
+            # 🚀 FULL-TEXT INDEX WITH PROPER WEIGHTS
             await self.search_col.create_index(
                 [
                     ("file_name", TEXT),
@@ -62,6 +63,14 @@ class MediaDB:
                     ("quality", TEXT),
                     ("year", TEXT)
                 ],
+                weights={
+                    "file_name": 100,     
+                    "search_text": 80,    
+                    "languages": 50,      
+                    "quality": 30,        
+                    "year": 10,           
+                    "caption": 5          
+                },
                 name="weighted_movie_search"
             )
 
@@ -160,6 +169,11 @@ class MediaDB:
         for m in re.finditer(src_pattern, cleaned_title): metadata['source'].add(m.group(1).upper()) 
         cleaned_title = re.sub(src_pattern, "", cleaned_title)
 
+        lang_map = {
+            'hin': 'Hindi', 'hindi': 'Hindi', 'tam': 'Tamil', 'tamil': 'Tamil', 'tel': 'Telugu', 'telugu': 'Telugu',
+            'mal': 'Malayalam', 'malayalam': 'Malayalam', 'kan': 'Kannada', 'kannada': 'Kannada', 'eng': 'English', 'english': 'English',
+            'multi': 'Multi Audio', 'dual': 'Dual Audio'
+        }
         lang_pattern = r"(?i)\b(hindi|hin|tamil|tam|telugu|tel|malayalam|mal|kannada|kan|english|eng|multi[\s\-]?audio|dual[\s\-]?audio)\b"
         for m in re.finditer(lang_pattern, cleaned_title):
             val = m.group(1).lower().replace('-', ' ').replace('audio', '').strip()
@@ -263,7 +277,7 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ HYBRID SEARCH: Stopword Remover & 100-Point Language Boost
+    # ⚡ HYBRID SEARCH: Stopword Remover & 100-Point Language Boost (100% FIXED)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -280,10 +294,10 @@ class MediaDB:
             clean_query = query.strip().lower()
             raw_words = clean_query.split()
             
-            # 🔥 1. STOPWORD REMOVER ("The", "in", "of" will be ignored)
+            # 🔥 STOPWORD REMOVER
             stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to"}
             words = [w for w in raw_words if w not in stop_words]
-            if not words: words = raw_words # if user literally searched "the"
+            if not words: words = raw_words 
             
             meta_keywords = {
                 "hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", 
@@ -294,47 +308,55 @@ class MediaDB:
             title_words = [w for w in words if not (re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords)]
             if not title_words: title_words = words 
 
-            # 🚀 2. FAST FETCHING
+            # 🚀 1. FAST FETCHING (MONGODB NATIVE SYNTAX)
             match_filters = {"$text": {"$search": " ".join(words)}}
 
             title_or_clauses = []
             for tw in title_words:
                 safe_tw = re.escape(tw)
-                title_or_clauses.append({"search_text": {"$regex": rf"(?i)\b{safe_tw}\b"}})
-                title_or_clauses.append({"file_name": {"$regex": rf"(?i)\b{safe_tw}\b"}})
+                # ✅ Fixed to proper MongoDB regex options
+                title_or_clauses.append({"search_text": {"$regex": rf"\b{safe_tw}\b", "$options": "i"}})
+                title_or_clauses.append({"file_name": {"$regex": rf"\b{safe_tw}\b", "$options": "i"}})
                 
             if title_or_clauses: match_filters["$and"] = match_filters.get("$and", []) + [{"$or": title_or_clauses}]
 
+            # Button Filters
             if file_type and file_type != "none": match_filters["file_type"] = "video" if file_type.lower() == "video" else "document"
             if lang and lang != "none":
                 pattern = LANG_MAP.get(lang, lang)
-                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": pattern, "$options": "i"}}]}]
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": pattern, "$options": "i"}}, {"caption": {"$regex": pattern, "$options": "i"}}]}]
+            if quality and quality != "none":
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"quality": quality}, {"file_name": {"$regex": quality, "$options": "i"}}, {"caption": {"$regex": quality, "$options": "i"}}]}]
             if year and year != "none":
                 match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
+            if size_range and size_range != "none":
+                MB_500, GB_1, GB_2 = 500*1024*1024, 1024*1024*1024, 2*1024*1024*1024
+                if size_range == "min500": match_filters["file_size"] = {"$lt": MB_500}
+                elif size_range == "500-1gb": match_filters["file_size"] = {"$gte": MB_500, "$lt": GB_1}
+                elif size_range == "1gb-2gb": match_filters["file_size"] = {"$gte": GB_1, "$lt": GB_2}
+                elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
-            # 🚀 3. THE LANGUAGE KILL-SWITCH SCORING
+            # 🚀 2. THE LANGUAGE KILL-SWITCH SCORING
             alias_map = {"hindi": r"(hindi|hin)", "english": r"(english|eng)", "tamil": r"(tamil|tam)", "telugu": r"(telugu|tel)", "malayalam": r"(malayalam|mal)", "kannada": r"(kannada|kan)", "dual": r"(dual|multi)", "multi": r"(dual|multi)"}
             match_conditions = []
             
             if title_words:
                 safe_first = re.escape(title_words[0])
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"(?i)^[\W_]*{safe_first}\b"}}, 50, 0]})
+                # ✅ Fixed to use "options": "i" instead of (?i) to prevent Database crash
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"^[\W_]*{safe_first}\b", "options": "i"}}, 50, 0]})
 
             for w in words:
                 regex_pattern = alias_map.get(w, re.escape(w))
                 is_lang = w in ["hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "english", "dual", "multi", "punjabi", "marathi"]
                 is_meta = re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords
                 
-                # 🔥 LANGUAGE KILL-SWITCH (+100 Points for correct language match)
-                if is_lang:
-                    name_weight, text_weight = 100, 50
-                elif is_meta:
-                    name_weight, text_weight = 20, 5
-                else:
-                    name_weight, text_weight = 40, 10
+                if is_lang: name_weight, text_weight = 100, 50
+                elif is_meta: name_weight, text_weight = 20, 5
+                else: name_weight, text_weight = 40, 10
                 
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"(?i)\b{regex_pattern}\b"}}, name_weight, 0]})
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": rf"(?i)\b{regex_pattern}\b"}}, text_weight, 0]})
+                # ✅ Fixed syntax here as well
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{regex_pattern}\b", "options": "i"}}, name_weight, 0]})
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": rf"\b{regex_pattern}\b", "options": "i"}}, text_weight, 0]})
 
             pipeline = [
                 {"$match": match_filters},
@@ -353,12 +375,13 @@ class MediaDB:
             return await cursor.to_list(length=100)
 
         except Exception as e:
-            # ✅ FALLBACK
+            print(f"⚠️ Native Search Failed: {e}. Switching to Fallback.")
+            # ✅ FALLBACK LOGIC
             try:
                 fallback_match, fallback_and_clauses = {}, []
                 for tw in title_words:
                     safe_tw = re.escape(tw)
-                    fallback_and_clauses.append({"$or": [{"search_text": {"$regex": rf"(?i)\b{safe_tw}\b"}}, {"file_name": {"$regex": rf"(?i)\b{safe_tw}\b"}}]})
+                    fallback_and_clauses.append({"$or": [{"search_text": {"$regex": rf"\b{safe_tw}\b", "$options": "i"}}, {"file_name": {"$regex": rf"\b{safe_tw}\b", "$options": "i"}}]})
                 if fallback_and_clauses: fallback_match["$and"] = fallback_and_clauses
                 
                 fallback_pipeline = [
@@ -373,6 +396,7 @@ class MediaDB:
                 cursor = self.search_col.aggregate(fallback_pipeline)
                 return await cursor.to_list(length=100)
             except Exception as inner_e:
+                print(f"❌ Fallback also failed: {inner_e}")
                 return []
 
     async def total_files_count(self): return await self.data_col.count_documents({})

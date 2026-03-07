@@ -42,14 +42,12 @@ class MediaDB:
     # ==================================================================
     async def ensure_indexes(self):
         try:
-            # Puraane indexes ko drop karna zaroori hai taaki naya weighted index bina error ban sake
             try:
                 await self.search_col.drop_indexes()
                 print("♻️ Old Indexes Dropped Successfully (Preparing for Weighted Indexes).")
             except OperationFailure:
-                pass # Agar collection nayi hai aur index nahi hai toh koi error nahi aayega
+                pass 
 
-            # 1. Standard B-Tree Indexes for Fast Fallback Searches
             await self.search_col.create_index("file_name")
             await self.search_col.create_index("caption")
             await self.search_col.create_index("search_text") 
@@ -69,12 +67,12 @@ class MediaDB:
                     ("year", TEXT)
                 ],
                 weights={
-                    "file_name": 100,     # Movie Title - Highest Priority
-                    "search_text": 80,    # Cleaned Hidden Name - Second Priority
-                    "languages": 50,      # Language (Hindi, Tamil) - Medium Priority
-                    "quality": 30,        # Quality (1080p) - Low Priority
-                    "year": 10,           # Year (2023) - Lowest Priority
-                    "caption": 5          # Faltu description
+                    "file_name": 100,     
+                    "search_text": 80,    
+                    "languages": 50,      
+                    "quality": 30,        
+                    "year": 10,           
+                    "caption": 5          
                 },
                 name="weighted_movie_search"
             )
@@ -464,8 +462,13 @@ class MediaDB:
                 "$text": {"$search": clean_query}
             }
 
-            # "At least one Title word" wala strict filter taaki random 2023 movie na aaye
-            title_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}} for tw in title_words]
+            # At least one Title word strict filter (Dono jagah check karega safety ke liye)
+            title_or_clauses = []
+            for tw in title_words:
+                safe_tw = re.escape(tw)
+                title_or_clauses.append({"search_text": {"$regex": rf"(?i)\b{safe_tw}\b"}})
+                title_or_clauses.append({"file_name": {"$regex": rf"(?i)\b{safe_tw}\b"}})
+                
             if title_or_clauses:
                 match_filters["$and"] = match_filters.get("$and", []) + [{"$or": title_or_clauses}]
 
@@ -510,7 +513,7 @@ class MediaDB:
                 elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
             # ==========================================================
-            # 🚀 3. PIPELINE WITH DIRECT NATIVE SCORING (NO MORE CPU LOAD)
+            # 🚀 3. PIPELINE WITH DIRECT NATIVE SCORING
             # ==========================================================
             pipeline = [
                 {"$match": match_filters},
@@ -519,7 +522,6 @@ class MediaDB:
                     "search_text": 1, "quality": 1, "languages": 1, 
                     "year": 1, "source": 1, "link_id": 1, "chat_id": 1, 
                     "file_type": 1,
-                    # Yahan MongoDB automatically Weight = 100 aur Weight = 10 ke hisab se score batayega!
                     "score": {"$meta": "textScore"} 
                 }}
             ]
@@ -536,8 +538,6 @@ class MediaDB:
             elif sort == "small":
                 pipeline.append({"$sort": {"file_size": 1}}) 
             else:
-                # 🥇 1st Priority: Native textScore (Based on your weights!)
-                # 🥈 2nd Priority: Newest Uploaded
                 pipeline.append({"$sort": {"score": {"$meta": "textScore"}, "_id": -1}}) 
 
             pipeline.append({"$limit": 100}) 
@@ -547,27 +547,72 @@ class MediaDB:
             return files
 
         except Exception as e:
-            print(f"⚠️ Native Search Failed (Likely Stopwords): {e}. Switching to B-Tree Fallback.")
+            print(f"⚠️ Native Search Failed (Likely Stopwords or Index Building): {e}. Switching to B-Tree Fallback.")
             
             # ==========================================================
-            # ✅ 5. B-TREE FALLBACK LOGIC (Agar stopword "The" use kiya ho)
+            # ✅ 5. B-TREE FALLBACK LOGIC (Strict & Safe)
             # ==========================================================
             try:
-                fallback_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}} for tw in title_words]
-                fallback_match = {"$or": fallback_or_clauses} if fallback_or_clauses else {}
+                fallback_match = {}
+                fallback_and_clauses = []
                 
-                # B-Tree fallback mein 'The' ya dusre words match karne ke rules
+                # B-Tree fallback mein saare words match hone chahiye (Standard Regex Search)
                 for w in words:
-                    fallback_match[f"fallback_word_{w}"] = {"$regexMatch": {"input": "$search_text", "regex": rf"(?i)\b{re.escape(w)}\b"}}
+                    safe_w = re.escape(w)
+                    fallback_and_clauses.append({
+                        "$or": [
+                            {"search_text": {"$regex": rf"(?i)\b{safe_w}\b"}},
+                            {"file_name": {"$regex": rf"(?i)\b{safe_w}\b"}},
+                            {"caption": {"$regex": rf"(?i)\b{safe_w}\b"}}
+                        ]
+                    })
+                
+                if fallback_and_clauses:
+                    fallback_match["$and"] = fallback_and_clauses
                 
                 if file_type and file_type != "none": 
                     fallback_match["file_type"] = "video" if file_type.lower() == "video" else "document"
+                    
+                if lang and lang != "none":
+                    pattern = LANG_MAP.get(lang, lang)
+                    fallback_match["$and"] = fallback_match.get("$and", []) + [{
+                        "$or": [
+                            {"languages": lang},
+                            {"file_name": {"$regex": pattern, "$options": "i"}},
+                            {"caption": {"$regex": pattern, "$options": "i"}}
+                        ]
+                    }]
+
+                if quality and quality != "none":
+                    fallback_match["$and"] = fallback_match.get("$and", []) + [{
+                        "$or": [
+                            {"quality": quality},
+                            {"file_name": {"$regex": quality, "$options": "i"}},
+                            {"caption": {"$regex": quality, "$options": "i"}}
+                        ]
+                    }]
+                
+                if year and year != "none":
+                    fallback_match["$and"] = fallback_match.get("$and", []) + [{
+                        "$or": [
+                            {"year": str(year)},
+                            {"file_name": {"$regex": str(year)}}
+                        ]
+                    }]
+
+                if size_range and size_range != "none":
+                    MB_500 = 500 * 1024 * 1024
+                    GB_1 = 1024 * 1024 * 1024
+                    GB_2 = 2 * 1024 * 1024 * 1024
+                    if size_range == "min500": fallback_match["file_size"] = {"$lt": MB_500}
+                    elif size_range == "500-1gb": fallback_match["file_size"] = {"$gte": MB_500, "$lt": GB_1}
+                    elif size_range == "1gb-2gb": fallback_match["file_size"] = {"$gte": GB_1, "$lt": GB_2}
+                    elif size_range == "max2gb": fallback_match["file_size"] = {"$gte": GB_2}
 
                 fallback_pipeline = [
                     {"$match": fallback_match}
                 ]
                 
-                # Basic Sort for Fallback
                 if sort == "new": fallback_pipeline.append({"$sort": {"_id": -1}})
                 elif sort == "old": fallback_pipeline.append({"$sort": {"_id": 1}})
                 elif sort == "large": fallback_pipeline.append({"$sort": {"file_size": -1}})
@@ -577,7 +622,8 @@ class MediaDB:
                 fallback_pipeline.append({"$limit": 100})
                 cursor = self.search_col.aggregate(fallback_pipeline)
                 return await cursor.to_list(length=100)
-            except:
+            except Exception as inner_e:
+                print(f"❌ Fallback also failed: {inner_e}")
                 return []
 
     async def total_files_count(self):

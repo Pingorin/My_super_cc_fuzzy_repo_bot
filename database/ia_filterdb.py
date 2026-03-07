@@ -37,9 +37,6 @@ class MediaDB:
         self.search_cache = self.db.search_cache 
         self.temp_searches = self.db.temp_searches
 
-    # ==================================================================
-    # ⚡ FAST INDEXING SETUP
-    # ==================================================================
     async def ensure_indexes(self):
         try:
             try:
@@ -56,7 +53,7 @@ class MediaDB:
             await self.search_col.create_index("year") 
             await self.search_col.create_index("link_id")
             
-            # 🚀 FULL-TEXT INDEX (Sirf search speed ke liye, ranking hum apni karenge)
+            # 🚀 FULL-TEXT INDEX 
             await self.search_col.create_index(
                 [
                     ("file_name", TEXT),
@@ -87,7 +84,6 @@ class MediaDB:
             )
             return doc["sequence_value"]
         except Exception as e:
-            print(f"❌ Error Getting Sequence ID: {e}")
             return None
 
     async def save_search_query(self, query, user_id, files):
@@ -107,7 +103,6 @@ class MediaDB:
             )
             return int(search_id)
         except Exception as e:
-            print(f"❌ CRITICAL DB ERROR (Save): {e}")
             return None
 
     async def update_search_cache(self, search_id, files):
@@ -117,13 +112,12 @@ class MediaDB:
                 {"$set": {"files": files}}
             )
         except Exception as e:
-            print(f"❌ Cache Update Error: {e}")
+            pass
 
     async def get_search_query(self, search_id):
         try:
             return await self.temp_searches.find_one({"_id": int(search_id)})
         except Exception as e:
-            print(f"❌ CRITICAL DB ERROR (Get): {e}")
             return None
 
     @staticmethod
@@ -321,7 +315,6 @@ class MediaDB:
             except BulkWriteError as bwe:
                 saved_count = bwe.details['nInserted']
             except Exception as e:
-                print(f"❌ Critical Error: {e}")
                 return 0, count + pre_duplicate_count
 
             if saved_count > 0:
@@ -334,7 +327,7 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ THE ULTIMATE HYBRID SEARCH (Fast Fetch + 100% Accurate Score)
+    # ⚡ THE ULTIMATE DUAL-LAYER SCORING SEARCH
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -395,7 +388,7 @@ class MediaDB:
                 elif size_range == "1gb-2gb": match_filters["file_size"] = {"$gte": GB_1, "$lt": GB_2}
                 elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
-            # 🚀 2. THE CUSTOM SCORING BRAHMASTRA
+            # 🚀 2. THE DUAL-LAYER SCORING BRAHMASTRA
             alias_map = {
                 "hindi": r"(hindi|hin)", "english": r"(english|eng)", "tamil": r"(tamil|tam)", "telugu": r"(telugu|tel)",
                 "malayalam": r"(malayalam|mal)", "kannada": r"(kannada|kan)", "dual": r"(dual|multi)", "multi": r"(dual|multi)"
@@ -403,12 +396,11 @@ class MediaDB:
 
             match_conditions = []
             
-            # 🔥 BONUS +50 POINTS: Agar movie exact wahi hai jo user ne type ki hai (starts with exact title)
+            # 🔥 BONUS +50 POINTS: Starts with exact title
             if title_words:
                 safe_first = re.escape(title_words[0])
                 match_conditions.append({
                     "$cond": [
-                        # \W_ skips initial symbols like [Movie] or - before checking the title
                         {"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"(?i)^[\W_]*{safe_first}\b"}},
                         50, 0
                     ]
@@ -417,22 +409,24 @@ class MediaDB:
             for w in words:
                 regex_pattern = alias_map.get(w, re.escape(w))
                 is_meta = re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords
-                weight = 1 if is_meta else 10 
+                
+                # Agar Filename me match hua toh Highest points
+                name_weight = 20 if is_meta else 30
+                # Agar sirf Caption me match hua toh Lowest points
+                text_weight = 2 if is_meta else 5 
                 
                 match_conditions.append({
-                    "$cond": [
-                        {"$or": [
-                            {"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"(?i)\b{regex_pattern}\b"}},
-                            {"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": rf"(?i)\b{regex_pattern}\b"}}
-                        ]}, weight, 0
-                    ]
+                    "$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"(?i)\b{regex_pattern}\b"}}, name_weight, 0]
+                })
+                match_conditions.append({
+                    "$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": rf"(?i)\b{regex_pattern}\b"}}, text_weight, 0]
                 })
 
             pipeline = [
                 {"$match": match_filters},
                 {"$project": {
                     "file_name": 1, "file_size": 1, "caption": 1, "search_text": 1, "quality": 1, "languages": 1, 
-                    "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1
+                    "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "score": {"$meta": "textScore"}
                 }},
                 {"$addFields": {"custom_score": {"$add": match_conditions}}}
             ]
@@ -443,7 +437,7 @@ class MediaDB:
             elif sort == "large": pipeline.append({"$sort": {"file_size": -1}}) 
             elif sort == "small": pipeline.append({"$sort": {"file_size": 1}}) 
             else:
-                pipeline.append({"$sort": {"custom_score": -1, "_id": -1}}) 
+                pipeline.append({"$sort": {"custom_score": -1, "score": {"$meta": "textScore"}, "_id": -1}}) 
 
             pipeline.append({"$limit": 100}) 
 
@@ -455,18 +449,17 @@ class MediaDB:
             print(f"⚠️ Native Search Failed: {e}. Switching to B-Tree Fallback.")
             
             # ==========================================================
-            # ✅ 4. FALLBACK LOGIC (Identical Scoring System Applied)
+            # ✅ 4. FALLBACK LOGIC
             # ==========================================================
             try:
                 fallback_match = {}
                 fallback_and_clauses = []
-                for w in words:
-                    safe_w = re.escape(w)
+                for tw in title_words: # Changed from words to title_words so meta keywords aren't strictly required
+                    safe_tw = re.escape(tw)
                     fallback_and_clauses.append({
                         "$or": [
-                            {"search_text": {"$regex": rf"(?i)\b{safe_w}\b"}},
-                            {"file_name": {"$regex": rf"(?i)\b{safe_w}\b"}},
-                            {"caption": {"$regex": rf"(?i)\b{safe_w}\b"}}
+                            {"search_text": {"$regex": rf"(?i)\b{safe_tw}\b"}},
+                            {"file_name": {"$regex": rf"(?i)\b{safe_tw}\b"}}
                         ]
                     })
                 if fallback_and_clauses: fallback_match["$and"] = fallback_and_clauses

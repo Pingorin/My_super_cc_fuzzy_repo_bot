@@ -26,6 +26,91 @@ LANG_MAP = {
     "Multi Audio": "Multi Audio|Multi-Audio"
 }
 
+# ==================================================================
+# 📚 DESI_DICT: Strict Normalizer (Hindi Numbers & Hinglish Typos)
+# ==================================================================
+DESI_DICT = {
+    # 🔢 CATEGORY 1: Hindi Numbers to Digits
+    'ek': '1', 'do': '2', 'teen': '3', 'char': '4', 'chaar': '4', 
+    'panch': '5', 'paanch': '5', 'che': '6', 'chhe': '6', 'chhah': '6', 
+    'saat': '7', 'ath': '8', 'aath': '8', 'nau': '9', 'no': '9', 
+    'das': '10', 'dus': '10', 'gyarah': '11', 'barah': '12',
+
+    # 🔤 CATEGORY 2: Massive Hinglish Spelling Variations
+    'pyaar': 'pyar', 'piyar': 'pyar', 
+    'kabhie': 'kabhi', 'kabhee': 'kabhi', 
+    'saath': 'sath', 'satth': 'sath',
+    'muje': 'mujhe', 'mujhey': 'mujhe', 
+    'kese': 'kaise', 'kesey': 'kaise',
+    'nhi': 'nahi', 'nai': 'nahi', 'nahin': 'nahi', 'ni': 'nahi', 'naa': 'na',
+    'zindegi': 'zindagi', 'jindagi': 'zindagi', 'jindgi': 'zindagi',
+    'tuje': 'tujhe', 'tujhey': 'tujhe',
+    'tumare': 'tumhare', 'tumharey': 'tumhare',
+    'humare': 'hamare', 'hamarey': 'hamare', 'humaare': 'hamare',
+    'kia': 'kya', 
+    'kyu': 'kyon', 'kyun': 'kyon', 'kyo': 'kyon', 'kyunki': 'kyonki',
+    'bohot': 'bahut', 'bahot': 'bahut', 'bht': 'bahut', 'bhut': 'bahut',
+    'acha': 'achha', 'accha': 'achha',
+    'mtlb': 'matlab', 'matlb': 'matlab',
+    'smjh': 'samajh', 'samaj': 'samajh', 'samj': 'samajh',
+    'pta': 'pata', 'ptaa': 'pata',
+    'kl': 'kal', 
+    'aj': 'aaj', 
+    'rat': 'raat', 
+    'jb': 'jab', 
+    'tb': 'tab', 
+    'kb': 'kab', 
+    'sb': 'sab', 
+    'srf': 'sirf', 'siraf': 'sirf',
+    'sare': 'saare', 
+    'uper': 'upar', 'ooper': 'upar', 
+    'niche': 'neeche', 'nichey': 'neeche',
+    'kro': 'karo', 'karu': 'karoon',
+    'krna': 'karna', 
+    'krne': 'karne', 
+    'krke': 'karke', 
+    'gya': 'gaya', 
+    'gyi': 'gayi', 
+    'gye': 'gaye', 
+    'hei': 'hai', 
+    'hn': 'haan', 'haa': 'haan', 'ha': 'haan', 
+    'kon': 'kaun', 
+    'koyi': 'koi', 
+    'bda': 'bada', 
+    'bdi': 'badi', 
+    'bde': 'bade', 
+    'chota': 'chhota', 
+    'dkho': 'dekho', 'dekhh': 'dekh', 
+    'bhaiya': 'bhai', 'bhy': 'bhai',
+    'yar': 'yaar', 
+    'dosth': 'dost', 
+    'vakt': 'wakt', 'waqt': 'wakt', 
+    'khatam': 'khatm', 
+    'kushi': 'khushi', 'khusi': 'khushi', 
+    'shaadi': 'shadi', 'shaddi': 'shadi',
+    'kahaani': 'kahani', 'kahanii': 'kahani', 
+    'kuchh': 'kuch', 'kch': 'kuch',
+    'ishk': 'ishq', 
+    'mujse': 'mujhse', 
+    'kaha': 'kahan', 'kahaa': 'kahan',
+    'yaha': 'yahan', 'yahaa': 'yahan',
+    'waha': 'wahan', 'wahaa': 'wahan'
+}
+
+# ⚡ OPTIMIZATION: Compile Regex Engine ONLY ONCE globally
+_sorted_keys = sorted(DESI_DICT.keys(), key=len, reverse=True)
+_pattern_str = r'\b(' + '|'.join(re.escape(k) for k in _sorted_keys) + r')\b'
+DESI_REGEX_ENGINE = re.compile(_pattern_str, flags=re.IGNORECASE)
+
+def normalize_desi_query(raw_query: str) -> str:
+    """Takes a raw user query and replaces spelling variations and numbers using DESI_DICT."""
+    if not raw_query or not raw_query.strip():
+        return ""
+    clean_query = raw_query.strip().lower()
+    return DESI_REGEX_ENGINE.sub(lambda match: DESI_DICT[match.group(1)], clean_query)
+# ==================================================================
+
+
 class MediaDB:
     def __init__(self, uri, database_name):
         self._client = AsyncIOMotorClient(uri)
@@ -275,8 +360,10 @@ class MediaDB:
         if not query or not query.strip(): return []
 
         try:
-            # ✅ TYPO FIXER
-            raw_query = query.strip().lower()
+            # ✅ 1. APPLY DESI DICTIONARY (Hinglish Typos + Numbers)
+            raw_query = normalize_desi_query(query)
+            
+            # ✅ 2. TYPO FIXER
             clean_query = re.sub(r"(?i)\b(englsh|engls|engish|egnlish)\b", "english", raw_query)
             clean_query = re.sub(r"(?i)\b(hndi|hind|hni|hin)\b", "hindi", clean_query)
             clean_query = re.sub(r"(?i)\b(tmal|taml|tmil|tam)\b", "tamil", clean_query)
@@ -315,7 +402,6 @@ class MediaDB:
             if not title_words: title_words = words 
 
             # 🚀 1. FAST FETCHING ($match)
-            # Yaha koi strict filter nahi hai, toh "The Batman" search karne par "Batman 1989" bhi aaram se pass hoga!
             match_filters = {"$text": {"$search": clean_query_for_text}}
 
             # Button Filters

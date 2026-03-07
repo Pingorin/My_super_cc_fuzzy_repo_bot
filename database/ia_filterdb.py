@@ -465,7 +465,7 @@ class MediaDB:
             }
 
             # "At least one Title word" wala strict filter taaki random 2023 movie na aaye
-            title_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}}] for tw in title_words]
+            title_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}} for tw in title_words]
             if title_or_clauses:
                 match_filters["$and"] = match_filters.get("$and", []) + [{"$or": title_or_clauses}]
 
@@ -553,7 +553,7 @@ class MediaDB:
             # ✅ 5. B-TREE FALLBACK LOGIC (Agar stopword "The" use kiya ho)
             # ==========================================================
             try:
-                fallback_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}}] for tw in title_words]
+                fallback_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}} for tw in title_words]
                 fallback_match = {"$or": fallback_or_clauses} if fallback_or_clauses else {}
                 
                 # B-Tree fallback mein 'The' ya dusre words match karne ke rules

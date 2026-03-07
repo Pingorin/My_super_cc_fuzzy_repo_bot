@@ -37,14 +37,11 @@ class MediaDB:
         self.search_cache = self.db.search_cache 
         self.temp_searches = self.db.temp_searches
 
+    # ==================================================================
+    # ⚡ SAFE INDEXING SETUP (No Drop on Restart)
+    # ==================================================================
     async def ensure_indexes(self):
         try:
-            try:
-                await self.search_col.drop_indexes()
-                print("♻️ Old Indexes Dropped Successfully.")
-            except OperationFailure:
-                pass 
-
             await self.search_col.create_index("file_name")
             await self.search_col.create_index("caption")
             await self.search_col.create_index("search_text") 
@@ -53,32 +50,44 @@ class MediaDB:
             await self.search_col.create_index("year") 
             await self.search_col.create_index("link_id")
             
-            # 🚀 FULL-TEXT INDEX WITH PROPER WEIGHTS
-            await self.search_col.create_index(
-                [
-                    ("file_name", TEXT),
-                    ("search_text", TEXT),
-                    ("caption", TEXT),
-                    ("languages", TEXT),
-                    ("quality", TEXT),
-                    ("year", TEXT)
-                ],
-                weights={
-                    "file_name": 100,     
-                    "search_text": 80,    
-                    "languages": 50,      
-                    "quality": 30,        
-                    "year": 10,           
-                    "caption": 5          
-                },
-                name="weighted_movie_search"
-            )
+            # 🚀 FULL-TEXT INDEX (Safe Creation)
+            try:
+                await self.search_col.create_index(
+                    [
+                        ("file_name", TEXT),
+                        ("search_text", TEXT),
+                        ("caption", TEXT),
+                        ("languages", TEXT),
+                        ("quality", TEXT),
+                        ("year", TEXT)
+                    ],
+                    weights={
+                        "file_name": 100,     
+                        "search_text": 80,    
+                        "languages": 50,      
+                        "quality": 30,        
+                        "year": 10,           
+                        "caption": 5          
+                    },
+                    name="weighted_movie_search"
+                )
+            except OperationFailure:
+                # Agar purana index alag weight ka hai toh sirf usko recreate karenge
+                try:
+                    await self.search_col.drop_index("weighted_movie_search")
+                    await self.search_col.create_index(
+                        [("file_name", TEXT), ("search_text", TEXT), ("caption", TEXT), ("languages", TEXT), ("quality", TEXT), ("year", TEXT)],
+                        weights={"file_name": 100, "search_text": 80, "languages": 50, "quality": 30, "year": 10, "caption": 5},
+                        name="weighted_movie_search"
+                    )
+                except:
+                    pass
 
             await self.data_col.create_index("file_unique_id", unique=True)
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
             await self.temp_searches.create_index("created_at", expireAfterSeconds=172800)
             
-            print("✅ Database Indexes Created Successfully!")
+            print("✅ Database Indexes Checked & Ready!")
         except Exception as e:
             print(f"❌ Error Creating Indexes: {e}")
 
@@ -277,13 +286,12 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ HYBRID SEARCH: Stopword Remover & 100-Point Language Boost (100% FIXED)
+    # ⚡ HYBRID SEARCH: Stopword Remover + 100% Crash-Proof Python Fallback
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
 
         try:
-            # ✅ TYPO FIXER
             query = re.sub(r"(?i)\b(englsh|engls|engish|egnlish)\b", "english", query)
             query = re.sub(r"(?i)\b(hndi|hind|hni|hin)\b", "hindi", query)
             query = re.sub(r"(?i)\b(tmal|taml|tmil|tam)\b", "tamil", query)
@@ -294,33 +302,21 @@ class MediaDB:
             clean_query = query.strip().lower()
             raw_words = clean_query.split()
             
-            # 🔥 STOPWORD REMOVER
             stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to"}
             words = [w for w in raw_words if w not in stop_words]
             if not words: words = raw_words 
             
-            meta_keywords = {
-                "hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", 
-                "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4",
-                "movie", "full", "hd", "print", "download", "series"
-            }
-
+            meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series"}
             title_words = [w for w in words if not (re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords)]
             if not title_words: title_words = words 
 
-            # 🚀 1. FAST FETCHING (MONGODB NATIVE SYNTAX)
-            match_filters = {"$text": {"$search": " ".join(words)}}
+            alias_map = {"hindi": r"(hindi|hin)", "english": r"(english|eng)", "tamil": r"(tamil|tam)", "telugu": r"(telugu|tel)", "malayalam": r"(malayalam|mal)", "kannada": r"(kannada|kan)", "dual": r"(dual|multi)", "multi": r"(dual|multi)"}
 
-            title_or_clauses = []
-            for tw in title_words:
-                safe_tw = re.escape(tw)
-                # ✅ Fixed to proper MongoDB regex options
-                title_or_clauses.append({"search_text": {"$regex": rf"\b{safe_tw}\b", "$options": "i"}})
-                title_or_clauses.append({"file_name": {"$regex": rf"\b{safe_tw}\b", "$options": "i"}})
-                
+            # 🚀 1. FAST FETCHING
+            match_filters = {"$text": {"$search": " ".join(words)}}
+            title_or_clauses = [{"search_text": {"$regex": rf"\b{re.escape(tw)}\b", "$options": "i"}} for tw in title_words] + [{"file_name": {"$regex": rf"\b{re.escape(tw)}\b", "$options": "i"}} for tw in title_words]
             if title_or_clauses: match_filters["$and"] = match_filters.get("$and", []) + [{"$or": title_or_clauses}]
 
-            # Button Filters
             if file_type and file_type != "none": match_filters["file_type"] = "video" if file_type.lower() == "video" else "document"
             if lang and lang != "none":
                 pattern = LANG_MAP.get(lang, lang)
@@ -336,25 +332,16 @@ class MediaDB:
                 elif size_range == "1gb-2gb": match_filters["file_size"] = {"$gte": GB_1, "$lt": GB_2}
                 elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
-            # 🚀 2. THE LANGUAGE KILL-SWITCH SCORING
-            alias_map = {"hindi": r"(hindi|hin)", "english": r"(english|eng)", "tamil": r"(tamil|tam)", "telugu": r"(telugu|tel)", "malayalam": r"(malayalam|mal)", "kannada": r"(kannada|kan)", "dual": r"(dual|multi)", "multi": r"(dual|multi)"}
             match_conditions = []
-            
             if title_words:
                 safe_first = re.escape(title_words[0])
-                # ✅ Fixed to use "options": "i" instead of (?i) to prevent Database crash
                 match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"^[\W_]*{safe_first}\b", "options": "i"}}, 50, 0]})
 
             for w in words:
                 regex_pattern = alias_map.get(w, re.escape(w))
                 is_lang = w in ["hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "english", "dual", "multi", "punjabi", "marathi"]
                 is_meta = re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords
-                
-                if is_lang: name_weight, text_weight = 100, 50
-                elif is_meta: name_weight, text_weight = 20, 5
-                else: name_weight, text_weight = 40, 10
-                
-                # ✅ Fixed syntax here as well
+                name_weight, text_weight = (100, 50) if is_lang else ((20, 5) if is_meta else (40, 10))
                 match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{regex_pattern}\b", "options": "i"}}, name_weight, 0]})
                 match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": rf"\b{regex_pattern}\b", "options": "i"}}, text_weight, 0]})
 
@@ -368,35 +355,64 @@ class MediaDB:
             elif sort == "old": pipeline.append({"$sort": {"_id": 1}}) 
             elif sort == "large": pipeline.append({"$sort": {"file_size": -1}}) 
             elif sort == "small": pipeline.append({"$sort": {"file_size": 1}}) 
-            else: pipeline.append({"$sort": {"custom_score": -1, "_id": -1}}) 
+            else: pipeline.append({"$sort": {"custom_score": -1, "score": {"$meta": "textScore"}, "_id": -1}}) 
 
             pipeline.append({"$limit": 100}) 
             cursor = self.search_col.aggregate(pipeline)
             return await cursor.to_list(length=100)
 
         except Exception as e:
-            print(f"⚠️ Native Search Failed: {e}. Switching to Fallback.")
-            # ✅ FALLBACK LOGIC
+            print(f"⚠️ Native Search Failed: {e}. Switching to Python Fallback.")
+            # ==========================================================
+            # ✅ THE BULLETPROOF PYTHON FALLBACK ENGINE (Never crashes)
+            # ==========================================================
             try:
-                fallback_match, fallback_and_clauses = {}, []
-                for tw in title_words:
-                    safe_tw = re.escape(tw)
-                    fallback_and_clauses.append({"$or": [{"search_text": {"$regex": rf"\b{safe_tw}\b", "$options": "i"}}, {"file_name": {"$regex": rf"\b{safe_tw}\b", "$options": "i"}}]})
-                if fallback_and_clauses: fallback_match["$and"] = fallback_and_clauses
+                fallback_match = {}
+                fallback_or_clauses = [{"search_text": {"$regex": rf"\b{re.escape(tw)}\b", "$options": "i"}} for tw in title_words] + [{"file_name": {"$regex": rf"\b{re.escape(tw)}\b", "$options": "i"}} for tw in title_words]
+                if fallback_or_clauses: fallback_match["$and"] = [{"$or": fallback_or_clauses}]
                 
-                fallback_pipeline = [
-                    {"$match": fallback_match},
-                    {"$addFields": {"custom_score": {"$add": match_conditions}}}
-                ]
+                if file_type and file_type != "none": fallback_match["file_type"] = "video" if file_type.lower() == "video" else "document"
+                if lang and lang != "none":
+                    pattern = LANG_MAP.get(lang, lang)
+                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": pattern, "$options": "i"}}, {"caption": {"$regex": pattern, "$options": "i"}}]}]
+                if quality and quality != "none":
+                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"quality": quality}, {"file_name": {"$regex": quality, "$options": "i"}}, {"caption": {"$regex": quality, "$options": "i"}}]}]
+                if year and year != "none":
+                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
+
+                # Sirf Database se plain result mangwate hain (Bina kisi aggregation maths ke)
+                cursor = self.search_col.find(fallback_match).limit(150)
+                files = await cursor.to_list(length=150)
+
+                # Pure Python Scoring (Ekdum Safe)
+                for f in files:
+                    score = 0
+                    fname = str(f.get("file_name", "")).lower()
+                    stext = str(f.get("search_text", "")).lower()
+                    
+                    if title_words and re.search(rf"^[\W_]*{re.escape(title_words[0])}\b", fname):
+                        score += 50
+                        
+                    for w in words:
+                        pattern = alias_map.get(w, re.escape(w))
+                        is_lang = w in ["hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "english", "dual", "multi", "punjabi", "marathi"]
+                        is_meta = re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords
+                        n_weight = 100 if is_lang else (20 if is_meta else 40)
+                        t_weight = 50 if is_lang else (5 if is_meta else 10)
+
+                        if re.search(rf"\b{pattern}\b", fname): score += n_weight
+                        elif re.search(rf"\b{pattern}\b", stext): score += t_weight
+                    f["custom_score"] = score
+
+                if sort == "new": files.sort(key=lambda x: x.get("_id", 0), reverse=True)
+                elif sort == "old": files.sort(key=lambda x: x.get("_id", 0))
+                elif sort == "large": files.sort(key=lambda x: x.get("file_size", 0), reverse=True)
+                elif sort == "small": files.sort(key=lambda x: x.get("file_size", 0))
+                else: files.sort(key=lambda x: (x.get("custom_score", 0), x.get("_id", 0)), reverse=True)
                 
-                if sort == "new": fallback_pipeline.append({"$sort": {"_id": -1}})
-                elif sort == "old": fallback_pipeline.append({"$sort": {"_id": 1}})
-                else: fallback_pipeline.append({"$sort": {"custom_score": -1, "_id": -1}})
-                fallback_pipeline.append({"$limit": 100})
-                cursor = self.search_col.aggregate(fallback_pipeline)
-                return await cursor.to_list(length=100)
+                return files[:100]
             except Exception as inner_e:
-                print(f"❌ Fallback also failed: {inner_e}")
+                print(f"❌ Python Fallback also failed: {inner_e}")
                 return []
 
     async def total_files_count(self): return await self.data_col.count_documents({})

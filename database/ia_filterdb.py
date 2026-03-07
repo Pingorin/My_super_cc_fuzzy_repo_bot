@@ -2,6 +2,7 @@ import logging
 import re
 import datetime
 import uuid
+import traceback
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError, OperationFailure
 from pymongo import ReturnDocument, ASCENDING, TEXT
@@ -38,7 +39,7 @@ class MediaDB:
         self.temp_searches = self.db.temp_searches
 
     # ==================================================================
-    # ⚡ SAFE INDEXING SETUP (No Drop on Restart)
+    # ⚡ SAFE INDEXING SETUP (Restart hone par index delete nahi hoga)
     # ==================================================================
     async def ensure_indexes(self):
         try:
@@ -72,7 +73,7 @@ class MediaDB:
                     name="weighted_movie_search"
                 )
             except OperationFailure:
-                # Agar purana index alag weight ka hai toh sirf usko recreate karenge
+                # Agar pehle se alag weight ka index hai, toh hi usko delete karke naya banayega
                 try:
                     await self.search_col.drop_index("weighted_movie_search")
                     await self.search_col.create_index(
@@ -80,16 +81,16 @@ class MediaDB:
                         weights={"file_name": 100, "search_text": 80, "languages": 50, "quality": 30, "year": 10, "caption": 5},
                         name="weighted_movie_search"
                     )
-                except:
-                    pass
+                except Exception as ex:
+                    print(f"⚠️ Could not recreate Text Index: {ex}")
 
             await self.data_col.create_index("file_unique_id", unique=True)
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
             await self.temp_searches.create_index("created_at", expireAfterSeconds=172800)
             
-            print("✅ Database Indexes Checked & Ready!")
+            print("✅ Database Indexes Checked & Ready! (Instant Start)")
         except Exception as e:
-            print(f"❌ Error Creating Indexes: {e}")
+            print(f"❌ Error Checking Indexes: {e}")
 
     async def get_next_sequence_value(self, sequence_name, increment=1):
         try:
@@ -286,12 +287,13 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ HYBRID SEARCH: Stopword Remover + 100% Crash-Proof Python Fallback
+    # ⚡ HYBRID SEARCH: Stopword Remover & 100% Crash-Proof Python Fallback
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
 
         try:
+            # ✅ TYPO FIXER
             query = re.sub(r"(?i)\b(englsh|engls|engish|egnlish)\b", "english", query)
             query = re.sub(r"(?i)\b(hndi|hind|hni|hin)\b", "hindi", query)
             query = re.sub(r"(?i)\b(tmal|taml|tmil|tam)\b", "tamil", query)
@@ -302,11 +304,17 @@ class MediaDB:
             clean_query = query.strip().lower()
             raw_words = clean_query.split()
             
+            # 🔥 STOPWORD REMOVER
             stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to"}
             words = [w for w in raw_words if w not in stop_words]
             if not words: words = raw_words 
             
-            meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series"}
+            meta_keywords = {
+                "hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", 
+                "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4",
+                "movie", "full", "hd", "print", "download", "series"
+            }
+
             title_words = [w for w in words if not (re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords)]
             if not title_words: title_words = words 
 
@@ -314,9 +322,16 @@ class MediaDB:
 
             # 🚀 1. FAST FETCHING
             match_filters = {"$text": {"$search": " ".join(words)}}
-            title_or_clauses = [{"search_text": {"$regex": rf"\b{re.escape(tw)}\b", "$options": "i"}} for tw in title_words] + [{"file_name": {"$regex": rf"\b{re.escape(tw)}\b", "$options": "i"}} for tw in title_words]
+
+            title_or_clauses = []
+            for tw in title_words:
+                safe_tw = re.escape(tw)
+                title_or_clauses.append({"search_text": {"$regex": rf"\b{safe_tw}\b", "$options": "i"}})
+                title_or_clauses.append({"file_name": {"$regex": rf"\b{safe_tw}\b", "$options": "i"}})
+                
             if title_or_clauses: match_filters["$and"] = match_filters.get("$and", []) + [{"$or": title_or_clauses}]
 
+            # Button Filters
             if file_type and file_type != "none": match_filters["file_type"] = "video" if file_type.lower() == "video" else "document"
             if lang and lang != "none":
                 pattern = LANG_MAP.get(lang, lang)
@@ -333,6 +348,7 @@ class MediaDB:
                 elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
             match_conditions = []
+            
             if title_words:
                 safe_first = re.escape(title_words[0])
                 match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"^[\W_]*{safe_first}\b", "options": "i"}}, 50, 0]})
@@ -341,7 +357,9 @@ class MediaDB:
                 regex_pattern = alias_map.get(w, re.escape(w))
                 is_lang = w in ["hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "english", "dual", "multi", "punjabi", "marathi"]
                 is_meta = re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords
+                
                 name_weight, text_weight = (100, 50) if is_lang else ((20, 5) if is_meta else (40, 10))
+                
                 match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{regex_pattern}\b", "options": "i"}}, name_weight, 0]})
                 match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": rf"\b{regex_pattern}\b", "options": "i"}}, text_weight, 0]})
 
@@ -364,11 +382,11 @@ class MediaDB:
         except Exception as e:
             print(f"⚠️ Native Search Failed: {e}. Switching to Python Fallback.")
             # ==========================================================
-            # ✅ THE BULLETPROOF PYTHON FALLBACK ENGINE (Never crashes)
+            # ✅ 100% CRASH-PROOF PYTHON FALLBACK ENGINE
             # ==========================================================
             try:
                 fallback_match = {}
-                fallback_or_clauses = [{"search_text": {"$regex": rf"\b{re.escape(tw)}\b", "$options": "i"}} for tw in title_words] + [{"file_name": {"$regex": rf"\b{re.escape(tw)}\b", "$options": "i"}} for tw in title_words]
+                fallback_or_clauses = [{"search_text": {"$regex": rf"{re.escape(tw)}", "$options": "i"}} for tw in title_words] + [{"file_name": {"$regex": rf"{re.escape(tw)}", "$options": "i"}} for tw in title_words]
                 if fallback_or_clauses: fallback_match["$and"] = [{"$or": fallback_or_clauses}]
                 
                 if file_type and file_type != "none": fallback_match["file_type"] = "video" if file_type.lower() == "video" else "document"
@@ -380,11 +398,11 @@ class MediaDB:
                 if year and year != "none":
                     fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
 
-                # Sirf Database se plain result mangwate hain (Bina kisi aggregation maths ke)
+                # Fetching max 150 docs to score in Python safely
                 cursor = self.search_col.find(fallback_match).limit(150)
                 files = await cursor.to_list(length=150)
 
-                # Pure Python Scoring (Ekdum Safe)
+                # Safe Python Scoring
                 for f in files:
                     score = 0
                     fname = str(f.get("file_name", "")).lower()
@@ -404,18 +422,21 @@ class MediaDB:
                         elif re.search(rf"\b{pattern}\b", stext): score += t_weight
                     f["custom_score"] = score
 
-                if sort == "new": files.sort(key=lambda x: x.get("_id", 0), reverse=True)
-                elif sort == "old": files.sort(key=lambda x: x.get("_id", 0))
+                # Safe Sort using link_id (integers only, no ObjectId comparison crash!)
+                if sort == "new": files.sort(key=lambda x: x.get("link_id", 0), reverse=True)
+                elif sort == "old": files.sort(key=lambda x: x.get("link_id", 0))
                 elif sort == "large": files.sort(key=lambda x: x.get("file_size", 0), reverse=True)
                 elif sort == "small": files.sort(key=lambda x: x.get("file_size", 0))
-                else: files.sort(key=lambda x: (x.get("custom_score", 0), x.get("_id", 0)), reverse=True)
+                else: files.sort(key=lambda x: (x.get("custom_score", 0), x.get("link_id", 0)), reverse=True)
                 
                 return files[:100]
             except Exception as inner_e:
-                print(f"❌ Python Fallback also failed: {inner_e}")
+                print(f"❌ Python Fallback CRITICAL FAILURE: {inner_e}")
+                traceback.print_exc()
                 return []
 
     async def total_files_count(self): return await self.data_col.count_documents({})
+    
     async def get_db_size(self):
         try:
             stats = await self.db.command("dbstats")
@@ -424,10 +445,19 @@ class MediaDB:
 
     async def save_search_results(self, query, files, chat_id):
         unique_id = str(uuid.uuid4())[:8]
-        simplified_files = [{"file_name": f['file_name'], "file_size": f['file_size'], "link_id": f['link_id'], "file_chat_id": f.get('chat_id'), "file_type": f.get('file_type', 'document')} for f in files]
+        # ✅ FIX: Using .get() ensures Bot NEVER crashes due to missing keys
+        simplified_files = [{
+            "file_name": f.get('file_name', 'Unknown File'), 
+            "file_size": f.get('file_size', 0), 
+            "link_id": f.get('link_id', 0), 
+            "file_chat_id": f.get('chat_id', 0), 
+            "file_type": f.get('file_type', 'document')
+        } for f in files]
+        
         await self.search_cache.insert_one({"_id": unique_id, "query": query, "chat_id": chat_id, "files": simplified_files, "created_at": datetime.datetime.utcnow()})
         return unique_id
 
-    async def get_cached_results(self, unique_id): return await self.search_cache.find_one({"_id": unique_id})
+    async def get_cached_results(self, unique_id): 
+        return await self.search_cache.find_one({"_id": unique_id})
 
 Media = MediaDB(DATABASE_URI, DATABASE_NAME)

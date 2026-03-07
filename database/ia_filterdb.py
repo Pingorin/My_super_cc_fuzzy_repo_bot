@@ -383,7 +383,7 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ PURE SCORING SEARCH: "Jitne words match, utni aage Rank!"
+    # ⚡ PURE VIP SCORING SEARCH: "Title gets 10 Points, Meta gets 1 Point"
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip():
@@ -409,12 +409,33 @@ class MediaDB:
             if not words: return []
 
             # ==========================================================
-            # 🚀 1. SUPER FAST FETCHING ($text) - NO STRICT WORDS
+            # 🚀 1. SUPER SMART TITLE EXTRACTOR (Separating Title from Meta)
             # ==========================================================
-            # Ab koi bhi word strict nahi hai. MongoDB $text apne hisaab se best matching files uthayega
+            meta_keywords = {
+                "hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", 
+                "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4",
+                "movie", "full", "hd", "print", "download", "series" # Faltu words added here
+            }
+
+            title_words = []
+            for word in words:
+                if not (re.match(r"^(19|20)\d{2}$", word) or word in meta_keywords):
+                    title_words.append(word)
+
+            if not title_words:
+                title_words = words # Agar kisi ne sirf "2023 hindi" likha hai toh ye usko title maan lega
+
+            # ==========================================================
+            # 🚀 2. "AT LEAST ONE" TITLE WORD FILTER
+            # ==========================================================
+            # $text ke bharose nahi rahenge, strict filter lagayenge ki Title ka koi ek word hona hi chahiye
             match_filters = {
                 "$text": {"$search": clean_query}
             }
+
+            title_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}}] for tw in title_words]
+            if title_or_clauses:
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": title_or_clauses}]
 
             # ✅ FAST BUTTON FILTERS
             if file_type and file_type != "none":
@@ -457,11 +478,10 @@ class MediaDB:
                 elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
             # ==========================================================
-            # 🚀 2. THE MAGIC POINTS SYSTEM (CUSTOM SCORE)
+            # 🚀 3. THE VIP POINTS SYSTEM (Title=10, Meta=1)
             # ==========================================================
             pipeline = [
                 {"$match": match_filters},
-                # Expose the textScore for ranking
                 {"$project": {
                     "file_name": 1, "file_size": 1, "caption": 1, 
                     "search_text": 1, "quality": 1, "languages": 1, 
@@ -485,9 +505,13 @@ class MediaDB:
             match_conditions = []
             for w in words:
                 regex_pattern = alias_map.get(w, re.escape(w))
-                # Har matched word ke liye +1 Point
+                
+                # 🔥 VIP WEIGHT SYSTEM 🔥
+                is_meta = re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords
+                weight = 1 if is_meta else 10 # Title word ko 10 point, tag ko 1 point
+                
                 match_conditions.append({
-                    "$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": regex_pattern, "options": "i"}}, 1, 0]
+                    "$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": regex_pattern, "options": "i"}}, weight, 0]
                 })
             
             if match_conditions:
@@ -498,7 +522,7 @@ class MediaDB:
                 })
 
             # ==========================================================
-            # 🚀 3. THE ULTIMATE SORTING (Jitne Words Match = Rank Top)
+            # 🚀 4. THE ULTIMATE SORTING
             # ==========================================================
             if sort == "new":
                 pipeline.append({"$sort": {"_id": -1}}) 
@@ -509,9 +533,9 @@ class MediaDB:
             elif sort == "small":
                 pipeline.append({"$sort": {"file_size": 1}}) 
             else:
-                # 🥇 1st Priority: Sabse zyada words match (Points system) 
-                # 🥈 2nd Priority: MongoDB Text Score (Tie breaker)
-                # 🥉 3rd Priority: Sabse Nayi File (Tie breaker 2)
+                # 🥇 1st Priority: Custom VIP Score (Title Match beats Meta Match)
+                # 🥈 2nd Priority: MongoDB Text Score
+                # 🥉 3rd Priority: Newest
                 pipeline.append({"$sort": {"custom_score": -1, "score": {"$meta": "textScore"}, "_id": -1}}) 
 
             pipeline.append({"$limit": 100}) 
@@ -524,11 +548,10 @@ class MediaDB:
             print(f"⚠️ Index Search Failed: {e}. Switching to Fallback.")
             
             # ==========================================================
-            # ✅ 4. FALLBACK LOGIC WITH POINTS SYSTEM (Agar stopword issue aaye)
+            # ✅ 5. FALLBACK LOGIC WITH VIP POINTS
             # ==========================================================
             try:
-                # Fallback me ab pehla word strict nahi hai, balki 'kam se kam koi ek word' match hona chahiye
-                fallback_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(w)}\b"}} for w in words]
+                fallback_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}}] for tw in title_words]
                 fallback_match = {"$or": fallback_or_clauses} if fallback_or_clauses else {}
                 
                 if file_type and file_type != "none": 
@@ -538,7 +561,6 @@ class MediaDB:
                     {"$match": fallback_match}
                 ]
 
-                # Fallback mein bhi Points System Apply Hoga!
                 if match_conditions:
                     fallback_pipeline.append({
                         "$addFields": {
@@ -564,7 +586,6 @@ class MediaDB:
     async def get_db_size(self):
         try:
             stats = await self.db.command("dbstats")
-            # Storage + Index Size = Total used in Atlas Free Tier
             total_bytes = stats.get('storageSize', 0) + stats.get('totalIndexSize', 0)
             return total_bytes
         except Exception as e:

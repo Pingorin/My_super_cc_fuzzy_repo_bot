@@ -433,7 +433,7 @@ class MediaDB:
                 "$text": {"$search": clean_query}
             }
 
-            title_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}}] for tw in title_words]
+            title_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}} for tw in title_words]
             if title_or_clauses:
                 match_filters["$and"] = match_filters.get("$and", []) + [{"$or": title_or_clauses}]
 
@@ -551,7 +551,7 @@ class MediaDB:
             # ✅ 5. FALLBACK LOGIC WITH VIP POINTS
             # ==========================================================
             try:
-                fallback_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}}] for tw in title_words]
+                fallback_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}} for tw in title_words]
                 fallback_match = {"$or": fallback_or_clauses} if fallback_or_clauses else {}
                 
                 if file_type and file_type != "none": 

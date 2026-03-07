@@ -269,7 +269,7 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ THE GOD-MODE SCORING SEARCH (Handles "The Batman" & "Batman" perfectly)
+    # ⚡ MASTERMIND SCORING SEARCH (Beats/Beat, The/Your, Exact Matches Fixed)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -287,13 +287,23 @@ class MediaDB:
             raw_words = clean_query.split()
             if not raw_words: return []
 
-            # Stopwords sirf Fetching ke liye hatayenge, Taki "The" hone par fail na ho
+            # 🚀 Smart Stopwords (Only for MongoDB fetch)
             stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to"}
-            fetch_words = [w for w in raw_words if w not in stop_words]
-            if not fetch_words: 
-                fetch_words = raw_words 
+            text_search_words = [w for w in raw_words if w not in stop_words]
             
-            clean_query_for_text = " ".join(fetch_words)
+            # 🔥 PLURAL/SINGULAR INJECTOR FOR MONGODB ("beat" -> "beat beats")
+            expanded_text_words = []
+            for w in text_search_words:
+                expanded_text_words.append(w)
+                if w.endswith('s') and len(w) > 3 and not w.endswith('ss'):
+                    expanded_text_words.append(w[:-1])
+                elif len(w) > 2 and not w.endswith('s'):
+                    expanded_text_words.append(w + 's')
+                    
+            clean_query_for_text = " ".join(expanded_text_words) if expanded_text_words else " ".join(raw_words)
+
+            # ALL Scoring uses the pure raw words! So "The Batman" keeps its "The"
+            words = raw_words 
 
             meta_keywords = {
                 "hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", 
@@ -301,20 +311,12 @@ class MediaDB:
                 "movie", "full", "hd", "print", "download", "series"
             }
 
-            title_words = [w for w in fetch_words if not (re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords)]
-            if not title_words: title_words = fetch_words 
+            title_words = [w for w in words if not (re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords)]
+            if not title_words: title_words = words 
 
             # 🚀 1. FAST FETCHING ($match)
+            # Yaha koi strict filter nahi hai, toh "The Batman" search karne par "Batman 1989" bhi aaram se pass hoga!
             match_filters = {"$text": {"$search": clean_query_for_text}}
-
-            title_or_clauses = []
-            for tw in title_words:
-                safe_tw = re.escape(tw)
-                title_or_clauses.append({"search_text": {"$regex": rf"(?i)\b{safe_tw}\b"}})
-                title_or_clauses.append({"file_name": {"$regex": rf"(?i)\b{safe_tw}\b"}})
-                
-            if title_or_clauses:
-                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": title_or_clauses}]
 
             # Button Filters
             if file_type and file_type != "none": match_filters["file_type"] = "video" if file_type.lower() == "video" else "document"
@@ -332,7 +334,7 @@ class MediaDB:
                 elif size_range == "1gb-2gb": match_filters["file_size"] = {"$gte": GB_1, "$lt": GB_2}
                 elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
-            # 🚀 2. GOD MODE SCORING (Safe Format)
+            # 🚀 2. THE MASTERMIND SCORING
             match_conditions = [0] 
             alias_map = {
                 "hindi": r"(hindi|hin)", "english": r"(english|eng)", "tamil": r"(tamil|tam)", "telugu": r"(telugu|tel)",
@@ -343,39 +345,44 @@ class MediaDB:
             safe_title_phrase = re.escape(" ".join(title_words))
             safe_first_word = re.escape(title_words[0]) if title_words else ""
 
-            # 🏆 1. EXACT PHRASE MATCH (+5000 Points): Jaise user ne likha hai "The Batman", file me "The Batman" hai toh sabse upar!
+            # 🏆 EXACT PHRASE MATCH (+5000 Points): "The Batman" hai toh seedha Rank 1
             match_conditions.append({
-                "$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"(?i)\b{safe_raw_query}\b"}}, 5000, 0]
+                "$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{safe_raw_query}\b", "options": "i"}}, 5000, 0]
             })
             
-            # 🏆 2. EXACT TITLE PHRASE MATCH (+1000 Points): Agar user ne "Leo Hindi 2023" search kiya, toh "Leo" match hone par bonus.
+            # 🏆 EXACT TITLE PHRASE (+1000 Points): "Leo Hindi" ke time "Leo" ko rank karega
             if safe_title_phrase and safe_title_phrase != safe_raw_query:
                 match_conditions.append({
-                    "$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"(?i)\b{safe_title_phrase}\b"}}, 1000, 0]
+                    "$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{safe_title_phrase}\b", "options": "i"}}, 1000, 0]
                 })
 
-            # 🏆 3. STARTS WITH BONUS (+500 Points): Jaise user ne sirf "Batman" likha, toh jo file "Batman" se shuru hoti hai wo upar aayegi.
+            # 🏆 STARTS-WITH FIRST WORD (+500 Points)
             if safe_first_word:
                 match_conditions.append({
-                    "$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"(?i)^[\W_]*{safe_first_word}\b"}}, 500, 0]
+                    "$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"^[\W_]*{safe_first_word}\b", "options": "i"}}, 500, 0]
                 })
 
-            # 🏆 4. INDIVIDUAL WORD POINTS
-            for w in raw_words: 
-                regex_pattern = alias_map.get(w, re.escape(w))
+            # 🏆 INDIVIDUAL WORD POINTS & PLURALS
+            for w in words: 
                 is_lang = w in ["hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "english", "dual", "multi", "punjabi", "marathi"]
                 is_meta = re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords
+                
+                if w in alias_map:
+                    safe_w_regex = rf"\b{alias_map[w]}\b"
+                else:
+                    # 'beats' aur 'beat' dono ek dusre ko match karenge!
+                    base = w[:-1] if (w.endswith('s') and len(w) > 3 and not w.endswith('ss')) else w
+                    safe_w_regex = rf"\b{re.escape(base)}s?\b"
                 
                 # 🔥 LANGUAGE KILL-SWITCH (Hindi in Name = +300 pts, Meta = +20 pts)
                 name_weight = 300 if is_lang else (20 if is_meta else 100)
                 text_weight = 50 if is_lang else (5 if is_meta else 20)
                 
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"(?i)\b{regex_pattern}\b"}}, name_weight, 0]})
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": rf"(?i)\b{regex_pattern}\b"}}, text_weight, 0]})
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": safe_w_regex, "options": "i"}}, name_weight, 0]})
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": safe_w_regex, "options": "i"}}, text_weight, 0]})
 
             pipeline = [
                 {"$match": match_filters},
-                # LENGTH SORTER: Tie-breaker - chhota naam jeetega
                 {"$project": {
                     "file_name": 1, "file_size": 1, "caption": 1, "search_text": 1, "quality": 1, "languages": 1, 
                     "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "score": {"$meta": "textScore"},
@@ -384,7 +391,7 @@ class MediaDB:
                 {"$addFields": {"custom_score": {"$add": match_conditions}}}
             ]
 
-            # 🚀 3. ULTIMATE SORTING (Score -> Length -> Newest)
+            # 🚀 3. ULTIMATE SORTING (Score -> Length Tie Breaker -> Newest)
             if sort == "new": pipeline.append({"$sort": {"_id": -1}}) 
             elif sort == "old": pipeline.append({"$sort": {"_id": 1}}) 
             elif sort == "large": pipeline.append({"$sort": {"file_size": -1}}) 
@@ -396,32 +403,42 @@ class MediaDB:
 
             cursor = self.search_col.aggregate(pipeline)
             files = await cursor.to_list(length=100)
+            
+            # 🔥 THIS FIXES THE "THE" / "YOUR" EMPTY RESULT BUG!
+            if not files:
+                raise Exception("Empty Text Search Result. Forcing Safe Fallback.")
+                
             return files
 
         except Exception as e:
-            print(f"⚠️ Native Search Failed: {e}. Switching to Fallback.")
+            print(f"⚠️ Native Search Failed or Empty: {e}. Switching to Fallback.")
             # ==========================================================
-            # ✅ SAFE FALLBACK LOGIC
+            # ✅ SAFE REGEX FALLBACK LOGIC
             # ==========================================================
             try:
                 fallback_match = {}
-                fallback_and_clauses = []
-                for tw in title_words:
-                    safe_tw = re.escape(tw)
-                    fallback_and_clauses.append({
-                        "$or": [
-                            {"search_text": {"$regex": rf"(?i)\b{safe_tw}\b"}},
-                            {"file_name": {"$regex": rf"(?i)\b{safe_tw}\b"}}
-                        ]
-                    })
-                if fallback_and_clauses: fallback_match["$and"] = fallback_and_clauses
+                fallback_or_clauses = []
+                
+                # Fallback mein ANY WORD match karna allow karenge, toh koi file chhutegi nahi
+                for tw in words:
+                    if tw in alias_map:
+                        safe_tw = rf"\b{alias_map[tw]}\b"
+                    else:
+                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not tw.endswith('ss')) else tw
+                        safe_tw = rf"\b{re.escape(base)}s?\b"
+                        
+                    fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})
+                    fallback_or_clauses.append({"file_name": {"$regex": safe_tw, "$options": "i"}})
+                    
+                if fallback_or_clauses: 
+                    fallback_match["$or"] = fallback_or_clauses
                 
                 if file_type and file_type != "none": fallback_match["file_type"] = "video" if file_type.lower() == "video" else "document"
                 if lang and lang != "none":
                     pattern = LANG_MAP.get(lang, lang)
-                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": rf"(?i){pattern}"}}, {"caption": {"$regex": rf"(?i){pattern}"}}]}]
+                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": pattern, "$options": "i"}}, {"caption": {"$regex": pattern, "$options": "i"}}]}]
                 if quality and quality != "none":
-                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"quality": quality}, {"file_name": {"$regex": rf"(?i){quality}"}}, {"caption": {"$regex": rf"(?i){quality}"}}]}]
+                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"quality": quality}, {"file_name": {"$regex": quality, "$options": "i"}}, {"caption": {"$regex": quality, "$options": "i"}}]}]
                 if year and year != "none":
                     fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
 

@@ -54,7 +54,6 @@ async def auto_delete_task(bot_message, user_message, delay, show_thanks, query=
             await temp_msg.delete()
     except: pass
 
-# ✅ NOTE: arrange_buttons function removed from here (It is now in utils.py)
 
 # ✅ HELPER: Get "Video | Docs" Row
 def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_size, curr_sort):
@@ -100,11 +99,21 @@ async def auto_filter(client, message):
 
         start_time = time.time()
         
-        # Initial Search (Default sort: relevance)
-        task_files = Media.get_search_results(query, sort="relevance")
+        # ==================================================================
+        # 🔥 THE ULTIMATE WEAPON: SMART CACHING (CPU SAVER)
+        # ==================================================================
         task_settings = db.get_group_settings(message.chat.id)
+        task_cache = Media.temp_searches.find_one({"query": query}) # Check globally in Cache first
         
-        files, group_settings = await asyncio.gather(task_files, task_settings)
+        group_settings, cached_result = await asyncio.gather(task_settings, task_cache)
+        
+        if cached_result and cached_result.get("files"):
+            # 🎉 BINGO! Database engine ko disturb karne ki zarurat nahi, direct Cache se uthao
+            files = cached_result["files"]
+        else:
+            # Nayi movie search hui hai, CPU use karo aur DB engine chalao
+            files = await Media.get_search_results(query, sort="relevance")
+        # ==================================================================
         
         if not files: return
 

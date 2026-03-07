@@ -3,8 +3,8 @@ import re
 import datetime
 import uuid
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.errors import BulkWriteError
-from pymongo import ReturnDocument
+from pymongo.errors import BulkWriteError, OperationFailure
+from pymongo import ReturnDocument, ASCENDING, TEXT
 from info import DATABASE_URI, DATABASE_NAME
 
 logger = logging.getLogger(__name__)
@@ -37,21 +37,53 @@ class MediaDB:
         self.search_cache = self.db.search_cache 
         self.temp_searches = self.db.temp_searches
 
+    # ==================================================================
+    # ⚡ PRO-LEVEL WEIGHTED INDEXING SETUP
+    # ==================================================================
     async def ensure_indexes(self):
         try:
+            # Puraane indexes ko drop karna zaroori hai taaki naya weighted index bina error ban sake
+            try:
+                await self.search_col.drop_indexes()
+                print("♻️ Old Indexes Dropped Successfully (Preparing for Weighted Indexes).")
+            except OperationFailure:
+                pass # Agar collection nayi hai aur index nahi hai toh koi error nahi aayega
+
+            # 1. Standard B-Tree Indexes for Fast Fallback Searches
             await self.search_col.create_index("file_name")
             await self.search_col.create_index("caption")
             await self.search_col.create_index("search_text") 
-            # 🚀 TEXT INDEX ADDED FOR ADVANCED SCORING (Required for $text)
-            await self.search_col.create_index([("search_text", "text")])
             await self.search_col.create_index("quality") 
             await self.search_col.create_index("languages") 
             await self.search_col.create_index("year") 
             await self.search_col.create_index("link_id")
+            
+            # 🚀 2. THE ULTIMATE FULL-TEXT WEIGHTED INDEX
+            await self.search_col.create_index(
+                [
+                    ("file_name", TEXT),
+                    ("search_text", TEXT),
+                    ("caption", TEXT),
+                    ("languages", TEXT),
+                    ("quality", TEXT),
+                    ("year", TEXT)
+                ],
+                weights={
+                    "file_name": 100,     # Movie Title - Highest Priority
+                    "search_text": 80,    # Cleaned Hidden Name - Second Priority
+                    "languages": 50,      # Language (Hindi, Tamil) - Medium Priority
+                    "quality": 30,        # Quality (1080p) - Low Priority
+                    "year": 10,           # Year (2023) - Lowest Priority
+                    "caption": 5          # Faltu description
+                },
+                name="weighted_movie_search"
+            )
+
             await self.data_col.create_index("file_unique_id", unique=True)
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
             await self.temp_searches.create_index("created_at", expireAfterSeconds=172800)
-            print("✅ Database Indexes Created Successfully")
+            
+            print("✅ Super-Fast Weighted Indexes Created Successfully!")
         except Exception as e:
             print(f"❌ Error Creating Indexes: {e}")
 
@@ -383,7 +415,7 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ PURE VIP SCORING SEARCH: "Title gets 10 Points, Meta gets 1 Point"
+    # ⚡ NATIVE WEIGHTED INDEX SEARCH (Ultra-Fast & CPU Friendly)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip():
@@ -409,12 +441,12 @@ class MediaDB:
             if not words: return []
 
             # ==========================================================
-            # 🚀 1. SUPER SMART TITLE EXTRACTOR (Separating Title from Meta)
+            # 🚀 1. TITLE EXTRACTOR (Sirf Filter Lagane Ke Liye)
             # ==========================================================
             meta_keywords = {
                 "hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", 
                 "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4",
-                "movie", "full", "hd", "print", "download", "series" # Faltu words added here
+                "movie", "full", "hd", "print", "download", "series"
             }
 
             title_words = []
@@ -423,17 +455,17 @@ class MediaDB:
                     title_words.append(word)
 
             if not title_words:
-                title_words = words # Agar kisi ne sirf "2023 hindi" likha hai toh ye usko title maan lega
+                title_words = words 
 
             # ==========================================================
-            # 🚀 2. "AT LEAST ONE" TITLE WORD FILTER
+            # 🚀 2. MONGODB $TEXT WITH WEIGHTS (Ultra-Fast Match)
             # ==========================================================
-            # $text ke bharose nahi rahenge, strict filter lagayenge ki Title ka koi ek word hona hi chahiye
             match_filters = {
                 "$text": {"$search": clean_query}
             }
 
-            title_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}} for tw in title_words]
+            # "At least one Title word" wala strict filter taaki random 2023 movie na aaye
+            title_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}}] for tw in title_words]
             if title_or_clauses:
                 match_filters["$and"] = match_filters.get("$and", []) + [{"$or": title_or_clauses}]
 
@@ -478,7 +510,7 @@ class MediaDB:
                 elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
             # ==========================================================
-            # 🚀 3. THE VIP POINTS SYSTEM (Title=10, Meta=1)
+            # 🚀 3. PIPELINE WITH DIRECT NATIVE SCORING (NO MORE CPU LOAD)
             # ==========================================================
             pipeline = [
                 {"$match": match_filters},
@@ -487,39 +519,10 @@ class MediaDB:
                     "search_text": 1, "quality": 1, "languages": 1, 
                     "year": 1, "source": 1, "link_id": 1, "chat_id": 1, 
                     "file_type": 1,
-                    "score": {"$meta": "textScore"}
+                    # Yahan MongoDB automatically Weight = 100 aur Weight = 10 ke hisab se score batayega!
+                    "score": {"$meta": "textScore"} 
                 }}
             ]
-
-            alias_map = {
-                "hindi": r"(hindi|hin)",
-                "english": r"(english|eng)",
-                "tamil": r"(tamil|tam)",
-                "telugu": r"(telugu|tel)",
-                "malayalam": r"(malayalam|mal)",
-                "kannada": r"(kannada|kan)",
-                "dual": r"(dual|multi)",
-                "multi": r"(dual|multi)"
-            }
-
-            match_conditions = []
-            for w in words:
-                regex_pattern = alias_map.get(w, re.escape(w))
-                
-                # 🔥 VIP WEIGHT SYSTEM 🔥
-                is_meta = re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords
-                weight = 1 if is_meta else 10 # Title word ko 10 point, tag ko 1 point
-                
-                match_conditions.append({
-                    "$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": regex_pattern, "options": "i"}}, weight, 0]
-                })
-            
-            if match_conditions:
-                pipeline.append({
-                    "$addFields": {
-                        "custom_score": {"$add": match_conditions}
-                    }
-                })
 
             # ==========================================================
             # 🚀 4. THE ULTIMATE SORTING
@@ -533,10 +536,9 @@ class MediaDB:
             elif sort == "small":
                 pipeline.append({"$sort": {"file_size": 1}}) 
             else:
-                # 🥇 1st Priority: Custom VIP Score (Title Match beats Meta Match)
-                # 🥈 2nd Priority: MongoDB Text Score
-                # 🥉 3rd Priority: Newest
-                pipeline.append({"$sort": {"custom_score": -1, "score": {"$meta": "textScore"}, "_id": -1}}) 
+                # 🥇 1st Priority: Native textScore (Based on your weights!)
+                # 🥈 2nd Priority: Newest Uploaded
+                pipeline.append({"$sort": {"score": {"$meta": "textScore"}, "_id": -1}}) 
 
             pipeline.append({"$limit": 100}) 
 
@@ -545,14 +547,18 @@ class MediaDB:
             return files
 
         except Exception as e:
-            print(f"⚠️ Index Search Failed: {e}. Switching to Fallback.")
+            print(f"⚠️ Native Search Failed (Likely Stopwords): {e}. Switching to B-Tree Fallback.")
             
             # ==========================================================
-            # ✅ 5. FALLBACK LOGIC WITH VIP POINTS
+            # ✅ 5. B-TREE FALLBACK LOGIC (Agar stopword "The" use kiya ho)
             # ==========================================================
             try:
-                fallback_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}} for tw in title_words]
+                fallback_or_clauses = [{"search_text": {"$regex": rf"(?i)\b{re.escape(tw)}\b"}}] for tw in title_words]
                 fallback_match = {"$or": fallback_or_clauses} if fallback_or_clauses else {}
+                
+                # B-Tree fallback mein 'The' ya dusre words match karne ke rules
+                for w in words:
+                    fallback_match[f"fallback_word_{w}"] = {"$regexMatch": {"input": "$search_text", "regex": rf"(?i)\b{re.escape(w)}\b"}}
                 
                 if file_type and file_type != "none": 
                     fallback_match["file_type"] = "video" if file_type.lower() == "video" else "document"
@@ -560,19 +566,13 @@ class MediaDB:
                 fallback_pipeline = [
                     {"$match": fallback_match}
                 ]
-
-                if match_conditions:
-                    fallback_pipeline.append({
-                        "$addFields": {
-                            "custom_score": {"$add": match_conditions}
-                        }
-                    })
                 
+                # Basic Sort for Fallback
                 if sort == "new": fallback_pipeline.append({"$sort": {"_id": -1}})
                 elif sort == "old": fallback_pipeline.append({"$sort": {"_id": 1}})
                 elif sort == "large": fallback_pipeline.append({"$sort": {"file_size": -1}})
                 elif sort == "small": fallback_pipeline.append({"$sort": {"file_size": 1}})
-                else: fallback_pipeline.append({"$sort": {"custom_score": -1, "_id": -1}})
+                else: fallback_pipeline.append({"$sort": {"_id": -1}})
 
                 fallback_pipeline.append({"$limit": 100})
                 cursor = self.search_col.aggregate(fallback_pipeline)

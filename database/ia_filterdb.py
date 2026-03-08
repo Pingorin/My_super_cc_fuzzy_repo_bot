@@ -328,7 +328,7 @@ class MediaDB:
             hidden_search_data = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", hidden_search_data)
 
             variations = []
-            orig_raw = raw_fname.lower()
+            orig_raw = (media.file_name or "").lower() # ✅ 100% Safe string operation
             seasons = re.findall(r"(?i)\bS(\d+)\b", hidden_search_data)
             episodes = re.findall(r"(?i)\bE(\d+)\b", hidden_search_data)
             for s in seasons: variations.append(f"s{int(s)} s{str(int(s)).zfill(2)} season{int(s)}")
@@ -489,7 +489,7 @@ class MediaDB:
                 for tw in words:
                     if tw in alias_map: safe_tw = rf"\b{alias_map[tw]}\b"
                     else:
-                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not w.endswith('ss')) else tw
+                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not w.endswith('ss')) else w
                         safe_tw = rf"\b{re.escape(base)}s?\b"
                         
                     fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})

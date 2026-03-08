@@ -109,6 +109,7 @@ def normalize_desi_query(raw_query: str) -> str:
     clean_query = raw_query.strip().lower()
     return DESI_REGEX_ENGINE.sub(lambda match: DESI_DICT[match.group(1)], clean_query)
 # ==================================================================
+
 class MediaDB:
     def __init__(self, uri, database_name):
         self._client = AsyncIOMotorClient(uri)
@@ -128,7 +129,7 @@ class MediaDB:
                 pass 
 
             # Optimized Indexes for Memory Saving
-            await self.search_col.create_index("file_name")
+            await self.search_col.create_index("display_name")
             await self.search_col.create_index("search_text") 
             await self.search_col.create_index("quality") 
             await self.search_col.create_index("languages") 
@@ -138,7 +139,7 @@ class MediaDB:
             # 🚀 FULL-TEXT INDEX (Lean & Mean)
             await self.search_col.create_index(
                 [
-                    ("file_name", TEXT),
+                    ("display_name", TEXT),
                     ("search_text", TEXT),
                     ("languages", TEXT),
                     ("quality", TEXT),
@@ -151,7 +152,7 @@ class MediaDB:
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
             await self.temp_searches.create_index("created_at", expireAfterSeconds=172800)
             
-            print("✅ Database Indexes Created Successfully! (Optimized Storage)")
+            print("✅ Database Indexes Created Successfully! (Using display_name)")
         except Exception as e:
             print(f"❌ Error Creating Indexes: {e}")
 
@@ -295,7 +296,6 @@ class MediaDB:
                 first_line = clean_raw_cap.strip().split('\n')[0]
                 clean_cap_line = self.clean_text(first_line)
             
-            # Faisla: Caption achha hai toh wo, warna File name
             if clean_cap_line and clean_fname != clean_cap_line and len(clean_cap_line) > 3:
                 final_display_name = clean_cap_line
             else:
@@ -346,10 +346,9 @@ class MediaDB:
 
             data_docs.append({'_id': current_id, 'msg_id': message.id, 'chat_id': message.chat.id, 'file_id': media.file_id, 'file_unique_id': media.file_unique_id, 'file_type': file_type})
             
-            # 🔥 STORAGE OPTIMIZATION FIX: Isko 'file_name' hi bolenge taki doosri files crash na ho.
-            # Alag se caption add nahi kiya, isi naam ko bot caption maan lega baad me.
+            # 🔥 DISPLAY_NAME USED HERE
             search_doc = {
-                'file_name': final_display_name,
+                'display_name': final_display_name,
                 'file_size': media.file_size, 
                 'search_text': master_search_text, 
                 'link_id': current_id, 
@@ -415,11 +414,11 @@ class MediaDB:
             if file_type and file_type != "none": match_filters["file_type"] = "video" if file_type.lower() == "video" else "document"
             if lang and lang != "none":
                 pattern = LANG_MAP.get(lang, lang)
-                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": pattern, "$options": "i"}}]}]
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"languages": lang}, {"display_name": {"$regex": pattern, "$options": "i"}}]}]
             if quality and quality != "none":
-                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"quality": quality}, {"file_name": {"$regex": quality, "$options": "i"}}]}]
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"quality": quality}, {"display_name": {"$regex": quality, "$options": "i"}}]}]
             if year and year != "none":
-                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"year": str(year)}, {"display_name": {"$regex": str(year)}}]}]
             if size_range and size_range != "none":
                 MB_500, GB_1, GB_2 = 500*1024*1024, 1024*1024*1024, 2*1024*1024*1024
                 if size_range == "min500": match_filters["file_size"] = {"$lt": MB_500}
@@ -434,11 +433,11 @@ class MediaDB:
             safe_title_phrase = re.escape(" ".join(title_words))
             safe_first_word = re.escape(title_words[0]) if title_words else ""
 
-            match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{safe_raw_query}\b", "options": "i"}}, 5000, 0]})
+            match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": rf"\b{safe_raw_query}\b", "options": "i"}}, 5000, 0]})
             if safe_title_phrase and safe_title_phrase != safe_raw_query:
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{safe_title_phrase}\b", "options": "i"}}, 1000, 0]})
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": rf"\b{safe_title_phrase}\b", "options": "i"}}, 1000, 0]})
             if safe_first_word:
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"^[\W_]*{safe_first_word}\b", "options": "i"}}, 500, 0]})
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": rf"^[\W_]*{safe_first_word}\b", "options": "i"}}, 500, 0]})
 
             for w in words: 
                 is_lang = w in ["hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "english", "dual", "multi", "punjabi", "marathi"]
@@ -453,15 +452,15 @@ class MediaDB:
                 name_weight = 300 if is_lang else (20 if is_meta else 100)
                 text_weight = 50 if is_lang else (5 if is_meta else 20)
                 
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": safe_w_regex, "options": "i"}}, name_weight, 0]})
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": safe_w_regex, "options": "i"}}, name_weight, 0]})
                 match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": safe_w_regex, "options": "i"}}, text_weight, 0]})
 
             pipeline = [
                 {"$match": match_filters},
                 {"$project": {
-                    "file_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
+                    "display_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
                     "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1, "score": {"$meta": "textScore"},
-                    "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}
+                    "name_length": {"$strLenCP": {"$ifNull": ["$display_name", ""]}}
                 }},
                 {"$addFields": {"custom_score": {"$add": match_conditions}}}
             ]
@@ -486,11 +485,11 @@ class MediaDB:
                 for tw in words:
                     if tw in alias_map: safe_tw = rf"\b{alias_map[tw]}\b"
                     else:
-                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not w.endswith('ss')) else w
+                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not w.endswith('ss')) else tw
                         safe_tw = rf"\b{re.escape(base)}s?\b"
                         
                     fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})
-                    fallback_or_clauses.append({"file_name": {"$regex": safe_tw, "$options": "i"}})
+                    fallback_or_clauses.append({"display_name": {"$regex": safe_tw, "$options": "i"}})
                     
                 if fallback_or_clauses: fallback_match["$or"] = fallback_or_clauses
                 
@@ -499,9 +498,9 @@ class MediaDB:
                 fallback_pipeline = [
                     {"$match": fallback_match},
                     {"$project": {
-                        "file_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
+                        "display_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
                         "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1,
-                        "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}
+                        "name_length": {"$strLenCP": {"$ifNull": ["$display_name", ""]}}
                     }},
                     {"$addFields": {"custom_score": {"$add": match_conditions}}}
                 ]
@@ -529,14 +528,14 @@ class MediaDB:
         unique_id = str(uuid.uuid4())[:8]
         simplified_files = []
         for file in files:
-            safe_name = file.get('file_name', 'Unknown')
+            # 🔥 Ab bot file_name ya caption ki jagah direct 'display_name' bhej raha hai aage ki files me
+            safe_name = file.get('display_name', 'Unknown')
             simplified_files.append({
-                "file_name": safe_name, 
+                "display_name": safe_name, 
                 "file_size": file.get('file_size', 0), 
                 "link_id": file.get('link_id', 0),
                 "file_chat_id": file.get('chat_id', 0), 
-                "file_type": file.get('file_type', 'document'),
-                "caption": safe_name # 🔥 Database me bina save kiye yahi dictionary se aapki file ko clear caption bhej dega!
+                "file_type": file.get('file_type', 'document')
             })
         await self.search_cache.insert_one({"_id": unique_id, "query": query, "chat_id": chat_id, "files": simplified_files, "created_at": datetime.datetime.utcnow()})
         return unique_id

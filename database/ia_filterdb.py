@@ -110,7 +110,6 @@ def normalize_desi_query(raw_query: str) -> str:
     return DESI_REGEX_ENGINE.sub(lambda match: DESI_DICT[match.group(1)], clean_query)
 # ==================================================================
 
-
 class MediaDB:
     def __init__(self, uri, database_name):
         self._client = AsyncIOMotorClient(uri)
@@ -130,20 +129,19 @@ class MediaDB:
             except OperationFailure:
                 pass 
 
-            await self.search_col.create_index("file_name")
-            await self.search_col.create_index("caption")
+            # Memory Bachane ke liye purane index hata diye, ab sirf zaroori index banenge
+            await self.search_col.create_index("display_name")
             await self.search_col.create_index("search_text") 
             await self.search_col.create_index("quality") 
             await self.search_col.create_index("languages") 
             await self.search_col.create_index("year") 
             await self.search_col.create_index("link_id")
             
-            # 🚀 FULL-TEXT INDEX 
+            # 🚀 FULL-TEXT INDEX (Lean & Mean)
             await self.search_col.create_index(
                 [
-                    ("file_name", TEXT),
+                    ("display_name", TEXT),
                     ("search_text", TEXT),
-                    ("caption", TEXT),
                     ("languages", TEXT),
                     ("quality", TEXT),
                     ("year", TEXT)
@@ -155,7 +153,7 @@ class MediaDB:
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
             await self.temp_searches.create_index("created_at", expireAfterSeconds=172800)
             
-            print("✅ Database Indexes Created Successfully!")
+            print("✅ Database Indexes Created Successfully! (Optimized Storage)")
         except Exception as e:
             print(f"❌ Error Creating Indexes: {e}")
 
@@ -288,12 +286,27 @@ class MediaDB:
         current_id = start_sequence
         
         for media, message in new_items:
-            display_name = self.clean_text(media.file_name) or "Unknown File"
-            caption = message.caption.html if message.caption else None
-            cap_text = caption if caption else ""
+            raw_fname = media.file_name or ""
+            raw_cap = message.caption.html if message.caption else ""
+            
+            clean_fname = self.clean_text(raw_fname)
+            
+            clean_cap_line = ""
+            if raw_cap:
+                clean_raw_cap = re.sub(r"<[^>]+>", "", raw_cap)
+                first_line = clean_raw_cap.strip().split('\n')[0]
+                clean_cap_line = self.clean_text(first_line)
+            
+            if clean_cap_line and clean_fname != clean_cap_line and len(clean_cap_line) > 3:
+                final_display_name = clean_cap_line
+            else:
+                final_display_name = clean_fname
                 
-            meta_name = self.parse_metadata(media.file_name)
-            meta_cap = self.parse_metadata(message.caption.html if message.caption else "")
+            if not final_display_name:
+                final_display_name = "Unknown File"
+
+            meta_name = self.parse_metadata(raw_fname)
+            meta_cap = self.parse_metadata(raw_cap)
 
             parsed_meta = {
                 "quality": list(set(meta_name['quality'] + meta_cap['quality'])),
@@ -302,7 +315,7 @@ class MediaDB:
                 "source": list(set(meta_name['source'] + meta_cap['source']))
             }
 
-            hidden_search_data = display_name
+            hidden_search_data = f"{raw_fname} {raw_cap}" # Kachra search_text me jayega
             roman_map = {r'I': '1', r'II': '2', r'III': '3', r'IV': '4', r'V': '5', r'VI': '6', r'VII': '7', r'VIII': '8', r'IX': '9', r'X': '10'}
             for roman, digit in roman_map.items():
                 hidden_search_data = re.sub(rf"(?i)(?<=\s)\b{roman}\b", digit, hidden_search_data)
@@ -315,8 +328,7 @@ class MediaDB:
             hidden_search_data = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", hidden_search_data)
 
             variations = []
-            orig_raw = (media.file_name or "").lower()
-            
+            orig_raw = raw_fname.lower()
             seasons = re.findall(r"(?i)\bS(\d+)\b", hidden_search_data)
             episodes = re.findall(r"(?i)\bE(\d+)\b", hidden_search_data)
             for s in seasons: variations.append(f"s{int(s)} s{str(int(s)).zfill(2)} season{int(s)}")
@@ -328,14 +340,26 @@ class MediaDB:
                 for v in re.findall(rf"(?i){tag}(?:ume)?\s*(\d+)", orig_raw): variations.append(f"{tag}{v}")
 
             variation_text = " ".join(list(set(variations)))
-            spaceless_name = display_name.replace(" ", "").replace("-", "").replace(".", "")
-            master_search_text = f"{display_name} {hidden_search_data} {spaceless_name} {variation_text}".lower()
+            spaceless_name = final_display_name.replace(" ", "").replace("-", "").replace(".", "")
+            
+            # Master search text jisme sab mix hai
+            master_search_text = f"{final_display_name} {hidden_search_data} {spaceless_name} {variation_text}".lower()
 
             file_type = "video" if message.video else "document"
 
             data_docs.append({'_id': current_id, 'msg_id': message.id, 'chat_id': message.chat.id, 'file_id': media.file_id, 'file_unique_id': media.file_unique_id, 'file_type': file_type})
             
-            search_doc = {'file_name': display_name, 'file_size': media.file_size, 'caption': caption, 'search_text': master_search_text, 'link_id': current_id, 'chat_id': message.chat.id, 'file_type': file_type}
+            # 🔥 THE MAGIC: File Name aur Caption Database se HATA DIYE GAYE!
+            # Ab sirf display_name save hoga, jo storage bachaega.
+            search_doc = {
+                'display_name': final_display_name,
+                'file_size': media.file_size, 
+                'search_text': master_search_text, 
+                'link_id': current_id, 
+                'chat_id': message.chat.id, 
+                'file_type': file_type
+            }
+
             if parsed_meta['quality']: search_doc['quality'] = parsed_meta['quality']
             if parsed_meta['languages']: search_doc['languages'] = parsed_meta['languages']
             if parsed_meta['year']: search_doc['year'] = parsed_meta['year']
@@ -354,16 +378,13 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ MASTERMIND SCORING SEARCH (Beats/Beat, The/Your, Exact Matches Fixed)
+    # ⚡ MASTERMIND SCORING SEARCH 
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
 
         try:
-            # ✅ 1. APPLY DESI DICTIONARY (Hinglish Typos + Numbers)
-            raw_query = normalize_desi_query(query)
-            
-            # ✅ 2. TYPO FIXER
+            raw_query = query.strip().lower()
             clean_query = re.sub(r"(?i)\b(englsh|engls|engish|egnlish)\b", "english", raw_query)
             clean_query = re.sub(r"(?i)\b(hndi|hind|hni|hin)\b", "hindi", clean_query)
             clean_query = re.sub(r"(?i)\b(tmal|taml|tmil|tam)\b", "tamil", clean_query)
@@ -374,11 +395,9 @@ class MediaDB:
             raw_words = clean_query.split()
             if not raw_words: return []
 
-            # 🚀 Smart Stopwords (Only for MongoDB fetch)
             stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to"}
             text_search_words = [w for w in raw_words if w not in stop_words]
             
-            # 🔥 PLURAL/SINGULAR INJECTOR FOR MONGODB ("beat" -> "beat beats")
             expanded_text_words = []
             for w in text_search_words:
                 expanded_text_words.append(w)
@@ -388,31 +407,22 @@ class MediaDB:
                     expanded_text_words.append(w + 's')
                     
             clean_query_for_text = " ".join(expanded_text_words) if expanded_text_words else " ".join(raw_words)
-
-            # ALL Scoring uses the pure raw words! So "The Batman" keeps its "The"
             words = raw_words 
 
-            meta_keywords = {
-                "hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", 
-                "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4",
-                "movie", "full", "hd", "print", "download", "series"
-            }
-
+            meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series"}
             title_words = [w for w in words if not (re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords)]
             if not title_words: title_words = words 
 
-            # 🚀 1. FAST FETCHING ($match)
             match_filters = {"$text": {"$search": clean_query_for_text}}
 
-            # Button Filters
             if file_type and file_type != "none": match_filters["file_type"] = "video" if file_type.lower() == "video" else "document"
             if lang and lang != "none":
                 pattern = LANG_MAP.get(lang, lang)
-                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": pattern, "$options": "i"}}, {"caption": {"$regex": pattern, "$options": "i"}}]}]
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"languages": lang}, {"display_name": {"$regex": pattern, "$options": "i"}}]}]
             if quality and quality != "none":
-                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"quality": quality}, {"file_name": {"$regex": quality, "$options": "i"}}, {"caption": {"$regex": quality, "$options": "i"}}]}]
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"quality": quality}, {"display_name": {"$regex": quality, "$options": "i"}}]}]
             if year and year != "none":
-                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"year": str(year)}, {"display_name": {"$regex": str(year)}}]}]
             if size_range and size_range != "none":
                 MB_500, GB_1, GB_2 = 500*1024*1024, 1024*1024*1024, 2*1024*1024*1024
                 if size_range == "min500": match_filters["file_size"] = {"$lt": MB_500}
@@ -420,35 +430,19 @@ class MediaDB:
                 elif size_range == "1gb-2gb": match_filters["file_size"] = {"$gte": GB_1, "$lt": GB_2}
                 elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
-            # 🚀 2. THE MASTERMIND SCORING
             match_conditions = [0] 
-            alias_map = {
-                "hindi": r"(hindi|hin)", "english": r"(english|eng)", "tamil": r"(tamil|tam)", "telugu": r"(telugu|tel)",
-                "malayalam": r"(malayalam|mal)", "kannada": r"(kannada|kan)", "dual": r"(dual|multi)", "multi": r"(dual|multi)"
-            }
+            alias_map = {"hindi": r"(hindi|hin)", "english": r"(english|eng)", "tamil": r"(tamil|tam)", "telugu": r"(telugu|tel)", "malayalam": r"(malayalam|mal)", "kannada": r"(kannada|kan)", "dual": r"(dual|multi)", "multi": r"(dual|multi)"}
             
             safe_raw_query = re.escape(clean_query)
             safe_title_phrase = re.escape(" ".join(title_words))
             safe_first_word = re.escape(title_words[0]) if title_words else ""
 
-            # 🏆 EXACT PHRASE MATCH (+5000 Points): "The Batman" hai toh seedha Rank 1
-            match_conditions.append({
-                "$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{safe_raw_query}\b", "options": "i"}}, 5000, 0]
-            })
-            
-            # 🏆 EXACT TITLE PHRASE (+1000 Points): "Leo Hindi" ke time "Leo" ko rank karega
+            match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": rf"\b{safe_raw_query}\b", "options": "i"}}, 5000, 0]})
             if safe_title_phrase and safe_title_phrase != safe_raw_query:
-                match_conditions.append({
-                    "$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{safe_title_phrase}\b", "options": "i"}}, 1000, 0]
-                })
-
-            # 🏆 STARTS-WITH FIRST WORD (+500 Points)
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": rf"\b{safe_title_phrase}\b", "options": "i"}}, 1000, 0]})
             if safe_first_word:
-                match_conditions.append({
-                    "$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"^[\W_]*{safe_first_word}\b", "options": "i"}}, 500, 0]
-                })
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": rf"^[\W_]*{safe_first_word}\b", "options": "i"}}, 500, 0]})
 
-            # 🏆 INDIVIDUAL WORD POINTS & PLURALS
             for w in words: 
                 is_lang = w in ["hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "english", "dual", "multi", "punjabi", "marathi"]
                 is_meta = re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords
@@ -456,84 +450,61 @@ class MediaDB:
                 if w in alias_map:
                     safe_w_regex = rf"\b{alias_map[w]}\b"
                 else:
-                    # 'beats' aur 'beat' dono ek dusre ko match karenge!
                     base = w[:-1] if (w.endswith('s') and len(w) > 3 and not w.endswith('ss')) else w
                     safe_w_regex = rf"\b{re.escape(base)}s?\b"
                 
-                # 🔥 LANGUAGE KILL-SWITCH (Hindi in Name = +300 pts, Meta = +20 pts)
                 name_weight = 300 if is_lang else (20 if is_meta else 100)
                 text_weight = 50 if is_lang else (5 if is_meta else 20)
                 
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": safe_w_regex, "options": "i"}}, name_weight, 0]})
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": safe_w_regex, "options": "i"}}, name_weight, 0]})
                 match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": safe_w_regex, "options": "i"}}, text_weight, 0]})
 
             pipeline = [
                 {"$match": match_filters},
                 {"$project": {
-                    "file_name": 1, "file_size": 1, "caption": 1, "search_text": 1, "quality": 1, "languages": 1, 
-                    "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "score": {"$meta": "textScore"},
-                    "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}
+                    "display_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
+                    "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1, "score": {"$meta": "textScore"},
+                    "name_length": {"$strLenCP": {"$ifNull": ["$display_name", ""]}}
                 }},
                 {"$addFields": {"custom_score": {"$add": match_conditions}}}
             ]
 
-            # 🚀 3. ULTIMATE SORTING (Score -> Length Tie Breaker -> Newest)
             if sort == "new": pipeline.append({"$sort": {"_id": -1}}) 
             elif sort == "old": pipeline.append({"$sort": {"_id": 1}}) 
             elif sort == "large": pipeline.append({"$sort": {"file_size": -1}}) 
             elif sort == "small": pipeline.append({"$sort": {"file_size": 1}}) 
-            else:
-                pipeline.append({"$sort": {"custom_score": -1, "name_length": 1, "_id": -1}}) 
+            else: pipeline.append({"$sort": {"custom_score": -1, "name_length": 1, "_id": -1}}) 
 
             pipeline.append({"$limit": 100}) 
-
             cursor = self.search_col.aggregate(pipeline)
             files = await cursor.to_list(length=100)
             
-            # 🔥 THIS FIXES THE "THE" / "YOUR" EMPTY RESULT BUG!
-            if not files:
-                raise Exception("Empty Text Search Result. Forcing Safe Fallback.")
-                
+            if not files: raise Exception("Empty Text Search Result. Forcing Safe Fallback.")
             return files
 
         except Exception as e:
-            print(f"⚠️ Native Search Failed or Empty: {e}. Switching to Fallback.")
-            # ==========================================================
-            # ✅ SAFE REGEX FALLBACK LOGIC
-            # ==========================================================
             try:
                 fallback_match = {}
                 fallback_or_clauses = []
-                
-                # Fallback mein ANY WORD match karna allow karenge, toh koi file chhutegi nahi
                 for tw in words:
-                    if tw in alias_map:
-                        safe_tw = rf"\b{alias_map[tw]}\b"
+                    if tw in alias_map: safe_tw = rf"\b{alias_map[tw]}\b"
                     else:
-                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not tw.endswith('ss')) else tw
+                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not w.endswith('ss')) else tw
                         safe_tw = rf"\b{re.escape(base)}s?\b"
                         
                     fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})
-                    fallback_or_clauses.append({"file_name": {"$regex": safe_tw, "$options": "i"}})
+                    fallback_or_clauses.append({"display_name": {"$regex": safe_tw, "$options": "i"}})
                     
-                if fallback_or_clauses: 
-                    fallback_match["$or"] = fallback_or_clauses
+                if fallback_or_clauses: fallback_match["$or"] = fallback_or_clauses
                 
                 if file_type and file_type != "none": fallback_match["file_type"] = "video" if file_type.lower() == "video" else "document"
-                if lang and lang != "none":
-                    pattern = LANG_MAP.get(lang, lang)
-                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": pattern, "$options": "i"}}, {"caption": {"$regex": pattern, "$options": "i"}}]}]
-                if quality and quality != "none":
-                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"quality": quality}, {"file_name": {"$regex": quality, "$options": "i"}}, {"caption": {"$regex": quality, "$options": "i"}}]}]
-                if year and year != "none":
-                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
 
                 fallback_pipeline = [
                     {"$match": fallback_match},
                     {"$project": {
-                        "file_name": 1, "file_size": 1, "caption": 1, "search_text": 1, "quality": 1, "languages": 1, 
-                        "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1,
-                        "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}
+                        "display_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
+                        "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1,
+                        "name_length": {"$strLenCP": {"$ifNull": ["$display_name", ""]}}
                     }},
                     {"$addFields": {"custom_score": {"$add": match_conditions}}}
                 ]
@@ -548,31 +519,32 @@ class MediaDB:
                 cursor = self.search_col.aggregate(fallback_pipeline)
                 return await cursor.to_list(length=100)
             except Exception as inner_e:
-                print(f"❌ Fallback also failed: {inner_e}")
                 return []
 
-    async def total_files_count(self):
-        return await self.data_col.count_documents({})
-        
+    async def total_files_count(self): return await self.data_col.count_documents({})
     async def get_db_size(self):
         try:
             stats = await self.db.command("dbstats")
             return stats.get('storageSize', 0) + stats.get('totalIndexSize', 0)
-        except:
-            return 0
+        except: return 0
 
     async def save_search_results(self, query, files, chat_id):
         unique_id = str(uuid.uuid4())[:8]
         simplified_files = []
         for file in files:
+            # 🔥 Ab bot file bhejte time aur button par dikhate time direct display_name use karega
+            safe_name = file.get('display_name', 'Unknown')
             simplified_files.append({
-                "file_name": file.get('file_name', 'Unknown'), "file_size": file.get('file_size', 0), "link_id": file.get('link_id', 0),
-                "file_chat_id": file.get('chat_id', 0), "file_type": file.get('file_type', 'document')
+                "file_name": safe_name, # Group button ka naam
+                "file_size": file.get('file_size', 0), 
+                "link_id": file.get('link_id', 0),
+                "file_chat_id": file.get('chat_id', 0), 
+                "file_type": file.get('file_type', 'document'),
+                "caption": safe_name # 🔥 File ka naya saaf suthra Caption!
             })
         await self.search_cache.insert_one({"_id": unique_id, "query": query, "chat_id": chat_id, "files": simplified_files, "created_at": datetime.datetime.utcnow()})
         return unique_id
 
-    async def get_cached_results(self, unique_id):
-        return await self.search_cache.find_one({"_id": unique_id})
+    async def get_cached_results(self, unique_id): return await self.search_cache.find_one({"_id": unique_id})
 
 Media = MediaDB(DATABASE_URI, DATABASE_NAME)

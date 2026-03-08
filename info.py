@@ -42,11 +42,11 @@ VERIFY_GAP1 = int(os.environ.get("VERIFY_GAP1", 300))  # 5 Min
 VERIFY_GAP2 = int(os.environ.get("VERIFY_GAP2", 300))  # 5 Min
 
 # --- SHORTENER SETTINGS ---
-SHORTLINK_URL_1 = os.environ.get("SHORTLINK_URL_1", "shortxlinks.com")
-SHORTLINK_API_1 = os.environ.get("SHORTLINK_API_1", "7c480930494be0edb7e546125c35d79840d5146b")
+SHORTLINK_URL_1 = os.environ.get("SHORTLINK_URL_1", "")
+SHORTLINK_API_1 = os.environ.get("SHORTLINK_API_1", "")
 
-SHORTLINK_URL_2 = os.environ.get("SHORTLINK_URL_2", "softurl.in")
-SHORTLINK_API_2 = os.environ.get("SHORTLINK_API_2", "613ce973446725bfe2bf909b320c7a1e84c4bdc8")
+SHORTLINK_URL_2 = os.environ.get("SHORTLINK_URL_2", "")
+SHORTLINK_API_2 = os.environ.get("SHORTLINK_API_2", "")
 
 SHORTLINK_URL_3 = os.environ.get("SHORTLINK_URL_3", "")
 SHORTLINK_API_3 = os.environ.get("SHORTLINK_API_3", "")

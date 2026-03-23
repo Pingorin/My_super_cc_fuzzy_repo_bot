@@ -46,7 +46,7 @@ class MediaDB:
                 pass 
 
             # Optimized Indexes for Memory Saving
-            await self.search_col.create_index("display_name")
+            await self.search_col.create_index("file_name")
             await self.search_col.create_index("search_text") 
             await self.search_col.create_index("quality") 
             await self.search_col.create_index("languages") 
@@ -56,7 +56,7 @@ class MediaDB:
             # 🚀 FULL-TEXT INDEX (Lean & Mean)
             await self.search_col.create_index(
                 [
-                    ("display_name", TEXT),
+                    ("file_name", TEXT),
                     ("search_text", TEXT),
                     ("languages", TEXT),
                     ("quality", TEXT),
@@ -124,11 +124,23 @@ class MediaDB:
         if not text: return ""
         text = re.sub(r"<[^>]+>", "", text)
         
-        # 🔥 EXTENSION TRIMMER: Extension milti hi aage ka saara kachra uda dega!
+        # EXTENSION TRIMMER: Extension milti hi aage ka saara kachra uda dega!
         ext_regex = r"(?i)(.*?(?:\.(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)|\b(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)\b))"
         match = re.search(ext_regex, text, flags=re.DOTALL)
         if match: text = match.group(1)
 
+        # 🔥 NEW LOGIC: Starting se Brackets aur Emojis/Symbols hatana
+        while True:
+            old_text = text
+            # 1. Starting me bracket ho aur andar text ho (eg: [Telegram] ya (HD))
+            text = re.sub(r"^(?:\[.*?\]|\(.*?\)|\{.*?\}|<.*?>)\s*", "", text).strip()
+            # 2. Starting me koi ajeeb symbol ya emoji ho (jo a-z, 0-9 nahi hai)
+            text = re.sub(r"^[^\w\s]+\s*", "", text).strip()
+            # Agar aur kuch nahi hata, toh loop tod do
+            if text == old_text:
+                break
+
+        # Promo Patterns aur Spam hatana
         promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
         text = re.sub(r"\[[^\]]*(?:" + promo_patterns + r")[^\]]*\]", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\([^)]*(?:" + promo_patterns + r")[^)]*\)", "", text, flags=re.IGNORECASE)
@@ -216,7 +228,7 @@ class MediaDB:
                 first_line = clean_raw_cap.strip().split('\n')[0]
                 clean_cap_line = self.clean_text(first_line)
             
-            # Display Name Generation
+            # Display Name Generation (Smart Decision)
             if clean_cap_line and clean_fname != clean_cap_line and len(clean_cap_line) > 3:
                 final_display_name = clean_cap_line
             else:
@@ -237,8 +249,9 @@ class MediaDB:
 
             raw_hidden_data = f"{self.clean_text(raw_fname)} {self.clean_text(raw_cap)}"
             
-            # Links & Spam Removal
-            clean_hidden_data = re.sub(r"<[^>]+>|https?://\S+|www\.\S+|t\.me/\S+|@\w+", " ", raw_hidden_data, flags=re.IGNORECASE)
+            promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
+            clean_hidden_data = re.sub(r"<[^>]+>", " ", raw_hidden_data)
+            clean_hidden_data = re.sub(promo_patterns, " ", clean_hidden_data, flags=re.IGNORECASE)
             
             roman_map = {r'I': '1', r'II': '2', r'III': '3', r'IV': '4', r'V': '5', r'VI': '6', r'VII': '7', r'VIII': '8', r'IX': '9', r'X': '10'}
             for roman, digit in roman_map.items():
@@ -264,33 +277,30 @@ class MediaDB:
                 for v in re.findall(rf"(?i){tag}(?:ume)?\s*(\d+)", orig_raw): variations.append(f"{tag}{v}")
 
             variation_text = " ".join(list(set(variations)))
-            
-            # 🔥 FIX 1: Spaceless name ko purely Alphanumeric kar diya (Bina brackets aur punctuation ke)
             spaceless_name = re.sub(r"[^\w]", "", final_display_name).lower()
             
-            # Jodna shuru
             raw_master_text = f"{clean_hidden_data} {spaceless_name} {variation_text}".lower()
-            
-            # 🔥 FIX 2: PUNCTUATION STRIPPER (Saare brackets [ ] { } ( ) hatakar space de dega)
             punctuation_stripped_text = re.sub(r"[^\w\s]", " ", raw_master_text)
-            
-            # Extra spaces hata do
             clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
             
-            # 🔥 THE MASTERSTROKE: Perfect Deduplication
-            # Ab kyunki sare brackets hat chuke hain, "[dual" aur "dual" dono sirf "dual" ban gaye.
-            # Aur dict.fromkeys un do "dual" ko automatically delete karke ek kar dega!
-            words_list = clean_master_text.split()
-            unique_words = list(dict.fromkeys(words_list)) 
-            master_search_text = " ".join(unique_words)
+            # 🔥 THE ULTIMATE MAGIC (Minus Logic + Spam Filter)
+            all_search_words = set(clean_master_text.split())
+            display_words = set(re.sub(r"[^\w\s]", " ", final_display_name.lower()).split())
+            
+            # Blacklist (Jo hamesha delete honge)
+            spam_words = {"nf", "esub", "esubs", "hc", "x264", "x265", "10bit", "org", "rip", "webdl", "web", "dl", "download", "join", "mkv", "mp4", "avi", "hevc", "crav", "ddp", "aac", "ott", "hdrip", "bluray", "print", "audio", "dual", "multi", "subs", "sub", "telegram", "channel", "movies", "movie", "series", "hd", "hub", "link", "watch", "online", "free"}
+            
+            # Display words hataye, phir spam hataya
+            final_unique_words = (all_search_words - display_words) - spam_words
+            
+            master_search_text = " ".join(final_unique_words)
 
             file_type = "video" if message.video else "document"
 
             data_docs.append({'_id': current_id, 'msg_id': message.id, 'chat_id': message.chat.id, 'file_id': media.file_id, 'file_unique_id': media.file_unique_id, 'file_type': file_type})
             
-            # DB Projection
             search_doc = {
-                'display_name': final_display_name,
+                'file_name': final_display_name,
                 'file_size': media.file_size, 
                 'search_text': master_search_text, 
                 'link_id': current_id, 
@@ -369,11 +379,11 @@ class MediaDB:
             if file_type and file_type != "none": match_filters["file_type"] = "video" if file_type.lower() == "video" else "document"
             if lang and lang != "none":
                 pattern = LANG_MAP.get(lang, lang)
-                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"languages": lang}, {"display_name": {"$regex": pattern, "$options": "i"}}]}]
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": pattern, "$options": "i"}}]}]
             if quality and quality != "none":
-                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"quality": quality}, {"display_name": {"$regex": quality, "$options": "i"}}]}]
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"quality": quality}, {"file_name": {"$regex": quality, "$options": "i"}}]}]
             if year and year != "none":
-                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"year": str(year)}, {"display_name": {"$regex": str(year)}}]}]
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
             if size_range and size_range != "none":
                 MB_500, GB_1, GB_2 = 500*1024*1024, 1024*1024*1024, 2*1024*1024*1024
                 if size_range == "min500": match_filters["file_size"] = {"$lt": MB_500}
@@ -388,11 +398,11 @@ class MediaDB:
             safe_title_phrase = re.escape(" ".join(title_words))
             safe_first_word = re.escape(title_words[0]) if title_words else ""
 
-            match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": rf"\b{safe_raw_query}\b", "options": "i"}}, 5000, 0]})
+            match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{safe_raw_query}\b", "options": "i"}}, 5000, 0]})
             if safe_title_phrase and safe_title_phrase != safe_raw_query:
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": rf"\b{safe_title_phrase}\b", "options": "i"}}, 1000, 0]})
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{safe_title_phrase}\b", "options": "i"}}, 1000, 0]})
             if safe_first_word:
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": rf"^[\W_]*{safe_first_word}\b", "options": "i"}}, 500, 0]})
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"^[\W_]*{safe_first_word}\b", "options": "i"}}, 500, 0]})
 
             for w in words: 
                 is_lang = w in ["hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "english", "dual", "multi", "punjabi", "marathi"]
@@ -407,15 +417,15 @@ class MediaDB:
                 name_weight = 300 if is_lang else (20 if is_meta else 100)
                 text_weight = 50 if is_lang else (5 if is_meta else 20)
                 
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": safe_w_regex, "options": "i"}}, name_weight, 0]})
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": safe_w_regex, "options": "i"}}, name_weight, 0]})
                 match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": safe_w_regex, "options": "i"}}, text_weight, 0]})
 
             pipeline = [
                 {"$match": match_filters},
                 {"$project": {
-                    "display_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
+                    "file_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
                     "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1, "score": {"$meta": "textScore"},
-                    "name_length": {"$strLenCP": {"$ifNull": ["$display_name", ""]}}
+                    "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}
                 }},
                 {"$addFields": {"custom_score": {"$add": match_conditions}}}
             ]
@@ -440,22 +450,22 @@ class MediaDB:
                 for tw in words:
                     if tw in alias_map: safe_tw = rf"\b{alias_map[tw]}\b"
                     else:
-                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not w.endswith('ss')) else tw
+                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not w.endswith('ss')) else w
                         safe_tw = rf"\b{re.escape(base)}s?\b"
                         
                     fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})
-                    fallback_or_clauses.append({"display_name": {"$regex": safe_tw, "$options": "i"}})
+                    fallback_or_clauses.append({"file_name": {"$regex": safe_tw, "$options": "i"}})
                     
-                if fallback_or_clauses: fallback_match["$or"] = fallback_or_clauses
+                if fallback_match: fallback_match["$or"] = fallback_or_clauses
                 
                 if file_type and file_type != "none": fallback_match["file_type"] = "video" if file_type.lower() == "video" else "document"
 
                 fallback_pipeline = [
                     {"$match": fallback_match},
                     {"$project": {
-                        "display_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
+                        "file_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
                         "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1,
-                        "name_length": {"$strLenCP": {"$ifNull": ["$display_name", ""]}}
+                        "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}
                     }},
                     {"$addFields": {"custom_score": {"$add": match_conditions}}}
                 ]
@@ -483,7 +493,7 @@ class MediaDB:
         unique_id = str(uuid.uuid4())[:8]
         simplified_files = []
         for file in files:
-            safe_name = file.get('display_name', 'Unknown')
+            safe_name = file.get('file_name', 'Unknown')
             simplified_files.append({
                 "file_name": safe_name, 
                 "file_size": file.get('file_size', 0), 

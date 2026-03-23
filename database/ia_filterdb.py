@@ -235,7 +235,6 @@ class MediaDB:
                 "source": list(set(meta_name['source'] + meta_cap['source']))
             }
 
-            # 🔥 OPTIMIZATION: Raw search data bhi extension tak cut hoga!
             raw_hidden_data = f"{self.clean_text(raw_fname)} {self.clean_text(raw_cap)}"
             
             # Links & Spam Removal
@@ -265,22 +264,31 @@ class MediaDB:
                 for v in re.findall(rf"(?i){tag}(?:ume)?\s*(\d+)", orig_raw): variations.append(f"{tag}{v}")
 
             variation_text = " ".join(list(set(variations)))
-            spaceless_name = final_display_name.replace(" ", "").replace("-", "").replace(".", "")
             
+            # 🔥 FIX 1: Spaceless name ko purely Alphanumeric kar diya (Bina brackets aur punctuation ke)
+            spaceless_name = re.sub(r"[^\w]", "", final_display_name).lower()
+            
+            # Jodna shuru
             raw_master_text = f"{clean_hidden_data} {spaceless_name} {variation_text}".lower()
-            clean_master_text = re.sub(r"\s+", " ", raw_master_text).strip()
             
-            # 🔥 THE MASTERSTROKE: Token Deduplication (Remove duplicate words)
+            # 🔥 FIX 2: PUNCTUATION STRIPPER (Saare brackets [ ] { } ( ) hatakar space de dega)
+            punctuation_stripped_text = re.sub(r"[^\w\s]", " ", raw_master_text)
+            
+            # Extra spaces hata do
+            clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
+            
+            # 🔥 THE MASTERSTROKE: Perfect Deduplication
+            # Ab kyunki sare brackets hat chuke hain, "[dual" aur "dual" dono sirf "dual" ban gaye.
+            # Aur dict.fromkeys un do "dual" ko automatically delete karke ek kar dega!
             words_list = clean_master_text.split()
             unique_words = list(dict.fromkeys(words_list)) 
             master_search_text = " ".join(unique_words)
-            # Master string is now ultra-lightweight!
 
             file_type = "video" if message.video else "document"
 
             data_docs.append({'_id': current_id, 'msg_id': message.id, 'chat_id': message.chat.id, 'file_id': media.file_id, 'file_unique_id': media.file_unique_id, 'file_type': file_type})
             
-            # DB Projection: Storage bachane ke liye sirf Zaroori cheezein
+            # DB Projection
             search_doc = {
                 'display_name': final_display_name,
                 'file_size': media.file_size, 
@@ -297,7 +305,6 @@ class MediaDB:
             search_docs.append(search_doc)
             current_id += 1
 
-        # BUG FIX: Ensure both tables sync properly even if one document fails
         saved_count = 0
         if data_docs:
             try:
@@ -476,7 +483,6 @@ class MediaDB:
         unique_id = str(uuid.uuid4())[:8]
         simplified_files = []
         for file in files:
-            # Output Dictionary mappings to keep other Bot Files crash-free
             safe_name = file.get('display_name', 'Unknown')
             simplified_files.append({
                 "file_name": safe_name, 

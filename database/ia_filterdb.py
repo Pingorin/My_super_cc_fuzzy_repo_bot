@@ -41,11 +41,12 @@ class MediaDB:
         try:
             try:
                 await self.search_col.drop_indexes()
+                print("♻️ Old Indexes Dropped Successfully.")
             except OperationFailure:
                 pass 
 
             # Optimized Indexes for Memory Saving
-            await self.search_col.create_index("file_name")
+            await self.search_col.create_index("display_name")
             await self.search_col.create_index("search_text") 
             await self.search_col.create_index("quality") 
             await self.search_col.create_index("languages") 
@@ -55,7 +56,7 @@ class MediaDB:
             # 🚀 FULL-TEXT INDEX (Lean & Mean)
             await self.search_col.create_index(
                 [
-                    ("file_name", TEXT),
+                    ("display_name", TEXT),
                     ("search_text", TEXT),
                     ("languages", TEXT),
                     ("quality", TEXT),
@@ -68,7 +69,7 @@ class MediaDB:
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
             await self.temp_searches.create_index("created_at", expireAfterSeconds=172800)
             
-            print("✅ Database Indexes Created Successfully! (Optimized Storage)")
+            print("✅ Database Indexes Created Successfully! (Ultra Optimized Storage)")
         except Exception as e:
             print(f"❌ Error Creating Indexes: {e}")
 
@@ -122,6 +123,8 @@ class MediaDB:
     def clean_text(text):
         if not text: return ""
         text = re.sub(r"<[^>]+>", "", text)
+        
+        # 🔥 EXTENSION TRIMMER: Extension milti hi aage ka saara kachra uda dega!
         ext_regex = r"(?i)(.*?(?:\.(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)|\b(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)\b))"
         match = re.search(ext_regex, text, flags=re.DOTALL)
         if match: text = match.group(1)
@@ -141,6 +144,7 @@ class MediaDB:
     @staticmethod
     def parse_metadata(text):
         if not text: return {"cleaned_title": "", "quality": [], "languages": [], "source": [], "year": []}
+        
         ext_regex = r"(?i)(.*?(?:\.(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)|\b(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)\b))"
         match = re.search(ext_regex, text, flags=re.DOTALL)
         if match: text = match.group(1)
@@ -212,7 +216,7 @@ class MediaDB:
                 first_line = clean_raw_cap.strip().split('\n')[0]
                 clean_cap_line = self.clean_text(first_line)
             
-            # Display Name Generator
+            # Display Name Generation
             if clean_cap_line and clean_fname != clean_cap_line and len(clean_cap_line) > 3:
                 final_display_name = clean_cap_line
             else:
@@ -231,22 +235,27 @@ class MediaDB:
                 "source": list(set(meta_name['source'] + meta_cap['source']))
             }
 
-            hidden_search_data = f"{raw_fname} {raw_cap}" 
+            # 🔥 OPTIMIZATION: Raw search data bhi extension tak cut hoga!
+            raw_hidden_data = f"{self.clean_text(raw_fname)} {self.clean_text(raw_cap)}"
+            
+            # Links & Spam Removal
+            clean_hidden_data = re.sub(r"<[^>]+>|https?://\S+|www\.\S+|t\.me/\S+|@\w+", " ", raw_hidden_data, flags=re.IGNORECASE)
+            
             roman_map = {r'I': '1', r'II': '2', r'III': '3', r'IV': '4', r'V': '5', r'VI': '6', r'VII': '7', r'VIII': '8', r'IX': '9', r'X': '10'}
             for roman, digit in roman_map.items():
-                hidden_search_data = re.sub(rf"(?i)(?<=\s)\b{roman}\b", digit, hidden_search_data)
+                clean_hidden_data = re.sub(rf"(?i)(?<=\s)\b{roman}\b", digit, clean_hidden_data)
 
-            hidden_search_data = re.sub(r"(?i)\bS(\d+)\s*E(\d+)\b", r"S\1 E\2", hidden_search_data)
-            hidden_search_data = re.sub(r"(?i)\bS(\d+)\s*(?:-|to)\s*(?:S)?(\d+)\b", lambda m: " ".join([f"S{str(i).zfill(2)}" for i in range(int(m.group(1)), int(m.group(2)) + 1)]), hidden_search_data)
-            hidden_search_data = re.sub(r"(?i)\bE(\d+)\s*(?:-|to)\s*(?:E)?(\d+)\b", lambda m: " ".join([f"E{str(i).zfill(2)}" for i in range(int(m.group(1)), int(m.group(2)) + 1)]), hidden_search_data)
-            hidden_search_data = re.sub(r"(?i)\b(\d{1,2})\s*x\s*(\d{1,4})\b", r"S\1 E\2", hidden_search_data)
-            hidden_search_data = re.sub(r"(?i)\b(?:season|s)\s*(\d+)\b", r"S\1", hidden_search_data)
-            hidden_search_data = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", hidden_search_data)
+            clean_hidden_data = re.sub(r"(?i)\bS(\d+)\s*E(\d+)\b", r"S\1 E\2", clean_hidden_data)
+            clean_hidden_data = re.sub(r"(?i)\bS(\d+)\s*(?:-|to)\s*(?:S)?(\d+)\b", lambda m: " ".join([f"S{str(i).zfill(2)}" for i in range(int(m.group(1)), int(m.group(2)) + 1)]), clean_hidden_data)
+            clean_hidden_data = re.sub(r"(?i)\bE(\d+)\s*(?:-|to)\s*(?:E)?(\d+)\b", lambda m: " ".join([f"E{str(i).zfill(2)}" for i in range(int(m.group(1)), int(m.group(2)) + 1)]), clean_hidden_data)
+            clean_hidden_data = re.sub(r"(?i)\b(\d{1,2})\s*x\s*(\d{1,4})\b", r"S\1 E\2", clean_hidden_data)
+            clean_hidden_data = re.sub(r"(?i)\b(?:season|s)\s*(\d+)\b", r"S\1", clean_hidden_data)
+            clean_hidden_data = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", clean_hidden_data)
 
             variations = []
             orig_raw = (media.file_name or "").lower() 
-            seasons = re.findall(r"(?i)\bS(\d+)\b", hidden_search_data)
-            episodes = re.findall(r"(?i)\bE(\d+)\b", hidden_search_data)
+            seasons = re.findall(r"(?i)\bS(\d+)\b", clean_hidden_data)
+            episodes = re.findall(r"(?i)\bE(\d+)\b", clean_hidden_data)
             for s in seasons: variations.append(f"s{int(s)} s{str(int(s)).zfill(2)} season{int(s)}")
             for e in episodes: variations.append(f"e{int(e)} e{str(int(e)).zfill(2)} ep{int(e)}")
             for s in seasons:
@@ -258,13 +267,22 @@ class MediaDB:
             variation_text = " ".join(list(set(variations)))
             spaceless_name = final_display_name.replace(" ", "").replace("-", "").replace(".", "")
             
-            master_search_text = f"{final_display_name} {hidden_search_data} {spaceless_name} {variation_text}".lower()
+            raw_master_text = f"{clean_hidden_data} {spaceless_name} {variation_text}".lower()
+            clean_master_text = re.sub(r"\s+", " ", raw_master_text).strip()
+            
+            # 🔥 THE MASTERSTROKE: Token Deduplication (Remove duplicate words)
+            words_list = clean_master_text.split()
+            unique_words = list(dict.fromkeys(words_list)) 
+            master_search_text = " ".join(unique_words)
+            # Master string is now ultra-lightweight!
+
             file_type = "video" if message.video else "document"
 
             data_docs.append({'_id': current_id, 'msg_id': message.id, 'chat_id': message.chat.id, 'file_id': media.file_id, 'file_unique_id': media.file_unique_id, 'file_type': file_type})
             
+            # DB Projection: Storage bachane ke liye sirf Zaroori cheezein
             search_doc = {
-                'file_name': final_display_name, # Taki aapka bot error na de
+                'display_name': final_display_name,
                 'file_size': media.file_size, 
                 'search_text': master_search_text, 
                 'link_id': current_id, 
@@ -279,7 +297,7 @@ class MediaDB:
             search_docs.append(search_doc)
             current_id += 1
 
-        # 🔥 THE BUG FIX (Dono Insertions ko isolate kar diya hai!)
+        # BUG FIX: Ensure both tables sync properly even if one document fails
         saved_count = 0
         if data_docs:
             try:
@@ -288,7 +306,7 @@ class MediaDB:
             except BulkWriteError as bwe:
                 saved_count = bwe.details['nInserted']
             except Exception as e:
-                pass # Silent fail but don't stop!
+                pass 
         
         if search_docs:
             try:
@@ -344,11 +362,11 @@ class MediaDB:
             if file_type and file_type != "none": match_filters["file_type"] = "video" if file_type.lower() == "video" else "document"
             if lang and lang != "none":
                 pattern = LANG_MAP.get(lang, lang)
-                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": pattern, "$options": "i"}}]}]
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"languages": lang}, {"display_name": {"$regex": pattern, "$options": "i"}}]}]
             if quality and quality != "none":
-                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"quality": quality}, {"file_name": {"$regex": quality, "$options": "i"}}]}]
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"quality": quality}, {"display_name": {"$regex": quality, "$options": "i"}}]}]
             if year and year != "none":
-                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
+                match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"year": str(year)}, {"display_name": {"$regex": str(year)}}]}]
             if size_range and size_range != "none":
                 MB_500, GB_1, GB_2 = 500*1024*1024, 1024*1024*1024, 2*1024*1024*1024
                 if size_range == "min500": match_filters["file_size"] = {"$lt": MB_500}
@@ -363,11 +381,11 @@ class MediaDB:
             safe_title_phrase = re.escape(" ".join(title_words))
             safe_first_word = re.escape(title_words[0]) if title_words else ""
 
-            match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{safe_raw_query}\b", "options": "i"}}, 5000, 0]})
+            match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": rf"\b{safe_raw_query}\b", "options": "i"}}, 5000, 0]})
             if safe_title_phrase and safe_title_phrase != safe_raw_query:
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{safe_title_phrase}\b", "options": "i"}}, 1000, 0]})
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": rf"\b{safe_title_phrase}\b", "options": "i"}}, 1000, 0]})
             if safe_first_word:
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"^[\W_]*{safe_first_word}\b", "options": "i"}}, 500, 0]})
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": rf"^[\W_]*{safe_first_word}\b", "options": "i"}}, 500, 0]})
 
             for w in words: 
                 is_lang = w in ["hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "english", "dual", "multi", "punjabi", "marathi"]
@@ -382,15 +400,15 @@ class MediaDB:
                 name_weight = 300 if is_lang else (20 if is_meta else 100)
                 text_weight = 50 if is_lang else (5 if is_meta else 20)
                 
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": safe_w_regex, "options": "i"}}, name_weight, 0]})
+                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$display_name", ""]}, "regex": safe_w_regex, "options": "i"}}, name_weight, 0]})
                 match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": safe_w_regex, "options": "i"}}, text_weight, 0]})
 
             pipeline = [
                 {"$match": match_filters},
                 {"$project": {
-                    "file_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
+                    "display_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
                     "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1, "score": {"$meta": "textScore"},
-                    "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}
+                    "name_length": {"$strLenCP": {"$ifNull": ["$display_name", ""]}}
                 }},
                 {"$addFields": {"custom_score": {"$add": match_conditions}}}
             ]
@@ -415,11 +433,11 @@ class MediaDB:
                 for tw in words:
                     if tw in alias_map: safe_tw = rf"\b{alias_map[tw]}\b"
                     else:
-                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not w.endswith('ss')) else w
+                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not w.endswith('ss')) else tw
                         safe_tw = rf"\b{re.escape(base)}s?\b"
                         
                     fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})
-                    fallback_or_clauses.append({"file_name": {"$regex": safe_tw, "$options": "i"}})
+                    fallback_or_clauses.append({"display_name": {"$regex": safe_tw, "$options": "i"}})
                     
                 if fallback_or_clauses: fallback_match["$or"] = fallback_or_clauses
                 
@@ -428,9 +446,9 @@ class MediaDB:
                 fallback_pipeline = [
                     {"$match": fallback_match},
                     {"$project": {
-                        "file_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
+                        "display_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
                         "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1,
-                        "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}
+                        "name_length": {"$strLenCP": {"$ifNull": ["$display_name", ""]}}
                     }},
                     {"$addFields": {"custom_score": {"$add": match_conditions}}}
                 ]
@@ -458,13 +476,15 @@ class MediaDB:
         unique_id = str(uuid.uuid4())[:8]
         simplified_files = []
         for file in files:
-            safe_name = file.get('file_name', 'Unknown')
+            # Output Dictionary mappings to keep other Bot Files crash-free
+            safe_name = file.get('display_name', 'Unknown')
             simplified_files.append({
                 "file_name": safe_name, 
                 "file_size": file.get('file_size', 0), 
                 "link_id": file.get('link_id', 0),
                 "file_chat_id": file.get('chat_id', 0), 
-                "file_type": file.get('file_type', 'document')
+                "file_type": file.get('file_type', 'document'),
+                "caption": safe_name
             })
         await self.search_cache.insert_one({"_id": unique_id, "query": query, "chat_id": chat_id, "files": simplified_files, "created_at": datetime.datetime.utcnow()})
         return unique_id

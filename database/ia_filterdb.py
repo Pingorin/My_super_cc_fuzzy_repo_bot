@@ -3,6 +3,7 @@ import re
 import datetime
 import uuid
 import html  
+import difflib  
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError, OperationFailure
 from pymongo import ReturnDocument, ASCENDING, TEXT
@@ -54,7 +55,7 @@ class MediaDB:
             await self.search_col.create_index("year") 
             await self.search_col.create_index("link_id")
             
-            # 🚀 FULL-TEXT INDEX (The Golden Balance - Highly Optimized)
+            # 🚀 FULL-TEXT INDEX (The Golden Balance)
             await self.search_col.create_index(
                 [
                     ("file_name", TEXT),
@@ -121,16 +122,14 @@ class MediaDB:
     @staticmethod
     def clean_text(text):
         if not text: return ""
-        # 🔥 Telegram ke HTML entity (&amp;) ko asali '&' symbol me convert karega!
         text = html.unescape(text)
         text = re.sub(r"<[^>]+>", "", text)
         
-        # ✂️ EXTENSION TRIMMER: Extension milti hi aage ka saara kachra uda dega!
+        # ✂️ EXTENSION TRIMMER: Naam saaf karne ke liye
         ext_regex = r"(?i)(.*?(?:\.(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)|\b(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)\b))"
         match = re.search(ext_regex, text, flags=re.DOTALL)
         if match: text = match.group(1)
 
-        # 🧹 LOGIC: Starting se Brackets aur Emojis/Symbols hatana ('&' ko safe rakha)
         while True:
             old_text = text
             text = re.sub(r"^(?:\[.*?\]|\(.*?\)|\{.*?\}|<.*?>)\s*", "", text).strip()
@@ -148,7 +147,6 @@ class MediaDB:
         spam_and_tags = [r"download", r"full movie", r"free", r"watch online", r"join", r"esub", r"hc-esub", r"x264", r"x265", r"code"]
         text = re.sub(r"\b(" + "|".join(spam_and_tags) + r")\b", "", text, flags=re.IGNORECASE)
         
-        # '&' is safe here too
         text = re.sub(r"[^\w\s:()\[\]{}\-&]|_", " ", text)
         return re.sub(r"\s+", " ", text).strip()
 
@@ -157,9 +155,7 @@ class MediaDB:
         if not text: return {"cleaned_title": "", "quality": [], "languages": [], "source": [], "year": []}
         
         text = html.unescape(text)
-        
-        # 🔥 EXTENSION TRIMMER YAHAN SE HATA DIYA HAI 
-        # Taaki .mkv ke baad bhi 1080p, 2023, Hindi likha ho toh bot poori line padh sake.
+        # 🔥 TRIMMER REMOVED FROM HERE
         
         cleaned_title = text
         metadata = {"quality": set(), "languages": set(), "source": set(), "year": set()}
@@ -220,7 +216,6 @@ class MediaDB:
             raw_fname = media.file_name or ""
             raw_cap = message.caption.html if message.caption else ""
             
-            # 1. Parsing Metadata from RAW TEXT so we don't miss anything after extension
             meta_name = self.parse_metadata(raw_fname)
             meta_cap = self.parse_metadata(raw_cap)
 
@@ -231,38 +226,32 @@ class MediaDB:
                 "source": list(set(meta_name['source'] + meta_cap['source']))
             }
             
-            # 🔥 DONO KO EXTENSION TAK CUT KAR DIYA TAAKI KACHRA NA JAYE
             clean_fname = self.clean_text(raw_fname)
             clean_full_cap = self.clean_text(raw_cap)
             
-            # 🔥 THE NEW "BEST LINE" SELECTOR 🔥
+            # 🔥 BEST LINE SELECTOR & RAW SCORING 🔥
             clean_cap_line = ""
+            score_cap = 0
             if raw_cap:
                 best_cap_line = ""
                 max_score = -1
                 meta_regex = r"(?i)(1080p|720p|480p|4k|2160p|s\d+|e\d+|\b19\d{2}\b|\b20\d{2}\b|hindi|tamil|telugu|dual)"
                 
-                # Caption ki har ek line ko check karega
                 for line in html.unescape(raw_cap).split('\n'):
+                    raw_score = len(re.findall(meta_regex, line))
                     cleaned_line = self.clean_text(line)
-                    score = len(re.findall(meta_regex, cleaned_line))
-                    # Jis line me sabse zyada info hogi, usko chhunega
-                    if score > max_score and len(cleaned_line) > 3:
-                        max_score = score
+                    if raw_score > max_score and len(cleaned_line) > 3:
+                        max_score = raw_score
                         best_cap_line = cleaned_line
                 
                 clean_cap_line = best_cap_line
+                score_cap = max_score
             
             # 👑 SMART CAPTION PRIORITY LOGIC
+            score_fname = len(re.findall(meta_regex, raw_fname))
+            
             if clean_cap_line and len(clean_cap_line) > 3:
-                meta_regex = r"(?i)(1080p|720p|480p|4k|2160p|s\d+|e\d+|\b19\d{2}\b|\b20\d{2}\b|hindi|tamil|telugu|dual)"
-                score_cap = len(re.findall(meta_regex, clean_cap_line))
-                score_fname = len(re.findall(meta_regex, clean_fname))
-                
-                # Agar Caption ka score 0 hai, toh File Name jitega
-                if score_cap == 0:
-                    final_display_name = clean_fname
-                elif score_fname > score_cap:
+                if score_cap == 0 and score_fname > 0:
                     final_display_name = clean_fname
                 else:
                     final_display_name = clean_cap_line 
@@ -272,11 +261,10 @@ class MediaDB:
             if not final_display_name:
                 final_display_name = "Unknown File"
 
-            # 🔥 NAYA LOGIC: Season aur Episode ko BINA KATE (Raw) text se nikalna!
+            # 🔥 RAW TEXT EXTRACTION FOR SEASONS/EPISODES 🔥
             untrimmed_raw_text = f"{raw_fname} {raw_cap}"
             untrimmed_raw_text = re.sub(r"(?i)\bS(\d+)\s*E(\d+)\b", r"S\1 E\2", untrimmed_raw_text)
             
-            # 🚨 MISSING RANGE CODE ADDED BACK (S01-05 aur E01-05 ko theek karega) 🚨
             untrimmed_raw_text = re.sub(r"(?i)\bS(\d+)\s*(?:-|to)\s*(?:S)?(\d+)\b", lambda m: " ".join([f"S{str(i).zfill(2)}" for i in range(int(m.group(1)), int(m.group(2)) + 1)]), untrimmed_raw_text)
             untrimmed_raw_text = re.sub(r"(?i)\bE(\d+)\s*(?:-|to)\s*(?:E)?(\d+)\b", lambda m: " ".join([f"E{str(i).zfill(2)}" for i in range(int(m.group(1)), int(m.group(2)) + 1)]), untrimmed_raw_text)
             
@@ -301,7 +289,6 @@ class MediaDB:
             variation_text = " ".join(list(set(variations)))
             spaceless_name = re.sub(r"[^\w]", "", final_display_name).lower()
 
-            # ✂️ HIDDEN DATA FOR SEARCH TEXT (Extension trimmed inputs used)
             raw_hidden_data = f"{clean_fname} {clean_full_cap}"
             
             promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
@@ -312,16 +299,13 @@ class MediaDB:
             for roman, digit in roman_map.items():
                 clean_hidden_data = re.sub(rf"(?i)(?<=\s)\b{roman}\b", digit, clean_hidden_data)
             
-            # 🔥 THE MASTER INJECTION 🔥 (Quality, Year, Lang) - Source (WEBRip etc.) add nahi hoga!
             meta_injection = " ".join(parsed_meta['quality'] + parsed_meta['year'] + parsed_meta['languages'])
             
             raw_master_text = f"{clean_hidden_data} {spaceless_name} {variation_text} {meta_injection}".lower()
             
-            # Safai - '&' is kept safe!
             punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)
             clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
             
-            # 🔥 STRICT DEDUPLICATION & SPAM BLACKLIST
             all_search_words = set(clean_master_text.split())
             display_words = set(re.sub(r"[^\w\s&]", " ", final_display_name.lower()).split())
             
@@ -374,7 +358,7 @@ class MediaDB:
         return await self.data_col.find_one({'_id': int(link_id)})
 
     # ==================================================================
-    # ⚡ MASTERMIND SCORING SEARCH 
+    # ⚡ MASTERMIND SCORING SEARCH & PYTHON FUZZY FILTER
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -471,12 +455,12 @@ class MediaDB:
             elif sort == "small": pipeline.append({"$sort": {"file_size": 1}}) 
             else: pipeline.append({"$sort": {"custom_score": -1, "name_length": 1, "_id": -1}}) 
 
+            # 🔥 MAIN HIGHWAY: Sahi spelling pe 100 result
             pipeline.append({"$limit": 100}) 
             cursor = self.search_col.aggregate(pipeline)
             files = await cursor.to_list(length=100)
             
             if not files: raise Exception("Empty Text Search Result. Forcing Safe Fallback.")
-            return files
 
         except Exception as e:
             try:
@@ -485,13 +469,18 @@ class MediaDB:
                 for tw in words:
                     if tw in alias_map: safe_tw = rf"\b{alias_map[tw]}\b"
                     else:
-                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not w.endswith('ss')) else tw
-                        safe_tw = rf"\b{re.escape(base)}s?\b"
+                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not tw.endswith('ss')) else tw
+                        
+                        # 🔥 NINJA TECHNIQUE: Wildcard Regex for spelling mistakes
+                        fuzzy_regex_word = ".?".join(list(re.escape(base)))
+                        safe_tw = rf"\b{fuzzy_regex_word}s?\b"
                         
                     fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})
                     fallback_or_clauses.append({"file_name": {"$regex": safe_tw, "$options": "i"}})
                     
-                if fallback_match: fallback_match["$or"] = fallback_or_clauses
+                # 🔥 BUG FIX: Only apply filter if words exist
+                if fallback_or_clauses: 
+                    fallback_match["$or"] = fallback_or_clauses
                 
                 if file_type and file_type != "none": fallback_match["file_type"] = "video" if file_type.lower() == "video" else "document"
 
@@ -511,11 +500,30 @@ class MediaDB:
                 elif sort == "small": fallback_pipeline.append({"$sort": {"file_size": 1}})
                 else: fallback_pipeline.append({"$sort": {"custom_score": -1, "name_length": 1, "_id": -1}})
 
-                fallback_pipeline.append({"$limit": 100})
+                # 🔥 EMERGENCY GALI: 30 Files Limit Breaker (Saves CPU)
+                fallback_pipeline.append({"$limit": 30})
                 cursor = self.search_col.aggregate(fallback_pipeline)
-                return await cursor.to_list(length=100)
+                files = await cursor.to_list(length=30)
             except Exception as inner_e:
-                return []
+                files = []
+
+        # 🔥 SMART PYTHON FUZZY FILTER & RE-RANKING (Zero DB Load) 🔥
+        if files:
+            query_title = " ".join(title_words).lower()
+            for file in files:
+                fname = file.get('file_name', '').lower()
+                
+                # Agar spelling exact same hai, VIP Pass (100% score)
+                if query_title in fname:
+                    file['fuzzy_score'] = 1.0
+                else:
+                    # Agar galat spelling hai, tabhi fuzzy calculation hogi
+                    file['fuzzy_score'] = difflib.SequenceMatcher(None, query_title, fname).ratio()
+            
+            # Jo files Custom Score + Fuzzy Score me best hongi, wo top par aayengi!
+            files.sort(key=lambda x: (x.get('custom_score', 0), x.get('fuzzy_score', 0)), reverse=True)
+
+        return files
 
     async def total_files_count(self): return await self.data_col.count_documents({})
     async def get_db_size(self):

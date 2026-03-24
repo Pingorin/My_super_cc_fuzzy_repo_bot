@@ -2,7 +2,7 @@ import logging
 import re
 import datetime
 import uuid
-import html  # 🔥 HTML kachre (&amp;) ko theek karne ke liye
+import html  
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError, OperationFailure
 from pymongo import ReturnDocument, ASCENDING, TEXT
@@ -158,10 +158,9 @@ class MediaDB:
         
         text = html.unescape(text)
         
-        ext_regex = r"(?i)(.*?(?:\.(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)|\b(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)\b))"
-        match = re.search(ext_regex, text, flags=re.DOTALL)
-        if match: text = match.group(1)
-
+        # 🔥 EXTENSION TRIMMER YAHAN SE HATA DIYA HAI 
+        # Taaki .mkv ke baad bhi 1080p, 2023, Hindi likha ho toh bot poori line padh sake.
+        
         cleaned_title = text
         metadata = {"quality": set(), "languages": set(), "source": set(), "year": set()}
 
@@ -221,6 +220,18 @@ class MediaDB:
             raw_fname = media.file_name or ""
             raw_cap = message.caption.html if message.caption else ""
             
+            # 1. Parsing Metadata from RAW TEXT so we don't miss anything after extension
+            meta_name = self.parse_metadata(raw_fname)
+            meta_cap = self.parse_metadata(raw_cap)
+
+            parsed_meta = {
+                "quality": list(set(meta_name['quality'] + meta_cap['quality'])),
+                "languages": list(set(meta_name['languages'] + meta_cap['languages'])),
+                "year": list(set(meta_name['year'] + meta_cap['year'])),
+                "source": list(set(meta_name['source'] + meta_cap['source']))
+            }
+            
+            # 🔥 DONO KO EXTENSION TAK CUT KAR DIYA TAAKI KACHRA NA JAYE
             clean_fname = self.clean_text(raw_fname)
             clean_full_cap = self.clean_text(raw_cap)
             
@@ -235,7 +246,7 @@ class MediaDB:
                 for line in html.unescape(raw_cap).split('\n'):
                     cleaned_line = self.clean_text(line)
                     score = len(re.findall(meta_regex, cleaned_line))
-                    # Jis line me sabse zyada info hogi, usko chhunega!
+                    # Jis line me sabse zyada info hogi, usko chhunega
                     if score > max_score and len(cleaned_line) > 3:
                         max_score = score
                         best_cap_line = cleaned_line
@@ -248,7 +259,7 @@ class MediaDB:
                 score_cap = len(re.findall(meta_regex, clean_cap_line))
                 score_fname = len(re.findall(meta_regex, clean_fname))
                 
-                # Agar Caption ka score 0 hai, ya File Name me zyada details hain, toh File Name jitega
+                # Agar Caption ka score 0 hai, toh File Name jitega
                 if score_cap == 0:
                     final_display_name = clean_fname
                 elif score_fname > score_cap:
@@ -261,38 +272,24 @@ class MediaDB:
             if not final_display_name:
                 final_display_name = "Unknown File"
 
-            meta_name = self.parse_metadata(raw_fname)
-            meta_cap = self.parse_metadata(raw_cap)
-
-            parsed_meta = {
-                "quality": list(set(meta_name['quality'] + meta_cap['quality'])),
-                "languages": list(set(meta_name['languages'] + meta_cap['languages'])),
-                "year": list(set(meta_name['year'] + meta_cap['year'])),
-                "source": list(set(meta_name['source'] + meta_cap['source']))
-            }
-
-            # ✂️ HIDDEN DATA FOR SEARCH TEXT
-            raw_hidden_data = f"{clean_fname} {clean_full_cap}"
+            # 🔥 NAYA LOGIC: Season aur Episode ko BINA KATE (Raw) text se nikalna!
+            untrimmed_raw_text = f"{raw_fname} {raw_cap}"
+            untrimmed_raw_text = re.sub(r"(?i)\bS(\d+)\s*E(\d+)\b", r"S\1 E\2", untrimmed_raw_text)
             
-            promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
-            clean_hidden_data = re.sub(r"<[^>]+>", " ", raw_hidden_data)
-            clean_hidden_data = re.sub(promo_patterns, " ", clean_hidden_data, flags=re.IGNORECASE)
+            # 🚨 MISSING RANGE CODE ADDED BACK (S01-05 aur E01-05 ko theek karega) 🚨
+            untrimmed_raw_text = re.sub(r"(?i)\bS(\d+)\s*(?:-|to)\s*(?:S)?(\d+)\b", lambda m: " ".join([f"S{str(i).zfill(2)}" for i in range(int(m.group(1)), int(m.group(2)) + 1)]), untrimmed_raw_text)
+            untrimmed_raw_text = re.sub(r"(?i)\bE(\d+)\s*(?:-|to)\s*(?:E)?(\d+)\b", lambda m: " ".join([f"E{str(i).zfill(2)}" for i in range(int(m.group(1)), int(m.group(2)) + 1)]), untrimmed_raw_text)
             
-            roman_map = {r'I': '1', r'II': '2', r'III': '3', r'IV': '4', r'V': '5', r'VI': '6', r'VII': '7', r'VIII': '8', r'IX': '9', r'X': '10'}
-            for roman, digit in roman_map.items():
-                clean_hidden_data = re.sub(rf"(?i)(?<=\s)\b{roman}\b", digit, clean_hidden_data)
+            untrimmed_raw_text = re.sub(r"(?i)\b(\d{1,2})\s*x\s*(\d{1,4})\b", r"S\1 E\2", untrimmed_raw_text)
+            untrimmed_raw_text = re.sub(r"(?i)\b(?:season|s)\s*(\d+)\b", r"S\1", untrimmed_raw_text)
+            untrimmed_raw_text = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", untrimmed_raw_text)
 
-            clean_hidden_data = re.sub(r"(?i)\bS(\d+)\s*E(\d+)\b", r"S\1 E\2", clean_hidden_data)
-            clean_hidden_data = re.sub(r"(?i)\bS(\d+)\s*(?:-|to)\s*(?:S)?(\d+)\b", lambda m: " ".join([f"S{str(i).zfill(2)}" for i in range(int(m.group(1)), int(m.group(2)) + 1)]), clean_hidden_data)
-            clean_hidden_data = re.sub(r"(?i)\bE(\d+)\s*(?:-|to)\s*(?:E)?(\d+)\b", lambda m: " ".join([f"E{str(i).zfill(2)}" for i in range(int(m.group(1)), int(m.group(2)) + 1)]), clean_hidden_data)
-            clean_hidden_data = re.sub(r"(?i)\b(\d{1,2})\s*x\s*(\d{1,4})\b", r"S\1 E\2", clean_hidden_data)
-            clean_hidden_data = re.sub(r"(?i)\b(?:season|s)\s*(\d+)\b", r"S\1", clean_hidden_data)
-            clean_hidden_data = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", clean_hidden_data)
-
+            seasons = re.findall(r"(?i)\bS(\d+)\b", untrimmed_raw_text)
+            episodes = re.findall(r"(?i)\bE(\d+)\b", untrimmed_raw_text)
+            
             variations = []
             orig_raw = (media.file_name or "").lower() 
-            seasons = re.findall(r"(?i)\bS(\d+)\b", clean_hidden_data)
-            episodes = re.findall(r"(?i)\bE(\d+)\b", clean_hidden_data)
+            
             for s in seasons: variations.append(f"s{int(s)} s{str(int(s)).zfill(2)} season{int(s)}")
             for e in episodes: variations.append(f"e{int(e)} e{str(int(e)).zfill(2)} ep{int(e)}")
             for s in seasons:
@@ -303,8 +300,22 @@ class MediaDB:
 
             variation_text = " ".join(list(set(variations)))
             spaceless_name = re.sub(r"[^\w]", "", final_display_name).lower()
+
+            # ✂️ HIDDEN DATA FOR SEARCH TEXT (Extension trimmed inputs used)
+            raw_hidden_data = f"{clean_fname} {clean_full_cap}"
             
-            raw_master_text = f"{clean_hidden_data} {spaceless_name} {variation_text}".lower()
+            promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
+            clean_hidden_data = re.sub(r"<[^>]+>", " ", raw_hidden_data)
+            clean_hidden_data = re.sub(promo_patterns, " ", clean_hidden_data, flags=re.IGNORECASE)
+            
+            roman_map = {r'I': '1', r'II': '2', r'III': '3', r'IV': '4', r'V': '5', r'VI': '6', r'VII': '7', r'VIII': '8', r'IX': '9', r'X': '10'}
+            for roman, digit in roman_map.items():
+                clean_hidden_data = re.sub(rf"(?i)(?<=\s)\b{roman}\b", digit, clean_hidden_data)
+            
+            # 🔥 THE MASTER INJECTION 🔥 (Quality, Year, Lang) - Source (WEBRip etc.) add nahi hoga!
+            meta_injection = " ".join(parsed_meta['quality'] + parsed_meta['year'] + parsed_meta['languages'])
+            
+            raw_master_text = f"{clean_hidden_data} {spaceless_name} {variation_text} {meta_injection}".lower()
             
             # Safai - '&' is kept safe!
             punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)

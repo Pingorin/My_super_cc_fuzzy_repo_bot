@@ -2,6 +2,7 @@ import logging
 import re
 import datetime
 import uuid
+import html  # 🔥 HTML kachre (&amp;) ko theek karne ke liye
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError, OperationFailure
 from pymongo import ReturnDocument, ASCENDING, TEXT
@@ -58,7 +59,7 @@ class MediaDB:
                 [
                     ("file_name", TEXT),
                     ("search_text", TEXT),
-                    ("languages", TEXT)  # Short forms ke liye rakha, baaki hata diye
+                    ("languages", TEXT)  
                 ],
                 name="weighted_movie_search"
             )
@@ -120,6 +121,8 @@ class MediaDB:
     @staticmethod
     def clean_text(text):
         if not text: return ""
+        # 🔥 Telegram ke HTML entity (&amp;) ko asali '&' symbol me convert karega!
+        text = html.unescape(text)
         text = re.sub(r"<[^>]+>", "", text)
         
         # ✂️ EXTENSION TRIMMER: Extension milti hi aage ka saara kachra uda dega!
@@ -152,6 +155,8 @@ class MediaDB:
     @staticmethod
     def parse_metadata(text):
         if not text: return {"cleaned_title": "", "quality": [], "languages": [], "source": [], "year": []}
+        
+        text = html.unescape(text)
         
         ext_regex = r"(?i)(.*?(?:\.(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)|\b(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)\b))"
         match = re.search(ext_regex, text, flags=re.DOTALL)
@@ -216,24 +221,37 @@ class MediaDB:
             raw_fname = media.file_name or ""
             raw_cap = message.caption.html if message.caption else ""
             
-            # 🔥 DONO KO EXTENSION TAK CUT KAR DIYA
             clean_fname = self.clean_text(raw_fname)
             clean_full_cap = self.clean_text(raw_cap)
             
+            # 🔥 THE NEW "BEST LINE" SELECTOR 🔥
             clean_cap_line = ""
             if raw_cap:
-                clean_raw_cap = re.sub(r"<[^>]+>", "", raw_cap)
-                first_line = clean_raw_cap.strip().split('\n')[0]
-                clean_cap_line = self.clean_text(first_line)
+                best_cap_line = ""
+                max_score = -1
+                meta_regex = r"(?i)(1080p|720p|480p|4k|2160p|s\d+|e\d+|\b19\d{2}\b|\b20\d{2}\b|hindi|tamil|telugu|dual)"
+                
+                # Caption ki har ek line ko check karega
+                for line in html.unescape(raw_cap).split('\n'):
+                    cleaned_line = self.clean_text(line)
+                    score = len(re.findall(meta_regex, cleaned_line))
+                    # Jis line me sabse zyada info hogi, usko chhunega!
+                    if score > max_score and len(cleaned_line) > 3:
+                        max_score = score
+                        best_cap_line = cleaned_line
+                
+                clean_cap_line = best_cap_line
             
-            # 👑 FIRST PRIORITY: CAPTION (Smart Selector Logic)
-            if clean_cap_line and len(clean_cap_line) > 4:
+            # 👑 SMART CAPTION PRIORITY LOGIC
+            if clean_cap_line and len(clean_cap_line) > 3:
                 meta_regex = r"(?i)(1080p|720p|480p|4k|2160p|s\d+|e\d+|\b19\d{2}\b|\b20\d{2}\b|hindi|tamil|telugu|dual)"
                 score_cap = len(re.findall(meta_regex, clean_cap_line))
                 score_fname = len(re.findall(meta_regex, clean_fname))
                 
-                # Agar caption me metadata zero hai aur File Name me hai, tabhi File Name jitega
-                if score_cap == 0 and score_fname > 0:
+                # Agar Caption ka score 0 hai, ya File Name me zyada details hain, toh File Name jitega
+                if score_cap == 0:
+                    final_display_name = clean_fname
+                elif score_fname > score_cap:
                     final_display_name = clean_fname
                 else:
                     final_display_name = clean_cap_line 
@@ -253,7 +271,7 @@ class MediaDB:
                 "source": list(set(meta_name['source'] + meta_cap['source']))
             }
 
-            # ✂️ HIDDEN DATA FOR SEARCH TEXT (Extension trimmed inputs used)
+            # ✂️ HIDDEN DATA FOR SEARCH TEXT
             raw_hidden_data = f"{clean_fname} {clean_full_cap}"
             
             promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"

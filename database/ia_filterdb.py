@@ -53,14 +53,12 @@ class MediaDB:
             await self.search_col.create_index("year") 
             await self.search_col.create_index("link_id")
             
-            # 🚀 FULL-TEXT INDEX (Lean & Mean)
+            # 🚀 FULL-TEXT INDEX (The Golden Balance - Highly Optimized)
             await self.search_col.create_index(
                 [
                     ("file_name", TEXT),
                     ("search_text", TEXT),
-                    ("languages", TEXT),
-                    ("quality", TEXT),
-                    ("year", TEXT)
+                    ("languages", TEXT)  # Short forms ke liye rakha, baaki hata diye
                 ],
                 name="weighted_movie_search"
             )
@@ -124,23 +122,19 @@ class MediaDB:
         if not text: return ""
         text = re.sub(r"<[^>]+>", "", text)
         
-        # EXTENSION TRIMMER: Extension milti hi aage ka saara kachra uda dega!
+        # ✂️ EXTENSION TRIMMER: Extension milti hi aage ka saara kachra uda dega!
         ext_regex = r"(?i)(.*?(?:\.(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)|\b(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)\b))"
         match = re.search(ext_regex, text, flags=re.DOTALL)
         if match: text = match.group(1)
 
-        # 🔥 NEW LOGIC: Starting se Brackets aur Emojis/Symbols hatana
+        # 🧹 LOGIC: Starting se Brackets aur Emojis/Symbols hatana ('&' ko safe rakha)
         while True:
             old_text = text
-            # 1. Starting me bracket ho aur andar text ho (eg: [Telegram] ya (HD))
             text = re.sub(r"^(?:\[.*?\]|\(.*?\)|\{.*?\}|<.*?>)\s*", "", text).strip()
-            # 2. Starting me koi ajeeb symbol ya emoji ho (jo a-z, 0-9 nahi hai)
-            text = re.sub(r"^[^\w\s]+\s*", "", text).strip()
-            # Agar aur kuch nahi hata, toh loop tod do
+            text = re.sub(r"^[^\w\s&]+\s*", "", text).strip()
             if text == old_text:
                 break
 
-        # Promo Patterns aur Spam hatana
         promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
         text = re.sub(r"\[[^\]]*(?:" + promo_patterns + r")[^\]]*\]", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\([^)]*(?:" + promo_patterns + r")[^)]*\)", "", text, flags=re.IGNORECASE)
@@ -150,7 +144,9 @@ class MediaDB:
 
         spam_and_tags = [r"download", r"full movie", r"free", r"watch online", r"join", r"esub", r"hc-esub", r"x264", r"x265", r"code"]
         text = re.sub(r"\b(" + "|".join(spam_and_tags) + r")\b", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"[^\w\s:()\[\]{}\-]|_", " ", text)
+        
+        # '&' is safe here too
+        text = re.sub(r"[^\w\s:()\[\]{}\-&]|_", " ", text)
         return re.sub(r"\s+", " ", text).strip()
 
     @staticmethod
@@ -220,7 +216,9 @@ class MediaDB:
             raw_fname = media.file_name or ""
             raw_cap = message.caption.html if message.caption else ""
             
+            # 🔥 DONO KO EXTENSION TAK CUT KAR DIYA
             clean_fname = self.clean_text(raw_fname)
+            clean_full_cap = self.clean_text(raw_cap)
             
             clean_cap_line = ""
             if raw_cap:
@@ -228,9 +226,17 @@ class MediaDB:
                 first_line = clean_raw_cap.strip().split('\n')[0]
                 clean_cap_line = self.clean_text(first_line)
             
-            # Display Name Generation (Smart Decision)
-            if clean_cap_line and clean_fname != clean_cap_line and len(clean_cap_line) > 3:
-                final_display_name = clean_cap_line
+            # 👑 FIRST PRIORITY: CAPTION (Smart Selector Logic)
+            if clean_cap_line and len(clean_cap_line) > 4:
+                meta_regex = r"(?i)(1080p|720p|480p|4k|2160p|s\d+|e\d+|\b19\d{2}\b|\b20\d{2}\b|hindi|tamil|telugu|dual)"
+                score_cap = len(re.findall(meta_regex, clean_cap_line))
+                score_fname = len(re.findall(meta_regex, clean_fname))
+                
+                # Agar caption me metadata zero hai aur File Name me hai, tabhi File Name jitega
+                if score_cap == 0 and score_fname > 0:
+                    final_display_name = clean_fname
+                else:
+                    final_display_name = clean_cap_line 
             else:
                 final_display_name = clean_fname
                 
@@ -247,7 +253,8 @@ class MediaDB:
                 "source": list(set(meta_name['source'] + meta_cap['source']))
             }
 
-            raw_hidden_data = f"{self.clean_text(raw_fname)} {self.clean_text(raw_cap)}"
+            # ✂️ HIDDEN DATA FOR SEARCH TEXT (Extension trimmed inputs used)
+            raw_hidden_data = f"{clean_fname} {clean_full_cap}"
             
             promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
             clean_hidden_data = re.sub(r"<[^>]+>", " ", raw_hidden_data)
@@ -280,19 +287,18 @@ class MediaDB:
             spaceless_name = re.sub(r"[^\w]", "", final_display_name).lower()
             
             raw_master_text = f"{clean_hidden_data} {spaceless_name} {variation_text}".lower()
-            punctuation_stripped_text = re.sub(r"[^\w\s]", " ", raw_master_text)
+            
+            # Safai - '&' is kept safe!
+            punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)
             clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
             
-            # 🔥 THE ULTIMATE MAGIC (Minus Logic + Spam Filter)
+            # 🔥 STRICT DEDUPLICATION & SPAM BLACKLIST
             all_search_words = set(clean_master_text.split())
-            display_words = set(re.sub(r"[^\w\s]", " ", final_display_name.lower()).split())
+            display_words = set(re.sub(r"[^\w\s&]", " ", final_display_name.lower()).split())
             
-            # Blacklist (Jo hamesha delete honge)
-            spam_words = {"nf", "esub", "esubs", "hc", "x264", "x265", "10bit", "org", "rip", "webdl", "web", "dl", "download", "join", "mkv", "mp4", "avi", "hevc", "crav", "ddp", "aac", "ott", "hdrip", "bluray", "print", "audio", "dual", "multi", "subs", "sub", "telegram", "channel", "movies", "movie", "series", "hd", "hub", "link", "watch", "online", "free"}
+            spam_words = {"nf", "esub", "esubs", "hc", "x264", "x265", "10bit", "org", "rip", "webdl", "web", "dl", "download", "join", "mkv", "mp4", "avi", "hevc", "crav", "ddp", "aac", "ott", "hdrip", "bluray", "print", "audio", "dual", "multi", "subs", "sub", "telegram", "channel", "movies", "movie", "series", "hd", "hub", "link", "watch", "online", "free", "admin", "upload", "uploaded"}
             
-            # Display words hataye, phir spam hataya
             final_unique_words = (all_search_words - display_words) - spam_words
-            
             master_search_text = " ".join(final_unique_words)
 
             file_type = "video" if message.video else "document"
@@ -450,7 +456,7 @@ class MediaDB:
                 for tw in words:
                     if tw in alias_map: safe_tw = rf"\b{alias_map[tw]}\b"
                     else:
-                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not w.endswith('ss')) else w
+                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not w.endswith('ss')) else tw
                         safe_tw = rf"\b{re.escape(base)}s?\b"
                         
                     fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})

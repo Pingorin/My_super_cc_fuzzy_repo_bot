@@ -29,7 +29,6 @@ async def auto_delete_single(file_msg, warning_msg, command_data):
     except Exception:
         pass
     try:
-        # Button jo wapas same file mangwayega
         btn = [[InlineKeyboardButton("✅ ɢᴇᴛ ғɪʟᴇ ᴀɢᴀɪɴ ✅", url=f"https://t.me/{temp.U_NAME}?start={command_data}")]]
         await warning_msg.edit_text(
             "<b>✅ ʏᴏᴜʀ ᴍᴇssᴀɢᴇ ɪs sᴜᴄᴄᴇssғᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ ɪғ ʏᴏᴜ ᴡᴀɴᴛ ᴀɢᴀɪɴ ᴛʜᴇɴ ᴄʟɪᴄᴋ ᴏɴ ʙᴇʟᴏᴡ ʙᴜᴛᴛᴏɴ</b>",
@@ -123,12 +122,10 @@ async def grant_full_access(user_id, chat_id):
 async def check_verification(client, user_id, chat_id, link_id, message_obj):
     if not IS_VERIFY: return True 
 
-    # 💎 PREMIUM CHECK
     is_premium = await db.is_user_premium(user_id)
     if is_premium:
         return True 
 
-    # 👑 ADMIN FREE ACCESS CHECK
     try:
         group_settings = await db.get_group_settings(chat_id)
         if group_settings and group_settings.get('admin_free_access', False):
@@ -555,7 +552,7 @@ async def start_handler(client, message):
             cap_btn_url = group_settings.get('caption_btn_url')
             
             sent_count = 0
-            filesarr = [] # Sent messages ko save karne ke liye list
+            filesarr = [] 
             
             for file in files:
                 try:
@@ -579,9 +576,12 @@ async def start_handler(client, message):
                     if cap_btn_text and cap_btn_url:
                         btn_rows.append([InlineKeyboardButton(cap_btn_text, url=cap_btn_url)])
                     
-                    # ✅ Streaming Buttons (Sirf Buttons, No Link in Text)
+                    # 🔥 Reverted back to send_cached_media for FILE SAFETY!
                     try:
-                        bin_msg = await client.send_cached_media(chat_id=info.BIN_CHANNEL, file_id=file_details['file_id'])
+                        bin_msg = await client.send_cached_media(
+                            chat_id=info.BIN_CHANNEL, 
+                            file_id=file_details['file_id']
+                        )
                         base_url = info.SITE_URL.rstrip('/') if info.SITE_URL else "http://127.0.0.1:8080"
                         
                         watch_url = f"{base_url}/watch/{bin_msg.id}"
@@ -596,7 +596,7 @@ async def start_handler(client, message):
                     
                     reply_markup = InlineKeyboardMarkup(btn_rows) if btn_rows else None
 
-                    # File send aur save karna
+                    # 🔥 Reverted back to send_cached_media for USER!
                     sent_media = await client.send_cached_media(
                         chat_id=message.from_user.id,
                         file_id=file_details['file_id'],
@@ -615,11 +615,9 @@ async def start_handler(client, message):
             
             await msg.delete()
             
-            # End me sirf 1 warning message bhejenge (Send All ke case me)
             warning_msg = await message.reply(
                 "⚠️ **DHYAN DEIN:**\n\nYe saari files theek **1 minute** baad yahan se automatically delete ho jayengi. Kripya isko jaldi se apne Saved Messages me forward kar lein!"
             )
-            # Auto delete task start (Batch mode)
             asyncio.create_task(auto_delete_batch(filesarr, warning_msg))
             
             return
@@ -752,9 +750,12 @@ async def start_handler(client, message):
 
             btn_rows.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
 
-            # ✅ Streaming Buttons - No links in caption text
+            # 🔥 Reverted back to send_cached_media for BIN CHANNEL!
             try:
-                bin_msg = await client.send_cached_media(chat_id=info.BIN_CHANNEL, file_id=file_data.get('file_id'))
+                bin_msg = await client.send_cached_media(
+                    chat_id=info.BIN_CHANNEL, 
+                    file_id=file_data.get('file_id')
+                )
                 base_url = info.SITE_URL.rstrip('/') if info.SITE_URL else "http://127.0.0.1:8080"
                 
                 watch_url = f"{base_url}/watch/{bin_msg.id}"
@@ -771,7 +772,7 @@ async def start_handler(client, message):
                 reply_markup = InlineKeyboardMarkup(btn_rows)
 
             try: 
-                # File Send and save
+                # 🔥 Reverted back to send_cached_media for USER!
                 sent_media = await client.send_cached_media(
                     chat_id=message.from_user.id, 
                     file_id=file_data.get('file_id'), 
@@ -780,13 +781,11 @@ async def start_handler(client, message):
                     parse_mode=enums.ParseMode.HTML
                 )
                 
-                # File ko reply karke warning message bhejna
                 warning_msg = await sent_media.reply_text(
                     "⚠️ **DHYAN DEIN:**\n\nYe file theek **1 minute** baad yahan se automatically delete ho jayegi. Kripya isko jaldi se apne Saved Messages me forward kar lein!",
                     quote=True
                 )
                 
-                # Auto delete task start (Single mode)
                 asyncio.create_task(auto_delete_single(sent_media, warning_msg, message.command[1]))
                 
             except Exception as e: 
@@ -797,7 +796,6 @@ async def start_handler(client, message):
 
     # --- PRIVATE START MESSAGE UI (SETTINGS REDIRECT HANDLER ADDED) ---
     if message.chat.type == enums.ChatType.PRIVATE:
-        # If user was redirected from group to use /settings
         if len(message.command) > 1 and message.command[1] == "settings":
             from plugins.settings_ui import settings_command
             return await settings_command(client, message)
@@ -819,7 +817,6 @@ async def connect_handler(client, message):
         if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]: 
             return await message.reply("❌ **Admin Only.** You cannot use this.")
         
-        # Connect karte time Admins ko DB me save kar lo
         try:
             admin_ids = []
             async for admin in client.get_chat_members(message.chat.id, filter=enums.ChatMembersFilter.ADMINISTRATORS):
@@ -845,43 +842,49 @@ async def new_chat(client, message):
 async def set_shortner_dynamic(client, message): 
     await message.reply("⚠️ This command is deprecated. Please use /settings in PM to configure shorteners.")
 
+# ==============================================================================
+# 📊 NEW DETAILED /STATS COMMAND (512 MB DASHBOARD)
+# ==============================================================================
 @Client.on_message(filters.command("stats") & filters.user(ADMINS))
 async def stats_handler(client, message):
     try:
-        msg = await message.reply("🔄 Fetching stats...")
+        msg = await message.reply("🔄 Fetching detailed database stats...")
         
-        # Purana data (Users, Groups, Files)
         users = await db.total_users_count()
         groups = await db.total_groups_count()
         files = await Media.total_files_count()
         
-        # Naya DB Size data
-        db_size_bytes = await Media.get_db_size()
+        db_stats = await Media.get_detailed_stats()
         
-        # Memory Calculation (Bytes to MB) for 512 MB limit
-        used_mb = db_size_bytes / (1024 * 1024)
-        total_limit_mb = 512.0
-        free_mb = total_limit_mb - used_mb
-        percentage = (used_mb / total_limit_mb) * 100
+        total_mb = db_stats['total_size'] / (1024 * 1024)
+        text_idx_mb = db_stats['text_index_size'] / (1024 * 1024)
+        cache_mb = db_stats['cache_size'] / (1024 * 1024)
+        other_mb = db_stats['other_size'] / (1024 * 1024)
         
-        # Progress bar design
-        filled_blocks = int(percentage / 10)
+        max_limit_mb = 512.0
+        percent_used = (total_mb / max_limit_mb) * 100
+        free_mb = max_limit_mb - total_mb
+        
+        filled_blocks = int(percent_used / 10)
+        if filled_blocks > 10: filled_blocks = 10
         empty_blocks = 10 - filled_blocks
         progress_bar = "🟩" * filled_blocks + "⬜" * empty_blocks
         
-        # Final Message Text
         text = f"📊 **BOT STATISTICS**\n\n"
-        text += f"👤 **Users:** {users}\n"
-        text += f"👥 **Groups:** {groups}\n"
-        text += f"📂 **Files Indexed:** {files}\n\n"
-        text += f"💽 **Database Used:** `{used_mb:.2f} MB` / `512 MB`\n"
+        text += f"👤 **Users:** `{users}`\n"
+        text += f"👥 **Groups:** `{groups}`\n"
+        text += f"📂 **Files Indexed:** `{files}`\n\n"
+        text += f"💽 **Total Used Space:** `{total_mb:.2f} MB` / `{max_limit_mb} MB`\n"
         text += f"🟢 **Free Space:** `{free_mb:.2f} MB`\n"
-        text += f"📈 **Usage:** `{percentage:.2f}%`\n"
-        text += f"[{progress_bar}]\n"
+        text += f"📈 **Usage:** `{percent_used:.2f}%`\n"
+        text += f"[{progress_bar}]\n\n"
+        text += f"**--- Breakdown ---**\n"
+        text += f"🔍 **Text Index:** `{text_idx_mb:.2f} MB`\n"
+        text += f"🗑 **Cache & Temp:** `{cache_mb:.2f} MB`\n"
+        text += f"📁 **Main Data:** `{other_mb:.2f} MB`"
         
-        # Agar 90% se zyada bhar jaye toh warning
-        if percentage >= 90:
-            text += "\n⚠️ **WARNING: Database is almost full!**"
+        if percent_used >= 90:
+            text += "\n\n⚠️ **WARNING: Database is almost full!**"
             
         await msg.edit(text)
         
@@ -1019,9 +1022,8 @@ async def close_data(client, query):
 # ==============================================================================
 
 async def show_groups_page(client, request_obj, page):
-    LIMIT = 10  # Ek page par 10 groups aayenge
+    LIMIT = 10 
     
-    # 1. Total groups count karna (Ye instant hota hai)
     total_groups = await db.groups.count_documents({})
 
     if total_groups == 0:
@@ -1031,13 +1033,11 @@ async def show_groups_page(client, request_obj, page):
         else:
             return await request_obj.reply(text)
 
-    # 2. Pages calculate karna
     max_pages = (total_groups + LIMIT - 1) // LIMIT
     
     if page >= max_pages: page = max_pages - 1
     if page < 0: page = 0
     
-    # 3. MONGODB PAGINATION (Ultra Fast) - Sirf 10 group uthayega page ke hisab se
     skip_count = page * LIMIT
     cursor = db.groups.find({}).skip(skip_count).limit(LIMIT)
     
@@ -1049,12 +1049,10 @@ async def show_groups_page(client, request_obj, page):
             current_groups.append((title, chat_id))
     
     buttons = []
-    # Har group ke liye ek button banana
     for title, chat_id in current_groups:
         short_title = title[:30] + "..." if len(title) > 30 else title
         buttons.append([InlineKeyboardButton(f"📂 {short_title}", callback_data=f"get_grp_link#{chat_id}#{page}")])
         
-    # Pagination Row (Isse aap Next/Prev karke baki ke saare groups dekh payenge)
     nav_row = []
     if page > 0:
         nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"admin_grp_page#{page-1}"))
@@ -1075,10 +1073,8 @@ async def show_groups_page(client, request_obj, page):
         else:
             await request_obj.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
     except Exception as e:
-        pass # Ignore minor edit errors
+        pass 
 
-
-# 1️⃣ THE MAIN COMMAND
 @Client.on_message(filters.command("groups") & filters.private, group=-2)
 async def groups_list_command(client, message):
     user_id = message.from_user.id
@@ -1089,22 +1085,16 @@ async def groups_list_command(client, message):
     wait_msg = await message.reply("🔄 **Loading Groups...**")
     await show_groups_page(client, wait_msg, 0)
 
-
-# 2️⃣ PAGINATION CALLBACK
 @Client.on_callback_query(filters.regex(r"^admin_grp_page#"))
 async def admin_grp_page_handler(client, query):
     if query.from_user.id not in ADMINS:
         return await query.answer("❌ Not Allowed", show_alert=True)
         
-    # ✅ FIX 1: Button ka loading animation rokne ke liye
     await query.answer() 
     
     page = int(query.data.split("#")[1])
-    
-    # ✅ FIX 2: 'query' ki jagah 'query.message' pass karna hai
     await show_groups_page(client, query.message, page)
 
-# 3️⃣ GENERATE LINK ON CLICK
 @Client.on_callback_query(filters.regex(r"^get_grp_link#"))
 async def get_grp_link_handler(client, query):
     if query.from_user.id not in ADMINS:
@@ -1119,7 +1109,6 @@ async def get_grp_link_handler(client, query):
     try:
         chat = await client.get_chat(chat_id)
         
-        # Link nikalna (Agar pehle se link hai toh wo use karo, nahi toh naya banao)
         if chat.invite_link:
             invite_link = chat.invite_link
         else:

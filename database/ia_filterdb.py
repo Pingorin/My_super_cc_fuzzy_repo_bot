@@ -47,15 +47,13 @@ class MediaDB:
             except OperationFailure:
                 pass 
 
-            # Optimized Indexes for Memory Saving
-            await self.search_col.create_index("file_name")
-            await self.search_col.create_index("search_text") 
             await self.search_col.create_index("quality") 
             await self.search_col.create_index("languages") 
             await self.search_col.create_index("year") 
             await self.search_col.create_index("link_id")
             
-            # 🚀 FULL-TEXT INDEX (The Golden Balance)
+            await self.data_col.create_index("file_unique_id", unique=True)
+            
             await self.search_col.create_index(
                 [
                     ("file_name", TEXT),
@@ -65,11 +63,10 @@ class MediaDB:
                 name="weighted_movie_search"
             )
 
-            await self.data_col.create_index("file_unique_id", unique=True)
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
             await self.temp_searches.create_index("created_at", expireAfterSeconds=172800)
             
-            print("✅ Database Indexes Created Successfully! (Ultra Optimized Storage)")
+            print("✅ Database Indexes Created Successfully!")
         except Exception as e:
             print(f"❌ Error Creating Indexes: {e}")
 
@@ -125,7 +122,6 @@ class MediaDB:
         text = html.unescape(text)
         text = re.sub(r"<[^>]+>", "", text)
         
-        # ✂️ EXTENSION TRIMMER: Naam saaf karne ke liye
         ext_regex = r"(?i)(.*?(?:\.(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)|\b(?:mkv|mp4|avi|webm|m4v|flv|zip|rar|pdf|mka)\b))"
         match = re.search(ext_regex, text, flags=re.DOTALL)
         if match: text = match.group(1)
@@ -155,8 +151,6 @@ class MediaDB:
         if not text: return {"cleaned_title": "", "quality": [], "languages": [], "source": [], "year": []}
         
         text = html.unescape(text)
-        # 🔥 TRIMMER REMOVED FROM HERE
-        
         cleaned_title = text
         metadata = {"quality": set(), "languages": set(), "source": set(), "year": set()}
 
@@ -171,6 +165,7 @@ class MediaDB:
         for m in re.finditer(src_pattern, cleaned_title): metadata['source'].add(m.group(1).upper()) 
         cleaned_title = re.sub(src_pattern, "", cleaned_title)
 
+        # 🔥 RESTORED YOUR CUSTOM LANG_MAP LOGIC
         lang_map = {
             'hin': 'Hindi', 'hindi': 'Hindi', 'tam': 'Tamil', 'tamil': 'Tamil', 'tel': 'Telugu', 'telugu': 'Telugu',
             'mal': 'Malayalam', 'malayalam': 'Malayalam', 'kan': 'Kannada', 'kannada': 'Kannada', 'eng': 'English', 'english': 'English',
@@ -179,7 +174,7 @@ class MediaDB:
         lang_pattern = r"(?i)\b(hindi|hin|tamil|tam|telugu|tel|malayalam|mal|kannada|kan|english|eng|multi[\s\-]?audio|dual[\s\-]?audio)\b"
         for m in re.finditer(lang_pattern, cleaned_title):
             val = m.group(1).lower().replace('-', ' ').replace('audio', '').strip()
-            for key, mapped in LANG_MAP.items():
+            for key, mapped in lang_map.items():
                 if val in mapped.lower().split('|'): metadata['languages'].add(key)
         cleaned_title = re.sub(lang_pattern, "", cleaned_title)
 
@@ -194,13 +189,21 @@ class MediaDB:
 
     async def save_batch(self, items):
         if not items: return 0, 0 
-        unique_ids = [media.file_unique_id for media, msg in items]
+        
+        unique_batch_items = []
+        batch_ids = set()
+        for media, msg in items:
+            if media.file_unique_id not in batch_ids:
+                batch_ids.add(media.file_unique_id)
+                unique_batch_items.append((media, msg))
+
+        unique_ids = [media.file_unique_id for media, msg in unique_batch_items]
         try:
-            existing_docs = await self.data_col.find({"file_unique_id": {"$in": unique_ids}}).to_list(length=len(items))
+            existing_docs = await self.data_col.find({"file_unique_id": {"$in": unique_ids}}).to_list(length=len(unique_batch_items))
             existing_unique_ids = set(doc['file_unique_id'] for doc in existing_docs)
         except: existing_unique_ids = set()
 
-        new_items = [(media, msg) for media, msg in items if media.file_unique_id not in existing_unique_ids]
+        new_items = [(media, msg) for media, msg in unique_batch_items if media.file_unique_id not in existing_unique_ids]
         pre_duplicate_count = len(items) - len(new_items)
         if not new_items: return 0, pre_duplicate_count 
             
@@ -227,47 +230,34 @@ class MediaDB:
             }
             
             clean_fname = self.clean_text(raw_fname)
-            clean_full_cap = self.clean_text(raw_cap)
             
-            # 🔥 BEST LINE SELECTOR & RAW SCORING 🔥
             clean_cap_line = ""
             score_cap = 0
             if raw_cap:
                 best_cap_line = ""
                 max_score = -1
                 meta_regex = r"(?i)(1080p|720p|480p|4k|2160p|s\d+|e\d+|\b19\d{2}\b|\b20\d{2}\b|hindi|tamil|telugu|dual)"
-                
                 for line in html.unescape(raw_cap).split('\n'):
                     raw_score = len(re.findall(meta_regex, line))
                     cleaned_line = self.clean_text(line)
                     if raw_score > max_score and len(cleaned_line) > 3:
                         max_score = raw_score
                         best_cap_line = cleaned_line
-                
                 clean_cap_line = best_cap_line
                 score_cap = max_score
             
-            # 👑 SMART CAPTION PRIORITY LOGIC
             score_fname = len(re.findall(meta_regex, raw_fname))
-            
             if clean_cap_line and len(clean_cap_line) > 3:
-                if score_cap == 0 and score_fname > 0:
-                    final_display_name = clean_fname
-                else:
-                    final_display_name = clean_cap_line 
+                final_display_name = clean_fname if (score_cap == 0 and score_fname > 0) else clean_cap_line
             else:
                 final_display_name = clean_fname
                 
-            if not final_display_name:
-                final_display_name = "Unknown File"
+            final_display_name = final_display_name or "Unknown File"
 
-            # 🔥 RAW TEXT EXTRACTION FOR SEASONS/EPISODES 🔥
             untrimmed_raw_text = f"{raw_fname} {raw_cap}"
             untrimmed_raw_text = re.sub(r"(?i)\bS(\d+)\s*E(\d+)\b", r"S\1 E\2", untrimmed_raw_text)
-            
             untrimmed_raw_text = re.sub(r"(?i)\bS(\d+)\s*(?:-|to)\s*(?:S)?(\d+)\b", lambda m: " ".join([f"S{str(i).zfill(2)}" for i in range(int(m.group(1)), int(m.group(2)) + 1)]), untrimmed_raw_text)
             untrimmed_raw_text = re.sub(r"(?i)\bE(\d+)\s*(?:-|to)\s*(?:E)?(\d+)\b", lambda m: " ".join([f"E{str(i).zfill(2)}" for i in range(int(m.group(1)), int(m.group(2)) + 1)]), untrimmed_raw_text)
-            
             untrimmed_raw_text = re.sub(r"(?i)\b(\d{1,2})\s*x\s*(\d{1,4})\b", r"S\1 E\2", untrimmed_raw_text)
             untrimmed_raw_text = re.sub(r"(?i)\b(?:season|s)\s*(\d+)\b", r"S\1", untrimmed_raw_text)
             untrimmed_raw_text = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", untrimmed_raw_text)
@@ -276,36 +266,42 @@ class MediaDB:
             episodes = re.findall(r"(?i)\bE(\d+)\b", untrimmed_raw_text)
             
             variations = []
-            orig_raw = (media.file_name or "").lower() 
+            
+            # 🔥 RESTORED YOUR ORIG_RAW LOGIC
+            orig_raw = (media.file_name or "").lower()
             
             for s in seasons: variations.append(f"s{int(s)} s{str(int(s)).zfill(2)} season{int(s)}")
             for e in episodes: variations.append(f"e{int(e)} e{str(int(e)).zfill(2)} ep{int(e)}")
             for s in seasons:
                 for e in episodes: variations.append(f"s{int(s)}e{int(e)} s{str(int(s)).zfill(2)}e{str(int(e)).zfill(2)}")
 
+            # 🔥 RESTORED YOUR TAG VARIATION LOGIC (Part, Vol, Chapter)
             for tag in ["part", "vol", "chapter", "ch"]:
                 for v in re.findall(rf"(?i){tag}(?:ume)?\s*(\d+)", orig_raw): variations.append(f"{tag}{v}")
 
             variation_text = " ".join(list(set(variations)))
             spaceless_name = re.sub(r"[^\w]", "", final_display_name).lower()
 
+            # 🔥 RESTORED YOUR CLEAN CAP LOGIC
+            clean_full_cap = self.clean_text(raw_cap)
             raw_hidden_data = f"{clean_fname} {clean_full_cap}"
             
             promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
             clean_hidden_data = re.sub(r"<[^>]+>", " ", raw_hidden_data)
             clean_hidden_data = re.sub(promo_patterns, " ", clean_hidden_data, flags=re.IGNORECASE)
             
+            # 🔥 RESTORED YOUR ROMAN MAP LOGIC
             roman_map = {r'I': '1', r'II': '2', r'III': '3', r'IV': '4', r'V': '5', r'VI': '6', r'VII': '7', r'VIII': '8', r'IX': '9', r'X': '10'}
             for roman, digit in roman_map.items():
                 clean_hidden_data = re.sub(rf"(?i)(?<=\s)\b{roman}\b", digit, clean_hidden_data)
             
             meta_injection = " ".join(parsed_meta['quality'] + parsed_meta['year'] + parsed_meta['languages'])
-            
             raw_master_text = f"{clean_hidden_data} {spaceless_name} {variation_text} {meta_injection}".lower()
             
             punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)
             clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
             
+            # 🔥 RESTORED YOUR ALL_SEARCH_WORDS AND SPAM LOGIC
             all_search_words = set(clean_master_text.split())
             display_words = set(re.sub(r"[^\w\s&]", " ", final_display_name.lower()).split())
             
@@ -319,14 +315,9 @@ class MediaDB:
             data_docs.append({'_id': current_id, 'msg_id': message.id, 'chat_id': message.chat.id, 'file_id': media.file_id, 'file_unique_id': media.file_unique_id, 'file_type': file_type})
             
             search_doc = {
-                'file_name': final_display_name,
-                'file_size': media.file_size, 
-                'search_text': master_search_text, 
-                'link_id': current_id, 
-                'chat_id': message.chat.id, 
-                'file_type': file_type
+                'file_name': final_display_name, 'file_size': media.file_size, 'search_text': master_search_text, 
+                'link_id': current_id, 'chat_id': message.chat.id, 'file_type': file_type
             }
-
             if parsed_meta['quality']: search_doc['quality'] = parsed_meta['quality']
             if parsed_meta['languages']: search_doc['languages'] = parsed_meta['languages']
             if parsed_meta['year']: search_doc['year'] = parsed_meta['year']
@@ -339,18 +330,13 @@ class MediaDB:
             try:
                 await self.data_col.insert_many(data_docs, ordered=False)
                 saved_count = len(data_docs)
-            except BulkWriteError as bwe:
-                saved_count = bwe.details['nInserted']
-            except Exception as e:
-                pass 
+            except BulkWriteError as bwe: saved_count = bwe.details['nInserted']
+            except Exception: pass 
         
         if search_docs:
-            try:
-                await self.search_col.insert_many(search_docs, ordered=False)
-            except BulkWriteError:
-                pass
-            except Exception as e:
-                pass
+            try: await self.search_col.insert_many(search_docs, ordered=False)
+            except BulkWriteError: pass
+            except Exception: pass
                 
         return saved_count, pre_duplicate_count
 
@@ -455,12 +441,11 @@ class MediaDB:
             elif sort == "small": pipeline.append({"$sort": {"file_size": 1}}) 
             else: pipeline.append({"$sort": {"custom_score": -1, "name_length": 1, "_id": -1}}) 
 
-            # 🔥 MAIN HIGHWAY: Sahi spelling pe 100 result
             pipeline.append({"$limit": 100}) 
             cursor = self.search_col.aggregate(pipeline)
             files = await cursor.to_list(length=100)
             
-            if not files: raise Exception("Empty Text Search Result. Forcing Safe Fallback.")
+            if not files: raise Exception("Fallback Search Triggered")
 
         except Exception as e:
             try:
@@ -470,15 +455,12 @@ class MediaDB:
                     if tw in alias_map: safe_tw = rf"\b{alias_map[tw]}\b"
                     else:
                         base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not tw.endswith('ss')) else tw
-                        
-                        # 🔥 NINJA TECHNIQUE: Wildcard Regex for spelling mistakes
                         fuzzy_regex_word = ".?".join(list(re.escape(base)))
-                        safe_tw = rf"\b{fuzzy_regex_word}s?\b"
+                        safe_tw = rf"\b{fuzzy_regex_word}\w*\b"
                         
                     fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})
                     fallback_or_clauses.append({"file_name": {"$regex": safe_tw, "$options": "i"}})
                     
-                # 🔥 BUG FIX: Only apply filter if words exist
                 if fallback_or_clauses: 
                     fallback_match["$or"] = fallback_or_clauses
                 
@@ -500,37 +482,65 @@ class MediaDB:
                 elif sort == "small": fallback_pipeline.append({"$sort": {"file_size": 1}})
                 else: fallback_pipeline.append({"$sort": {"custom_score": -1, "name_length": 1, "_id": -1}})
 
-                # 🔥 EMERGENCY GALI: 30 Files Limit Breaker (Saves CPU)
                 fallback_pipeline.append({"$limit": 30})
                 cursor = self.search_col.aggregate(fallback_pipeline)
                 files = await cursor.to_list(length=30)
             except Exception as inner_e:
                 files = []
 
-        # 🔥 SMART PYTHON FUZZY FILTER & RE-RANKING (Zero DB Load) 🔥
         if files:
             query_title = " ".join(title_words).lower()
             for file in files:
                 fname = file.get('file_name', '').lower()
-                
-                # Agar spelling exact same hai, VIP Pass (100% score)
                 if query_title in fname:
                     file['fuzzy_score'] = 1.0
                 else:
-                    # Agar galat spelling hai, tabhi fuzzy calculation hogi
                     file['fuzzy_score'] = difflib.SequenceMatcher(None, query_title, fname).ratio()
             
-            # Jo files Custom Score + Fuzzy Score me best hongi, wo top par aayengi!
             files.sort(key=lambda x: (x.get('custom_score', 0), x.get('fuzzy_score', 0)), reverse=True)
 
         return files
 
     async def total_files_count(self): return await self.data_col.count_documents({})
+    
     async def get_db_size(self):
         try:
             stats = await self.db.command("dbstats")
             return stats.get('storageSize', 0) + stats.get('totalIndexSize', 0)
         except: return 0
+
+    async def get_detailed_stats(self):
+        try:
+            db_stats = await self.db.command("dbstats")
+            total_size = db_stats.get('storageSize', 0) + db_stats.get('totalIndexSize', 0)
+
+            try:
+                search_stats = await self.db.command("collStats", "files_search")
+                text_index_size = search_stats.get('indexSizes', {}).get('weighted_movie_search', 0)
+            except: text_index_size = 0
+
+            try:
+                cache_stats = await self.db.command("collStats", "search_cache")
+                cache_size = cache_stats.get('storageSize', 0) + cache_stats.get('totalIndexSize', 0)
+            except: cache_size = 0
+
+            try:
+                temp_stats = await self.db.command("collStats", "temp_searches")
+                temp_size = temp_stats.get('storageSize', 0) + temp_stats.get('totalIndexSize', 0)
+            except: temp_size = 0
+
+            total_cache_size = cache_size + temp_size
+            other_size = total_size - (text_index_size + total_cache_size)
+            if other_size < 0: other_size = 0 
+
+            return {
+                "total_size": total_size,
+                "text_index_size": text_index_size,
+                "cache_size": total_cache_size,
+                "other_size": other_size
+            }
+        except Exception as e:
+            return {"total_size": 0, "text_index_size": 0, "cache_size": 0, "other_size": 0}
 
     async def save_search_results(self, query, files, chat_id):
         unique_id = str(uuid.uuid4())[:8]

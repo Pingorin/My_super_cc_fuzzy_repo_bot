@@ -64,7 +64,7 @@ class MediaDB:
             )
 
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
-            await self.temp_searches.create_index("created_at", expireAfterSeconds=172800)
+            await self.temp_searches.create_index("created_at", expireAfterSeconds=43200)
             
             print("✅ Database Indexes Created Successfully!")
         except Exception as e:

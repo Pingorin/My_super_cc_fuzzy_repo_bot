@@ -843,48 +843,81 @@ async def set_shortner_dynamic(client, message):
     await message.reply("⚠️ This command is deprecated. Please use /settings in PM to configure shorteners.")
 
 # ==============================================================================
-# 📊 NEW DETAILED /STATS COMMAND (512 MB DASHBOARD)
+# 🎛️ MANUAL DB ROUTING COMMAND (/setindex)
+# ==============================================================================
+@Client.on_message(filters.command("setindex") & filters.user(ADMINS))
+async def set_index_db_command(client, message):
+    if len(message.command) < 2:
+        current = await Media.get_active_index_db()
+        return await message.reply(f"⚠️ **Syntax:** `/setindex [1/2/3]`\n\n📌 **Current Active DB:** `DB {current}`")
+    
+    try:
+        db_num = int(message.command[1])
+        if db_num not in [1, 2, 3]:
+            return await message.reply("❌ Please choose between 1, 2, or 3.")
+            
+        if db_num == 2 and not Media.has_db2:
+            return await message.reply("❌ **DB 2 is not configured** in info.py!")
+        if db_num == 3 and not Media.has_db3:
+            return await message.reply("❌ **DB 3 is not configured** in info.py!")
+            
+        await Media.set_active_index_db(db_num)
+        await message.reply(f"✅ **Indexing Switched Successfully!**\n\nAb saari nayi files **Database {db_num}** mein save hongi.")
+    except ValueError:
+        await message.reply("❌ Invalid number. Please use 1, 2, or 3.")
+
+# ==============================================================================
+# 📊 NEW DETAILED /STATS COMMAND (MULTI-DB DASHBOARD)
 # ==============================================================================
 @Client.on_message(filters.command("stats") & filters.user(ADMINS))
 async def stats_handler(client, message):
     try:
-        msg = await message.reply("🔄 Fetching detailed database stats...")
+        msg = await message.reply("🔄 Fetching multi-database stats...")
         
         users = await db.total_users_count()
         groups = await db.total_groups_count()
         files = await Media.total_files_count()
         
         db_stats = await Media.get_detailed_stats()
-        
-        total_mb = db_stats['total_size'] / (1024 * 1024)
-        text_idx_mb = db_stats['text_index_size'] / (1024 * 1024)
-        cache_mb = db_stats['cache_size'] / (1024 * 1024)
-        other_mb = db_stats['other_size'] / (1024 * 1024)
-        
-        max_limit_mb = 512.0
-        percent_used = (total_mb / max_limit_mb) * 100
-        free_mb = max_limit_mb - total_mb
-        
-        filled_blocks = int(percent_used / 10)
-        if filled_blocks > 10: filled_blocks = 10
-        empty_blocks = 10 - filled_blocks
-        progress_bar = "🟩" * filled_blocks + "⬜" * empty_blocks
-        
+        if not db_stats:
+            return await msg.edit("❌ Error fetching database stats.")
+
+        current_db = await Media.get_active_index_db()
+
         text = f"📊 **BOT STATISTICS**\n\n"
         text += f"👤 **Users:** `{users}`\n"
         text += f"👥 **Groups:** `{groups}`\n"
-        text += f"📂 **Files Indexed:** `{files}`\n\n"
-        text += f"💽 **Total Used Space:** `{total_mb:.2f} MB` / `{max_limit_mb} MB`\n"
-        text += f"🟢 **Free Space:** `{free_mb:.2f} MB`\n"
-        text += f"📈 **Usage:** `{percent_used:.2f}%`\n"
-        text += f"[{progress_bar}]\n\n"
-        text += f"**--- Breakdown ---**\n"
-        text += f"🔍 **Text Index:** `{text_idx_mb:.2f} MB`\n"
-        text += f"🗑 **Cache & Temp:** `{cache_mb:.2f} MB`\n"
-        text += f"📁 **Main Data:** `{other_mb:.2f} MB`"
+        text += f"📂 **Total Files:** `{files}`\n\n"
+        text += f"🎯 **Active Indexing DB:** `DB {current_db}`\n\n"
         
-        if percent_used >= 90:
-            text += "\n\n⚠️ **WARNING: Database is almost full!**"
+        # 🎨 Helper function to design DB Box
+        def format_db_block(name, stats, has_cache=False):
+            t_mb = stats['total'] / (1024*1024)
+            tx_mb = stats['text'] / (1024*1024)
+            m_mb = stats['main'] / (1024*1024)
+            
+            pct = (t_mb / 512.0) * 100
+            fill = int(pct / 10)
+            fill = min(fill, 10)
+            bar = "🟩" * fill + "⬜" * (10 - fill)
+            
+            blk = f"🗄 **{name}**\n"
+            blk += f"💽 Used: `{t_mb:.2f} MB` / `512 MB` ({pct:.2f}%)\n"
+            blk += f"[{bar}]\n"
+            blk += f" ├ 🔍 Text Index: `{tx_mb:.2f} MB`\n"
+            if has_cache:
+                c_mb = stats['cache'] / (1024*1024)
+                blk += f" ├ 🗑 Cache & Temp: `{c_mb:.2f} MB`\n"
+            blk += f" └ 📁 Main Data: `{m_mb:.2f} MB`\n\n"
+            return blk
+
+        # 🖨️ Print Available Databases
+        if db_stats.get('db1'): text += format_db_block("DATABASE 1 (Master)", db_stats['db1'], True)
+        if db_stats.get('db2'): text += format_db_block("DATABASE 2", db_stats['db2'], False)
+        if db_stats.get('db3'): text += format_db_block("DATABASE 3", db_stats['db3'], False)
+
+        overall_mb = db_stats['total_overall'] / (1024*1024)
+        text += f"🌐 **Total Cloud Storage Used:** `{overall_mb:.2f} MB`"
             
         await msg.edit(text)
         

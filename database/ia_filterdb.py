@@ -318,12 +318,14 @@ class MediaDB:
             
             clean_fname = self.clean_text(raw_fname)
             
+            # 🔥 BUG FIX: meta_regex bahar aagaya, ab bina caption wali file bhi pass hogi
+            meta_regex = r"(?i)(1080p|720p|480p|4k|2160p|s\d+|e\d+|\b19\d{2}\b|\b20\d{2}\b|hindi|tamil|telugu|dual)"
+            
             clean_cap_line = ""
             score_cap = 0
             if raw_cap:
                 best_cap_line = ""
                 max_score = -1
-                meta_regex = r"(?i)(1080p|720p|480p|4k|2160p|s\d+|e\d+|\b19\d{2}\b|\b20\d{2}\b|hindi|tamil|telugu|dual)"
                 for line in html.unescape(raw_cap).split('\n'):
                     raw_score = len(re.findall(meta_regex, line))
                     cleaned_line = self.clean_text(line)
@@ -450,7 +452,7 @@ class MediaDB:
         if not doc and self.has_db2: doc = await self.search_col2.find_one({'link_id': int(link_id)})
         if not doc and self.has_db3: doc = await self.search_col3.find_one({'link_id': int(link_id)})
         return doc
-    
+
     # ==================================================================
     # ⚡ MASTERMIND TRIPLE-SCORING SEARCH & PYTHON FUZZY FILTER
     # ==================================================================

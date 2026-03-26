@@ -73,6 +73,12 @@ class MediaDB:
             try: await self.search_col1.drop_indexes()
             except OperationFailure: pass 
 
+            # 🔥 TTL BUG FIX: Purane time wale rules ko pehle hatayenge taaki clash na ho
+            try: await self.search_cache.drop_index("created_at_1")
+            except Exception: pass
+            try: await self.temp_searches.drop_index("created_at_1")
+            except Exception: pass
+
             # DB 1 Indexes
             await self.search_col1.create_index("quality") 
             await self.search_col1.create_index("languages") 
@@ -85,6 +91,7 @@ class MediaDB:
                 name="weighted_movie_search"
             )
 
+            # Naye time wale rules banayenge
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
             await self.temp_searches.create_index("created_at", expireAfterSeconds=172800)
             
@@ -697,7 +704,7 @@ class MediaDB:
             stats_dict["total_overall"] = total_overall
             return stats_dict
         except Exception as e:
-            return None
+            return {"total_size": 0, "text_index_size": 0, "cache_size": 0, "other_size": 0}
 
     async def save_search_results(self, query, files, chat_id):
         unique_id = str(uuid.uuid4())[:8]

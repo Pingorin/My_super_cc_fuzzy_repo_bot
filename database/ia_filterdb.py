@@ -4,10 +4,15 @@ import datetime
 import uuid
 import html  
 import difflib  
+import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError, OperationFailure
 from pymongo import ReturnDocument, ASCENDING, TEXT
+import info 
 from info import DATABASE_URI, DATABASE_NAME
+
+# Safe Import for Secondary DB
+DATABASE_URI_2 = getattr(info, "DATABASE_URI_2", None)
 
 logger = logging.getLogger(__name__)
 
@@ -29,47 +34,69 @@ LANG_MAP = {
 }
 
 class MediaDB:
-    def __init__(self, uri, database_name):
-        self._client = AsyncIOMotorClient(uri)
-        self.db = self._client[database_name]
+    def __init__(self, uri1, uri2, database_name):
+        # 🟢 PRIMARY DATABASE (DB 1 - The Master)
+        self._client1 = AsyncIOMotorClient(uri1)
+        self.db1 = self._client1[database_name] # Same Database Name
+        self.data_col1 = self.db1.files_data   
+        self.search_col1 = self.db1.files_search 
         
-        self.data_col = self.db.files_data   
-        self.search_col = self.db.files_search 
-        self.counters = self.db.counters
-        self.search_cache = self.db.search_cache 
-        self.temp_searches = self.db.temp_searches
+        # Bot ka "Dimaag" (Counters aur Cache) hamesha DB 1 par rahega taaki ID mix na ho!
+        self.counters = self.db1.counters
+        self.search_cache = self.db1.search_cache 
+        self.temp_searches = self.db1.temp_searches
+
+        # 🔵 SECONDARY DATABASE (DB 2 - The New Storage)
+        self.has_db2 = bool(uri2 and len(uri2) > 10)
+        if self.has_db2:
+            self._client2 = AsyncIOMotorClient(uri2)
+            self.db2 = self._client2[database_name] # Same Database Name
+            self.data_col2 = self.db2.files_data
+            self.search_col2 = self.db2.files_search
+        else:
+            self.db2 = None
 
     async def ensure_indexes(self):
         try:
-            try:
-                await self.search_col.drop_indexes()
-                print("♻️ Old Indexes Dropped Successfully.")
-            except OperationFailure:
-                pass 
+            try: await self.search_col1.drop_indexes()
+            except OperationFailure: pass 
 
-            await self.search_col.create_index("quality") 
-            await self.search_col.create_index("languages") 
-            await self.search_col.create_index("year") 
-            await self.search_col.create_index("link_id")
+            # DB 1 Indexes
+            await self.search_col1.create_index("quality") 
+            await self.search_col1.create_index("languages") 
+            await self.search_col1.create_index("year") 
+            await self.search_col1.create_index("link_id")
+            await self.data_col1.create_index("file_unique_id", unique=True)
             
-            await self.data_col.create_index("file_unique_id", unique=True)
-            
-            await self.search_col.create_index(
-                [
-                    ("file_name", TEXT),
-                    ("search_text", TEXT),
-                    ("languages", TEXT)  
-                ],
+            await self.search_col1.create_index(
+                [("file_name", TEXT), ("search_text", TEXT), ("languages", TEXT)],
                 name="weighted_movie_search"
             )
 
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
-            await self.temp_searches.create_index("created_at", expireAfterSeconds=43200)
+            await self.temp_searches.create_index("created_at", expireAfterSeconds=172800)
             
-            print("✅ Database Indexes Created Successfully!")
+            # 🔥 DB 2 Indexes (Agar available hai)
+            if self.has_db2:
+                try: await self.search_col2.drop_indexes()
+                except OperationFailure: pass
+                
+                await self.search_col2.create_index("quality") 
+                await self.search_col2.create_index("languages") 
+                await self.search_col2.create_index("year") 
+                await self.search_col2.create_index("link_id")
+                await self.data_col2.create_index("file_unique_id", unique=True)
+                await self.search_col2.create_index(
+                    [("file_name", TEXT), ("search_text", TEXT), ("languages", TEXT)],
+                    name="weighted_movie_search"
+                )
+                print("✅ Dual Database Indexes Created Successfully! (Auto-Routing Enabled)")
+            else:
+                print("✅ Single Database Indexes Created Successfully!")
         except Exception as e:
             print(f"❌ Error Creating Indexes: {e}")
 
+    # 🔥 UNIQUE COUNTER (Sabhi files ko ek line me rakhega, chahe kisi bhi DB me hon)
     async def get_next_sequence_value(self, sequence_name, increment=1):
         try:
             doc = await self.counters.find_one_and_update(
@@ -165,7 +192,6 @@ class MediaDB:
         for m in re.finditer(src_pattern, cleaned_title): metadata['source'].add(m.group(1).upper()) 
         cleaned_title = re.sub(src_pattern, "", cleaned_title)
 
-        # 🔥 RESTORED YOUR CUSTOM LANG_MAP LOGIC
         lang_map = {
             'hin': 'Hindi', 'hindi': 'Hindi', 'tam': 'Tamil', 'tamil': 'Tamil', 'tel': 'Telugu', 'telugu': 'Telugu',
             'mal': 'Malayalam', 'malayalam': 'Malayalam', 'kan': 'Kannada', 'kannada': 'Kannada', 'eng': 'English', 'english': 'English',
@@ -198,16 +224,26 @@ class MediaDB:
                 unique_batch_items.append((media, msg))
 
         unique_ids = [media.file_unique_id for media, msg in unique_batch_items]
+        
+        # 🔥 MULTI-DB AUTO-ROUTING (The Magic)
         try:
-            existing_docs = await self.data_col.find({"file_unique_id": {"$in": unique_ids}}).to_list(length=len(unique_batch_items))
-            existing_unique_ids = set(doc['file_unique_id'] for doc in existing_docs)
+            # Pehle DB 1 me check karega
+            existing_docs_1 = await self.data_col1.find({"file_unique_id": {"$in": unique_ids}}).to_list(length=len(unique_batch_items))
+            existing_unique_ids = set(doc['file_unique_id'] for doc in existing_docs_1)
+            
+            # Phir DB 2 me check karega (agar hai toh)
+            if self.has_db2:
+                existing_docs_2 = await self.data_col2.find({"file_unique_id": {"$in": unique_ids}}).to_list(length=len(unique_batch_items))
+                existing_unique_ids.update(doc['file_unique_id'] for doc in existing_docs_2)
         except: existing_unique_ids = set()
 
+        # Sirf wo files bachengi jo na DB 1 me hain, na DB 2 me!
         new_items = [(media, msg) for media, msg in unique_batch_items if media.file_unique_id not in existing_unique_ids]
         pre_duplicate_count = len(items) - len(new_items)
         if not new_items: return 0, pre_duplicate_count 
             
         count = len(new_items)
+        # ID DB 1 se lega taaki sequence na toote
         end_sequence = await self.get_next_sequence_value("file_id_counter", increment=count)
         if not end_sequence: return 0, 0
         
@@ -266,8 +302,6 @@ class MediaDB:
             episodes = re.findall(r"(?i)\bE(\d+)\b", untrimmed_raw_text)
             
             variations = []
-            
-            # 🔥 RESTORED YOUR ORIG_RAW LOGIC
             orig_raw = (media.file_name or "").lower()
             
             for s in seasons: variations.append(f"s{int(s)} s{str(int(s)).zfill(2)} season{int(s)}")
@@ -275,14 +309,12 @@ class MediaDB:
             for s in seasons:
                 for e in episodes: variations.append(f"s{int(s)}e{int(e)} s{str(int(s)).zfill(2)}e{str(int(e)).zfill(2)}")
 
-            # 🔥 RESTORED YOUR TAG VARIATION LOGIC (Part, Vol, Chapter)
             for tag in ["part", "vol", "chapter", "ch"]:
                 for v in re.findall(rf"(?i){tag}(?:ume)?\s*(\d+)", orig_raw): variations.append(f"{tag}{v}")
 
             variation_text = " ".join(list(set(variations)))
             spaceless_name = re.sub(r"[^\w]", "", final_display_name).lower()
 
-            # 🔥 RESTORED YOUR CLEAN CAP LOGIC
             clean_full_cap = self.clean_text(raw_cap)
             raw_hidden_data = f"{clean_fname} {clean_full_cap}"
             
@@ -290,7 +322,6 @@ class MediaDB:
             clean_hidden_data = re.sub(r"<[^>]+>", " ", raw_hidden_data)
             clean_hidden_data = re.sub(promo_patterns, " ", clean_hidden_data, flags=re.IGNORECASE)
             
-            # 🔥 RESTORED YOUR ROMAN MAP LOGIC
             roman_map = {r'I': '1', r'II': '2', r'III': '3', r'IV': '4', r'V': '5', r'VI': '6', r'VII': '7', r'VIII': '8', r'IX': '9', r'X': '10'}
             for roman, digit in roman_map.items():
                 clean_hidden_data = re.sub(rf"(?i)(?<=\s)\b{roman}\b", digit, clean_hidden_data)
@@ -301,7 +332,6 @@ class MediaDB:
             punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)
             clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
             
-            # 🔥 RESTORED YOUR ALL_SEARCH_WORDS AND SPAM LOGIC
             all_search_words = set(clean_master_text.split())
             display_words = set(re.sub(r"[^\w\s&]", " ", final_display_name.lower()).split())
             
@@ -326,25 +356,35 @@ class MediaDB:
             current_id += 1
 
         saved_count = 0
+        
+        # 🔥 SMART SAVING: Agar DB 2 hai, toh NAYI files DB 2 me jayengi. Nahi toh DB 1 me.
+        active_data_col = self.data_col2 if self.has_db2 else self.data_col1
+        active_search_col = self.search_col2 if self.has_db2 else self.search_col1
+
         if data_docs:
             try:
-                await self.data_col.insert_many(data_docs, ordered=False)
+                await active_data_col.insert_many(data_docs, ordered=False)
                 saved_count = len(data_docs)
             except BulkWriteError as bwe: saved_count = bwe.details['nInserted']
             except Exception: pass 
         
         if search_docs:
-            try: await self.search_col.insert_many(search_docs, ordered=False)
+            try: await active_search_col.insert_many(search_docs, ordered=False)
             except BulkWriteError: pass
             except Exception: pass
                 
         return saved_count, pre_duplicate_count
 
     async def get_file_details(self, link_id):
-        return await self.data_col.find_one({'_id': int(link_id)})
+        # Scan Primary DB
+        doc = await self.data_col1.find_one({'_id': int(link_id)})
+        # Scan Secondary DB if not found
+        if not doc and self.has_db2:
+            doc = await self.data_col2.find_one({'_id': int(link_id)})
+        return doc
 
     # ==================================================================
-    # ⚡ MASTERMIND SCORING SEARCH & PYTHON FUZZY FILTER
+    # ⚡ MASTERMIND DUAL-SCORING SEARCH & PYTHON FUZZY FILTER
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -442,8 +482,15 @@ class MediaDB:
             else: pipeline.append({"$sort": {"custom_score": -1, "name_length": 1, "_id": -1}}) 
 
             pipeline.append({"$limit": 100}) 
-            cursor = self.search_col.aggregate(pipeline)
-            files = await cursor.to_list(length=100)
+            
+            # 🔥 MULTI-DATABASE SEARCH
+            cursor1 = self.search_col1.aggregate(pipeline)
+            files = await cursor1.to_list(length=100)
+            
+            if self.has_db2:
+                cursor2 = self.search_col2.aggregate(pipeline)
+                files2 = await cursor2.to_list(length=100)
+                files.extend(files2) 
             
             if not files: raise Exception("Fallback Search Triggered")
 
@@ -483,8 +530,16 @@ class MediaDB:
                 else: fallback_pipeline.append({"$sort": {"custom_score": -1, "name_length": 1, "_id": -1}})
 
                 fallback_pipeline.append({"$limit": 30})
-                cursor = self.search_col.aggregate(fallback_pipeline)
-                files = await cursor.to_list(length=30)
+                
+                # 🔥 MULTI-DATABASE FALLBACK SEARCH
+                cursor1 = self.search_col1.aggregate(fallback_pipeline)
+                files = await cursor1.to_list(length=30)
+                
+                if self.has_db2:
+                    cursor2 = self.search_col2.aggregate(fallback_pipeline)
+                    files2 = await cursor2.to_list(length=30)
+                    files.extend(files2)
+                    
             except Exception as inner_e:
                 files = []
 
@@ -498,38 +553,60 @@ class MediaDB:
                     file['fuzzy_score'] = difflib.SequenceMatcher(None, query_title, fname).ratio()
             
             files.sort(key=lambda x: (x.get('custom_score', 0), x.get('fuzzy_score', 0)), reverse=True)
+            files = files[:100] 
 
         return files
 
-    async def total_files_count(self): return await self.data_col.count_documents({})
+    async def total_files_count(self): 
+        count = await self.data_col1.count_documents({})
+        if self.has_db2: count += await self.data_col2.count_documents({})
+        return count
     
     async def get_db_size(self):
         try:
-            stats = await self.db.command("dbstats")
-            return stats.get('storageSize', 0) + stats.get('totalIndexSize', 0)
+            stats1 = await self.db1.command("dbstats")
+            total = stats1.get('storageSize', 0) + stats1.get('totalIndexSize', 0)
+            if self.has_db2:
+                stats2 = await self.db2.command("dbstats")
+                total += stats2.get('storageSize', 0) + stats2.get('totalIndexSize', 0)
+            return total
         except: return 0
 
     async def get_detailed_stats(self):
         try:
-            db_stats = await self.db.command("dbstats")
-            total_size = db_stats.get('storageSize', 0) + db_stats.get('totalIndexSize', 0)
+            db_stats1 = await self.db1.command("dbstats")
+            total_size1 = db_stats1.get('storageSize', 0) + db_stats1.get('totalIndexSize', 0)
 
             try:
-                search_stats = await self.db.command("collStats", "files_search")
-                text_index_size = search_stats.get('indexSizes', {}).get('weighted_movie_search', 0)
-            except: text_index_size = 0
+                search_stats1 = await self.db1.command("collStats", "files_search")
+                text_index_size1 = search_stats1.get('indexSizes', {}).get('weighted_movie_search', 0)
+            except: text_index_size1 = 0
 
             try:
-                cache_stats = await self.db.command("collStats", "search_cache")
+                cache_stats = await self.db1.command("collStats", "search_cache")
                 cache_size = cache_stats.get('storageSize', 0) + cache_stats.get('totalIndexSize', 0)
             except: cache_size = 0
 
             try:
-                temp_stats = await self.db.command("collStats", "temp_searches")
+                temp_stats = await self.db1.command("collStats", "temp_searches")
                 temp_size = temp_stats.get('storageSize', 0) + temp_stats.get('totalIndexSize', 0)
             except: temp_size = 0
 
+            # DB 2 Stats
+            total_size2 = 0
+            text_index_size2 = 0
+            if self.has_db2:
+                try:
+                    db_stats2 = await self.db2.command("dbstats")
+                    total_size2 = db_stats2.get('storageSize', 0) + db_stats2.get('totalIndexSize', 0)
+                    search_stats2 = await self.db2.command("collStats", "files_search")
+                    text_index_size2 = search_stats2.get('indexSizes', {}).get('weighted_movie_search', 0)
+                except: pass
+
+            total_size = total_size1 + total_size2
+            text_index_size = text_index_size1 + text_index_size2
             total_cache_size = cache_size + temp_size
+            
             other_size = total_size - (text_index_size + total_cache_size)
             if other_size < 0: other_size = 0 
 
@@ -560,4 +637,4 @@ class MediaDB:
 
     async def get_cached_results(self, unique_id): return await self.search_cache.find_one({"_id": unique_id})
 
-Media = MediaDB(DATABASE_URI, DATABASE_NAME)
+Media = MediaDB(DATABASE_URI, DATABASE_URI_2, DATABASE_NAME)

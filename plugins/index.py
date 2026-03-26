@@ -8,33 +8,84 @@ from info import ADMINS
 INDEX_CACHE = {}
 RUNNING_TASKS = {}
 
+# ==============================================================================
+# 🗑️ SMART DELETE MANAGER (Surgical Strike)
+# ==============================================================================
 @Client.on_message(filters.command("delete_all") & filters.user(ADMINS), group=-1)
 async def delete_database_handler(bot, message):
+    buttons = []
+    
+    # DB 1 Button (Master)
+    buttons.append([InlineKeyboardButton("🗑️ Delete DB 1 (Master + Cache)", callback_data="ask_delete_1")])
+    
+    # DB 2 Button (Agar info.py me link hai)
+    if Media.has_db2:
+        buttons.append([InlineKeyboardButton("🗑️ Delete DB 2", callback_data="ask_delete_2")])
+        
+    # DB 3 Button (Agar info.py me link hai)
+    if Media.has_db3:
+        buttons.append([InlineKeyboardButton("🗑️ Delete DB 3", callback_data="ask_delete_3")])
+    
+    # Delete ALL Button
+    buttons.append([InlineKeyboardButton("💥 Delete ALL Databases (Total Wipe)", callback_data="ask_delete_all")])
+    buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel_index")])
+    
+    await message.reply_text("⚠️ **Database Manager:**\nAap kis database ka data clear karna chahte hain?", reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^ask_delete_(.*)"))
+async def ask_delete_handler(bot, query):
+    if query.from_user.id not in ADMINS: return
+    db_choice = query.data.split("_")[2]
+    
     btn = [[
-        InlineKeyboardButton("✅ YES, Delete All", callback_data="confirm_delete"),
+        InlineKeyboardButton("✅ YES, I am Sure!", callback_data=f"confirm_delete_{db_choice}"),
         InlineKeyboardButton("❌ Cancel", callback_data="cancel_index")
     ]]
-    await message.reply_text("⚠️ **WARNING:** Kya aap Saara Data Delete karna chahte hain?\n(Index Safe rahega, sirf files jayengi)", reply_markup=InlineKeyboardMarkup(btn))
+    
+    target_name = "ALL Databases" if db_choice == "all" else f"Database {db_choice}"
+    await query.message.edit_text(f"⚠️ **FINAL WARNING:**\nKya aap sach me **{target_name}** ka saara data delete karna chahte hain?\n\n*(Sirf data jayega, Search Indexes safe rahenge)*", reply_markup=InlineKeyboardMarkup(btn))
 
-@Client.on_callback_query(filters.regex("^confirm_delete"))
+@Client.on_callback_query(filters.regex(r"^confirm_delete_(.*)"))
 async def confirm_delete_handler(bot, query):
     if query.from_user.id not in ADMINS: return
-    await query.message.edit_text("⏳ **Deleting Data (Keeping Index Safe)...**")
+    db_choice = query.data.split("_")[2]
+    
+    await query.message.edit_text(f"⏳ **Deleting Data from {db_choice.upper()}...**")
     try:
-        # ⚠️ OLD WAY (Danger): await Media.db.drop_collection("files_search")
+        # 🟢 CLEAR DB 1
+        if db_choice in ['1', 'all']:
+            await Media.search_col1.delete_many({}) 
+            await Media.data_col1.delete_many({})
+            await Media.counters.delete_many({})
+            await Media.search_cache.delete_many({})
+            await Media.temp_searches.delete_many({})
         
-        # ✅ NEW WAY (Safe): Sirf andar ka data uda do, Index mat chedo
-        await Media.search_col.delete_many({}) 
-        await Media.data_col.delete_many({})
-        await Media.counters.delete_many({})
+        # 🔵 CLEAR DB 2
+        if db_choice in ['2', 'all'] and Media.has_db2:
+            await Media.search_col2.delete_many({})
+            await Media.data_col2.delete_many({})
+            
+        # 🟣 CLEAR DB 3
+        if db_choice in ['3', 'all'] and Media.has_db3:
+            await Media.search_col3.delete_many({})
+            await Media.data_col3.delete_many({})
         
-        # Standard indexes refresh (Optional, but good)
+        # Indexes safe rakhne ke liye refresh
         await Media.ensure_indexes()
         
-        await query.message.edit_text("✅ **Reset Successful!**\nJSON Index abhi bhi safe hai. Aap turant /index kar sakte hain.")
+        # Agar current Active DB hi uda diya, toh wapas DB 1 par set kar do
+        current_active = await Media.get_active_index_db()
+        if db_choice == 'all' or str(current_active) == db_choice:
+            await Media.set_active_index_db(1)
+        
+        target_name = "All Databases" if db_choice == "all" else f"Database {db_choice}"
+        await query.message.edit_text(f"✅ **{target_name} Reset Successfully!**\nAap naya data index kar sakte hain.")
     except Exception as e:
         await query.message.edit_text(f"❌ Error: {e}")
 
+# ==============================================================================
+# 🚀 ULTRA FAST INDEXING SYSTEM
+# ==============================================================================
 @Client.on_message(filters.command("index") & filters.user(ADMINS), group=-1)
 async def step_one_index(bot, message):
     INDEX_CACHE[message.from_user.id] = {
@@ -65,13 +116,16 @@ async def step_three_skip(bot, message):
         INDEX_CACHE[user_id]['state'] = 'ready'
         data = INDEX_CACHE[user_id]
         total = data['last_msg_id'] - skip
+        
+        # Ye check karega ki kis DB me index hone wala hai
+        active_db = await Media.get_active_index_db()
+        
         buttons = [[
             InlineKeyboardButton("🚀 FAST Start", callback_data="start_index"),
             InlineKeyboardButton("❌ Cancel", callback_data="cancel_index")
         ]]
-        await message.reply_text(f"📊 **Ready (Ultra Fast Mode)**\nTotal: {total}", reply_markup=InlineKeyboardMarkup(buttons))
+        await message.reply_text(f"📊 **Ready (Ultra Fast Mode)**\nTotal Files: {total}\n🎯 **Target:** `Database {active_db}`", reply_markup=InlineKeyboardMarkup(buttons))
 
-# --- ULTRA FAST INDEXING LOGIC ---
 @Client.on_callback_query(filters.regex("^start_index"))
 async def start_index(bot, query):
     user_id = query.from_user.id

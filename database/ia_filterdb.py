@@ -42,10 +42,11 @@ class MediaDB:
         self.data_col1 = self.db1.files_data   
         self.search_col1 = self.db1.files_search 
         
-        # Bot ka "Dimaag" (Counters aur Cache) hamesha DB 1 par rahega!
+        # Bot ka "Dimaag" (Counters, Settings aur Cache) hamesha DB 1 par rahega!
         self.counters = self.db1.counters
         self.search_cache = self.db1.search_cache 
         self.temp_searches = self.db1.temp_searches
+        self.bot_settings = self.db1.bot_settings 
 
         # 🔵 SECONDARY DATABASE (DB 2)
         self.has_db2 = bool(uri2 and len(uri2) > 10)
@@ -168,6 +169,24 @@ class MediaDB:
         except Exception as e:
             return None
 
+    # 🔥 MANUAL OVERRIDE (Set Active DB) 🔥
+    async def get_active_index_db(self):
+        try:
+            doc = await self.bot_settings.find_one({"_id": "active_db"})
+            if doc: return doc.get("db_num", 1)
+        except: pass
+        
+        if self.has_db3: return 3
+        if self.has_db2: return 2
+        return 1
+
+    async def set_active_index_db(self, db_num):
+        await self.bot_settings.update_one(
+            {"_id": "active_db"}, 
+            {"$set": {"db_num": int(db_num)}}, 
+            upsert=True
+        )
+
     @staticmethod
     def clean_text(text):
         if not text: return ""
@@ -250,7 +269,7 @@ class MediaDB:
 
         unique_ids = [media.file_unique_id for media, msg in unique_batch_items]
         
-        # 🔥 MULTI-DB AUTO-ROUTING (3 Nodes)
+        # 🔥 MULTI-DB DEDUPLICATION (3 Nodes)
         try:
             existing_docs_1 = await self.data_col1.find({"file_unique_id": {"$in": unique_ids}}).to_list(length=len(unique_batch_items))
             existing_unique_ids = set(doc['file_unique_id'] for doc in existing_docs_1)
@@ -382,11 +401,13 @@ class MediaDB:
 
         saved_count = 0
         
-        # 🔥 SMART TRIPLE-ROUTING: Agar DB 3 hai toh usme jaye, nahi toh DB 2 me, warna DB 1 me!
-        if self.has_db3:
+        # 🔥 SMART MANUAL ROUTING: Admin ne jo DB set kiya hai, wahi use hoga!
+        active_db_num = await self.get_active_index_db()
+        
+        if active_db_num == 3 and self.has_db3:
             active_data_col = self.data_col3
             active_search_col = self.search_col3
-        elif self.has_db2:
+        elif active_db_num == 2 and self.has_db2:
             active_data_col = self.data_col2
             active_search_col = self.search_col2
         else:
@@ -620,63 +641,63 @@ class MediaDB:
             return total
         except: return 0
 
+    # 🔥 NAYA FUNCTION: Har Database ka Alag-Alag Hisaab 🔥
     async def get_detailed_stats(self):
+        stats_dict = {"db1": None, "db2": None, "db3": None, "total_overall": 0}
+        total_overall = 0
         try:
+            # 🟢 DB 1 Stats
             db_stats1 = await self.db1.command("dbstats")
-            total_size1 = db_stats1.get('storageSize', 0) + db_stats1.get('totalIndexSize', 0)
-
+            t1 = db_stats1.get('storageSize', 0) + db_stats1.get('totalIndexSize', 0)
+            
             try:
                 search_stats1 = await self.db1.command("collStats", "files_search")
-                text_index_size1 = search_stats1.get('indexSizes', {}).get('weighted_movie_search', 0)
-            except: text_index_size1 = 0
+                tx1 = search_stats1.get('indexSizes', {}).get('weighted_movie_search', 0)
+            except: tx1 = 0
 
             try:
-                cache_stats = await self.db1.command("collStats", "search_cache")
-                cache_size = cache_stats.get('storageSize', 0) + cache_stats.get('totalIndexSize', 0)
-            except: cache_size = 0
+                c1 = await self.db1.command("collStats", "search_cache")
+                cache1 = c1.get('storageSize', 0) + c1.get('totalIndexSize', 0)
+            except: cache1 = 0
 
             try:
-                temp_stats = await self.db1.command("collStats", "temp_searches")
-                temp_size = temp_stats.get('storageSize', 0) + temp_stats.get('totalIndexSize', 0)
-            except: temp_size = 0
+                ts1 = await self.db1.command("collStats", "temp_searches")
+                temp1 = ts1.get('storageSize', 0) + ts1.get('totalIndexSize', 0)
+            except: temp1 = 0
 
-            # DB 2 Stats
-            total_size2 = 0
-            text_index_size2 = 0
+            cache_total = cache1 + temp1
+            main1 = t1 - (tx1 + cache_total)
+            stats_dict["db1"] = {"total": t1, "text": tx1, "cache": cache_total, "main": max(main1, 0)}
+            total_overall += t1
+
+            # 🔵 DB 2 Stats
             if self.has_db2:
+                db_stats2 = await self.db2.command("dbstats")
+                t2 = db_stats2.get('storageSize', 0) + db_stats2.get('totalIndexSize', 0)
                 try:
-                    db_stats2 = await self.db2.command("dbstats")
-                    total_size2 = db_stats2.get('storageSize', 0) + db_stats2.get('totalIndexSize', 0)
-                    search_stats2 = await self.db2.command("collStats", "files_search")
-                    text_index_size2 = search_stats2.get('indexSizes', {}).get('weighted_movie_search', 0)
-                except: pass
+                    s2 = await self.db2.command("collStats", "files_search")
+                    tx2 = s2.get('indexSizes', {}).get('weighted_movie_search', 0)
+                except: tx2 = 0
+                main2 = t2 - tx2
+                stats_dict["db2"] = {"total": t2, "text": tx2, "main": max(main2, 0)}
+                total_overall += t2
 
-            # DB 3 Stats
-            total_size3 = 0
-            text_index_size3 = 0
+            # 🟣 DB 3 Stats
             if self.has_db3:
+                db_stats3 = await self.db3.command("dbstats")
+                t3 = db_stats3.get('storageSize', 0) + db_stats3.get('totalIndexSize', 0)
                 try:
-                    db_stats3 = await self.db3.command("dbstats")
-                    total_size3 = db_stats3.get('storageSize', 0) + db_stats3.get('totalIndexSize', 0)
-                    search_stats3 = await self.db3.command("collStats", "files_search")
-                    text_index_size3 = search_stats3.get('indexSizes', {}).get('weighted_movie_search', 0)
-                except: pass
+                    s3 = await self.db3.command("collStats", "files_search")
+                    tx3 = s3.get('indexSizes', {}).get('weighted_movie_search', 0)
+                except: tx3 = 0
+                main3 = t3 - tx3
+                stats_dict["db3"] = {"total": t3, "text": tx3, "main": max(main3, 0)}
+                total_overall += t3
 
-            total_size = total_size1 + total_size2 + total_size3
-            text_index_size = text_index_size1 + text_index_size2 + text_index_size3
-            total_cache_size = cache_size + temp_size
-            
-            other_size = total_size - (text_index_size + total_cache_size)
-            if other_size < 0: other_size = 0 
-
-            return {
-                "total_size": total_size,
-                "text_index_size": text_index_size,
-                "cache_size": total_cache_size,
-                "other_size": other_size
-            }
+            stats_dict["total_overall"] = total_overall
+            return stats_dict
         except Exception as e:
-            return {"total_size": 0, "text_index_size": 0, "cache_size": 0, "other_size": 0}
+            return None
 
     async def save_search_results(self, query, files, chat_id):
         unique_id = str(uuid.uuid4())[:8]

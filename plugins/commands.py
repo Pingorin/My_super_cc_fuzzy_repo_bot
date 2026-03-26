@@ -704,7 +704,7 @@ async def start_handler(client, message):
                 return 
 
             file_data = await Media.get_file_details(link_id)
-            search_data = await Media.search_col.find_one({'link_id': link_id})
+            search_data = await Media.get_search_data(link_id)
             
             if not file_data: return await message.reply("❌ **File Not Found.**")
             

@@ -93,7 +93,7 @@ class MediaDB:
 
             # Naye time wale rules banayenge
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
-            await self.temp_searches.create_index("created_at", expireAfterSeconds=172800)
+            await self.temp_searches.create_index("created_at", expireAfterSeconds=43200)
             
             # 🔥 DB 2 Indexes
             if self.has_db2:

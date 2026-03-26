@@ -9,9 +9,16 @@ API_ID = int(os.environ.get("API_ID", "12345"))
 API_HASH = os.environ.get("API_HASH", "your_api_hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "your_bot_token")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "9e1353ccc623e71f80262309cda5cdfb") # Default Test Key
-DATABASE_URI = os.environ.get("DATABASE_URI", "your_mongo_uri")
 
 # --- DATABASE SETTINGS ---
+DATABASE_URI = os.environ.get("DATABASE_URI", "your_mongo_uri")
+
+# 🔥 NEW: MULTI-DATABASE ARCHITECTURE SETTINGS 🔥
+# Jab DB 1 full ho jaye, toh host (Render/Heroku) ke variables me inki link daal dena
+DATABASE_URI_2 = os.environ.get("DATABASE_URI_2", "")
+DATABASE_URI_3 = os.environ.get("DATABASE_URI_3", "")
+INDEX_DB = int(os.environ.get("INDEX_DB", "1")) # Default DB 1 (Changeable via /setindex command)
+
 DATABASE_NAME = os.environ.get("DATABASE_NAME", "MyBotDB")
 COLLECTION_NAME = os.environ.get('COLLECTION_NAME', 'Telegram_files')
 USER_DB_URI = os.environ.get("USER_DB_URI", "")
@@ -33,7 +40,7 @@ BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", "-1003173929836"))
 # ✅ SITE URL (REQUIRED FOR SITE MODE)
 # Render/Heroku users must set this in Environment Variables (e.g., https://my-app.onrender.com)
 # Do not add a trailing slash (/) at the end.
-SITE_URL = os.environ.get("SITE_URL", "https://nainyj-56b575136034.herokuapp.com")
+SITE_URL = os.environ.get("SITE_URL", "")
 
 # --- VERIFICATION SETTINGS ---
 IS_VERIFY = os.environ.get("IS_VERIFY", "True").lower() in ["true", "yes", "1"]

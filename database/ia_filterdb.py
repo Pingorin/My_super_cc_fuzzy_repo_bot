@@ -444,6 +444,13 @@ class MediaDB:
         if not doc and self.has_db3: doc = await self.data_col3.find_one({'_id': int(link_id)})
         return doc
 
+    # 🔥 NAYA FUNCTION (Error Fix ke liye) 🔥
+    async def get_search_data(self, link_id):
+        doc = await self.search_col1.find_one({'link_id': int(link_id)})
+        if not doc and self.has_db2: doc = await self.search_col2.find_one({'link_id': int(link_id)})
+        if not doc and self.has_db3: doc = await self.search_col3.find_one({'link_id': int(link_id)})
+        return doc
+    
     # ==================================================================
     # ⚡ MASTERMIND TRIPLE-SCORING SEARCH & PYTHON FUZZY FILTER
     # ==================================================================

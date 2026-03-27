@@ -2,6 +2,7 @@ import logging
 import math
 import aiohttp
 import re
+import asyncio
 from pyrogram.types import InlineKeyboardButton
 from pyrogram import enums
 from pyrogram.errors import UserNotParticipant
@@ -574,18 +575,45 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active
     if pagination: buttons.append(pagination)
     return buttons
 
+# 🔄 SMART RETRY SYSTEM (Maximum 2 Attempts - Fast Mode)
 async def get_shortlink(site, api, link):
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, timeout=20) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if "shortenedUrl" in data: return data["shortenedUrl"]
-                    elif "status" in data and data["status"] == "success" and "shortenedUrl" in data: return data["shortenedUrl"]
-                return None 
-    except: return None 
+    
+    for attempt in range(2):
+        try:
+            # Har koshish ke liye max 15 seconds ka wait
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=15) as response:
+                    if response.status == 200:
+                        try:
+                            # content_type=None lagaya taaki Cloudflare ke errors crash na karein
+                            data = await response.json(content_type=None)
+                        except:
+                            # Agar website ne JSON ki jagah HTML (Error page) bhej diya
+                            if attempt < 1: await asyncio.sleep(2) # Pehli baar fail hua toh 2 sec ruko
+                            continue 
+                            
+                        if data and "shortenedUrl" in data: 
+                            return data["shortenedUrl"]
+                        elif data and "status" in data and data["status"] == "success" and "shortenedUrl" in data: 
+                            return data["shortenedUrl"]
+                        else:
+                            # Agar API Key galat hai, toh turant fail kar do
+                            return None 
+                    else:
+                        # Server down hai (502, 503 error)
+                        if attempt < 1: await asyncio.sleep(2)
+                        
+        except asyncio.TimeoutError:
+            # Website bohot slow hai (Timeout)
+            if attempt < 1: await asyncio.sleep(2)
+        except Exception as e:
+            # Koi aur internet error
+            if attempt < 1: await asyncio.sleep(2)
+            
+    # Agar 2 koshish (Attempts) ke baad bhi link na bane, TABHI None return karega (Skip hoga)
+    return None
 
 async def _get_fsub_status(bot, user_id, channel_id):
     try:

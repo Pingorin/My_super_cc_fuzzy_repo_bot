@@ -64,17 +64,28 @@ async def send_shortener_alert(client, chat_id, site_domain):
         except:
             group_name = "Unknown Group"
             group_id = chat_id
+            chat_id_int = int(chat_id)
 
         msg = (
             f"⚠️ **Shortener Alert** ⚠️\n\n"
             f"Group: **{group_name}** (`{group_id}`).\n"
-            f"Shortener: **{site_domain}** failed or is slow.\n"
-            f"**Action:** Check API Key or Website Status."
+            f"Shortener: **{site_domain}** failed or is down.\n"
+            f"**Action:** Please Check your API Key or Website Status."
         )
-        for admin_id in ADMINS:
-            try: await client.send_message(chat_id=int(admin_id), text=msg)
-            except: pass
-    except: pass
+        
+        # 🔥 SMART ALERT ENGINE: Sirf Group ke Owner aur Admins ko msg jayega!
+        try:
+            async for member in client.get_chat_members(chat_id_int, filter=enums.ChatMembersFilter.ADMINISTRATORS):
+                if not member.user.is_bot:
+                    try: 
+                        await client.send_message(chat_id=member.user.id, text=msg)
+                    except: 
+                        pass
+        except Exception as e:
+            logger.error(f"Admin fetch error for shortener alert: {e}")
+            
+    except Exception as e: 
+        pass
 
 async def get_active_shorteners(chat_id):
     group_settings = await db.get_group_settings(chat_id)

@@ -554,6 +554,7 @@ async def start_handler(client, message):
             sent_count = 0
             filesarr = [] 
             
+            # 🔥 SMART FALLBACK ENGINE WITH ANTI-FLOOD TIMER 🔥
             for file in files:
                 try:
                     link_id = file['link_id']
@@ -576,38 +577,66 @@ async def start_handler(client, message):
                     if cap_btn_text and cap_btn_url:
                         btn_rows.append([InlineKeyboardButton(cap_btn_text, url=cap_btn_url)])
                     
-                    # 🔥 Reverted back to send_cached_media for FILE SAFETY!
+                    # 1️⃣ BIN CHANNEL STREAMING LINK (With Fallback)
                     try:
-                        bin_msg = await client.send_cached_media(
-                            chat_id=info.BIN_CHANNEL, 
-                            file_id=file_details['file_id']
-                        )
+                        bin_msg = await client.send_cached_media(chat_id=info.BIN_CHANNEL, file_id=file_details['file_id'])
+                    except Exception:
+                        try:
+                            bin_msg = await client.copy_message(chat_id=info.BIN_CHANNEL, from_chat_id=file_details['chat_id'], message_id=file_details['msg_id'])
+                        except Exception:
+                            bin_msg = None
+
+                    if bin_msg:
                         base_url = info.SITE_URL.rstrip('/') if info.SITE_URL else "http://127.0.0.1:8080"
-                        
                         watch_url = f"{base_url}/watch/{bin_msg.id}"
                         dl_url = f"{base_url}/{bin_msg.id}"
-                        
                         btn_rows.append([
                             InlineKeyboardButton("🍿 Watch Online", url=watch_url),
                             InlineKeyboardButton("⚡ Fast Download", url=dl_url)
                         ])
-                    except Exception as e:
-                        print(f"Streaming Button Error: {e}")
                     
                     reply_markup = InlineKeyboardMarkup(btn_rows) if btn_rows else None
 
-                    # 🔥 Reverted back to send_cached_media for USER!
-                    sent_media = await client.send_cached_media(
-                        chat_id=message.from_user.id,
-                        file_id=file_details['file_id'],
-                        caption=final_caption,
-                        reply_markup=reply_markup,
-                        parse_mode=enums.ParseMode.HTML
-                    )
+                    # 2️⃣ USER FILE SENDING (Auto-Fallback)
+                    used_fallback = False
+                    try:
+                        # Attempt 1: Fast Cache Method
+                        sent_media = await client.send_cached_media(
+                            chat_id=message.from_user.id,
+                            file_id=file_details['file_id'],
+                            caption=final_caption,
+                            reply_markup=reply_markup,
+                            parse_mode=enums.ParseMode.HTML
+                        )
+                    except Exception as cache_err:
+                        # Attempt 2: Auto-Fallback
+                        try:
+                            sent_media = await client.copy_message(
+                                chat_id=message.from_user.id,
+                                from_chat_id=file_details['chat_id'],
+                                message_id=file_details['msg_id'],
+                                caption=final_caption,
+                                reply_markup=reply_markup,
+                                parse_mode=enums.ParseMode.HTML
+                            )
+                            used_fallback = True
+                            
+                            # Sirf pehli file par alert bheje
+                            if sent_count == 0:
+                                await message.reply_text("⚠️ **Bot Token Changed!**\nFiles safely `copy_message` ke zariye bheji ja rahi hain. Kripya naye bot se database /index kar lein.", quote=True)
+                        except Exception as copy_err:
+                            continue
+
                     filesarr.append(sent_media)
-                    
                     sent_count += 1
-                    await asyncio.sleep(0.8) 
+                    
+                    # ⏱️ THE ANTI-FLOOD MAGIC TIMER
+                    if used_fallback:
+                        # Agar copy_message use hua hai, toh API pe load jyada hai, isliye 0.8 second ka aaram dega
+                        await asyncio.sleep(0.8)
+                    else:
+                        # Agar fast cache use hua hai, toh load kam hai, isliye sirf 0.3 second ka nano-gap dega
+                        await asyncio.sleep(0.3)
                     
                 except Exception as e:
                     print(f"Send All Error: {e}")
@@ -750,46 +779,60 @@ async def start_handler(client, message):
 
             btn_rows.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
 
-            # 🔥 Reverted back to send_cached_media for BIN CHANNEL!
+            # 🔥 SMART FALLBACK ENGINE (For Single File) 🔥
+
+            # 1️⃣ BIN CHANNEL STREAMING LINK (With Fallback)
             try:
-                bin_msg = await client.send_cached_media(
-                    chat_id=info.BIN_CHANNEL, 
-                    file_id=file_data.get('file_id')
-                )
+                bin_msg = await client.send_cached_media(chat_id=info.BIN_CHANNEL, file_id=file_data.get('file_id'))
+            except Exception:
+                try:
+                    bin_msg = await client.copy_message(chat_id=info.BIN_CHANNEL, from_chat_id=file_data['chat_id'], message_id=file_data['msg_id'])
+                except Exception as e:
+                    print(f"Bin Channel Error: {e}")
+                    bin_msg = None
+
+            if bin_msg:
                 base_url = info.SITE_URL.rstrip('/') if info.SITE_URL else "http://127.0.0.1:8080"
-                
                 watch_url = f"{base_url}/watch/{bin_msg.id}"
                 dl_url = f"{base_url}/{bin_msg.id}"
-                
                 btn_rows.append([
                     InlineKeyboardButton("🍿 Watch Online", url=watch_url),
                     InlineKeyboardButton("⚡ Fast Download", url=dl_url)
                 ])
-            except Exception as e:
-                print(f"Streaming Button Error: {e}")
 
             if btn_rows:
                 reply_markup = InlineKeyboardMarkup(btn_rows)
 
-            try: 
-                # 🔥 Reverted back to send_cached_media for USER!
+            # 2️⃣ USER FILE SENDING (With Auto-Fallback & Alert)
+            try:
+                # Attempt 1: Default Method
                 sent_media = await client.send_cached_media(
-                    chat_id=message.from_user.id, 
-                    file_id=file_data.get('file_id'), 
-                    caption=final_caption, 
+                    chat_id=message.from_user.id,
+                    file_id=file_data.get('file_id'),
+                    caption=final_caption,
                     reply_markup=reply_markup,
                     parse_mode=enums.ParseMode.HTML
                 )
-                
-                warning_msg = await sent_media.reply_text(
-                    "⚠️ **DHYAN DEIN:**\n\nYe file theek **1 minute** baad yahan se automatically delete ho jayegi. Kripya isko jaldi se apne Saved Messages me forward kar lein!",
-                    quote=True
-                )
-                
-                asyncio.create_task(auto_delete_single(sent_media, warning_msg, message.command[1]))
-                
-            except Exception as e: 
-                await message.reply(f"❌ Error sending file: `{e}`")
+            except Exception as cache_err:
+                # Attempt 2: Auto-Fallback to copy_message
+                try:
+                    sent_media = await client.copy_message(
+                        chat_id=message.from_user.id,
+                        from_chat_id=file_data['chat_id'],
+                        message_id=file_data['msg_id'],
+                        caption=final_caption,
+                        reply_markup=reply_markup,
+                        parse_mode=enums.ParseMode.HTML
+                    )
+                    await message.reply_text("⚠️ **Bot Token Changed!**\n`send_cached_media` fail hua. Auto-Fallback ne safely `copy_message` ka use kiya hai. Naye bot se database /index kar lein.", quote=True)
+                except Exception as copy_err:
+                    return await message.reply(f"❌ **Dono Method Fail Ho Gaye!**\nCache Error: `{cache_err}`\nCopy Error: `{copy_err}`")
+
+            warning_msg = await sent_media.reply_text(
+                "⚠️ **DHYAN DEIN:**\n\nYe file theek **1 minute** baad yahan se automatically delete ho jayegi. Kripya isko jaldi se apne Saved Messages me forward kar lein!",
+                quote=True
+            )
+            asyncio.create_task(auto_delete_single(sent_media, warning_msg, message.command[1]))
                 
         except Exception as e: await message.reply(f"❌ Error: {e}")
         return

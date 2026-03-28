@@ -453,6 +453,29 @@ class MediaDB:
         if not doc and self.has_db3: doc = await self.search_col3.find_one({'link_id': int(link_id)})
         return doc
 
+    # 🔥 ON-DEMAND CACHING ENGINE 🔥
+    async def update_file_id(self, old_file_id, new_file_id):
+        """Purani file_id ko nayi se replace karta hai teeno DBs me"""
+        try:
+            # Check and Update DB 1
+            res1 = await self.data_col1.update_one({'file_id': old_file_id}, {'$set': {'file_id': new_file_id}})
+            if res1.modified_count > 0: return True
+            
+            # Check and Update DB 2
+            if self.has_db2:
+                res2 = await self.data_col2.update_one({'file_id': old_file_id}, {'$set': {'file_id': new_file_id}})
+                if res2.modified_count > 0: return True
+                
+            # Check and Update DB 3
+            if self.has_db3:
+                res3 = await self.data_col3.update_one({'file_id': old_file_id}, {'$set': {'file_id': new_file_id}})
+                if res3.modified_count > 0: return True
+                
+            return False
+        except Exception as e:
+            logger.error(f"Error updating file_id for Smart Cache: {e}")
+            return False
+
     # ==================================================================
     # ⚡ MASTERMIND TRIPLE-SCORING SEARCH & PYTHON FUZZY FILTER
     # ==================================================================

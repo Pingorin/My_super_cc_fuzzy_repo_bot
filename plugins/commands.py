@@ -608,10 +608,10 @@ async def start_handler(client, message):
                     
                     reply_markup = InlineKeyboardMarkup(btn_rows) if btn_rows else None
 
-                    # 2️⃣ USER FILE SENDING (Auto-Fallback)
+                    # 2️⃣ USER FILE SENDING (With On-Demand Caching & Auto-Fallback)
                     used_fallback = False
                     try:
-                        # Attempt 1: Fast Cache Method
+                        # Attempt 1: Fast Cache Method (Purani ID Try Karega)
                         sent_media = await client.send_cached_media(
                             chat_id=message.from_user.id,
                             file_id=file_details['file_id'],
@@ -620,23 +620,42 @@ async def start_handler(client, message):
                             parse_mode=enums.ParseMode.HTML
                         )
                     except Exception as cache_err:
-                        # Attempt 2: Auto-Fallback
+                        # Attempt 2: 🔥 ON-DEMAND CACHING (Bot B nayi ID nikalega aur DB update karega)
                         try:
-                            sent_media = await client.copy_message(
-                                chat_id=message.from_user.id,
-                                from_chat_id=file_details['chat_id'],
-                                message_id=file_details['msg_id'],
-                                caption=final_caption,
-                                reply_markup=reply_markup,
-                                parse_mode=enums.ParseMode.HTML
-                            )
-                            used_fallback = True
+                            db_msg = await client.get_messages(file_details['chat_id'], file_details['msg_id'])
+                            new_file_id = None
+                            if db_msg.video: new_file_id = db_msg.video.file_id
+                            elif db_msg.document: new_file_id = db_msg.document.file_id
                             
-                            # Sirf pehli file par alert bheje
-                            if sent_count == 0:
-                                await message.reply_text("⚠️ **Bot Token Changed!**\nFiles safely `copy_message` ke zariye bheji ja rahi hain. Kripya naye bot se database /index kar lein.", quote=True)
-                        except Exception as copy_err:
-                            continue
+                            if new_file_id:
+                                # Nayi ID mil gayi! Isko DB me permanent save karo
+                                await Media.update_file_id(file_details['file_id'], new_file_id)
+                                
+                                # Aur super-fast send_cached_media se bhej do!
+                                sent_media = await client.send_cached_media(
+                                    chat_id=message.from_user.id,
+                                    file_id=new_file_id,
+                                    caption=final_caption,
+                                    reply_markup=reply_markup,
+                                    parse_mode=enums.ParseMode.HTML
+                                )
+                            else:
+                                raise Exception("No media found in DB Message")
+                                
+                        except Exception as update_err:
+                            # Attempt 3: 🐢 Final Fallback (Agar kuch bhi kaam na kare toh copy_message use karega)
+                            try:
+                                sent_media = await client.copy_message(
+                                    chat_id=message.from_user.id,
+                                    from_chat_id=file_details['chat_id'],
+                                    message_id=file_details['msg_id'],
+                                    caption=final_caption,
+                                    reply_markup=reply_markup,
+                                    parse_mode=enums.ParseMode.HTML
+                                )
+                                used_fallback = True
+                            except Exception as copy_err:
+                                continue
 
                     filesarr.append(sent_media)
                     sent_count += 1
@@ -814,7 +833,7 @@ async def start_handler(client, message):
             if btn_rows:
                 reply_markup = InlineKeyboardMarkup(btn_rows)
 
-            # 2️⃣ USER FILE SENDING (With Auto-Fallback & Alert)
+            # 2️⃣ USER FILE SENDING (With On-Demand Caching & Auto-Fallback)
             try:
                 # Attempt 1: Default Method
                 sent_media = await client.send_cached_media(
@@ -825,19 +844,41 @@ async def start_handler(client, message):
                     parse_mode=enums.ParseMode.HTML
                 )
             except Exception as cache_err:
-                # Attempt 2: Auto-Fallback to copy_message
+                # Attempt 2: 🔥 ON-DEMAND CACHING (Nayi ID nikal kar DB update karna)
                 try:
-                    sent_media = await client.copy_message(
-                        chat_id=message.from_user.id,
-                        from_chat_id=file_data['chat_id'],
-                        message_id=file_data['msg_id'],
-                        caption=final_caption,
-                        reply_markup=reply_markup,
-                        parse_mode=enums.ParseMode.HTML
-                    )
-                    await message.reply_text("⚠️ **Bot Token Changed!**\n`send_cached_media` fail hua. Auto-Fallback ne safely `copy_message` ka use kiya hai. Naye bot se database /index kar lein.", quote=True)
-                except Exception as copy_err:
-                    return await message.reply(f"❌ **Dono Method Fail Ho Gaye!**\nCache Error: `{cache_err}`\nCopy Error: `{copy_err}`")
+                    db_msg = await client.get_messages(file_data['chat_id'], file_data['msg_id'])
+                    new_file_id = None
+                    if db_msg.video: new_file_id = db_msg.video.file_id
+                    elif db_msg.document: new_file_id = db_msg.document.file_id
+                    
+                    if new_file_id:
+                        # Database Update
+                        await Media.update_file_id(file_data['file_id'], new_file_id)
+                        
+                        # Nayi ID se file bhejna
+                        sent_media = await client.send_cached_media(
+                            chat_id=message.from_user.id,
+                            file_id=new_file_id,
+                            caption=final_caption,
+                            reply_markup=reply_markup,
+                            parse_mode=enums.ParseMode.HTML
+                        )
+                    else:
+                        raise Exception("No media found in DB Message")
+                        
+                except Exception as update_err:
+                    # Attempt 3: 🐢 Auto-Fallback to copy_message
+                    try:
+                        sent_media = await client.copy_message(
+                            chat_id=message.from_user.id,
+                            from_chat_id=file_data['chat_id'],
+                            message_id=file_data['msg_id'],
+                            caption=final_caption,
+                            reply_markup=reply_markup,
+                            parse_mode=enums.ParseMode.HTML
+                        )
+                    except Exception as copy_err:
+                        return await message.reply(f"❌ **Dono Method Fail Ho Gaye!**\nCache Error: `{cache_err}`\nUpdate Error: `{update_err}`")
 
             warning_msg = await sent_media.reply_text(
                 "⚠️ **DHYAN DEIN:**\n\nYe file theek **1 minute** baad yahan se automatically delete ho jayegi. Kripya isko jaldi se apne Saved Messages me forward kar lein!",

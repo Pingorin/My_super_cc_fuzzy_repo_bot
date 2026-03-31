@@ -9,6 +9,10 @@ from pyrogram.errors import UserNotParticipant
 from database.users_chats_db import db
 from info import ADMINS, AUTH_CHANNEL
 
+# 🔥 Redirect Logic (Bot B) ke liye info se variable import
+try: from info import FILE_STORE_BOT
+except: FILE_STORE_BOT = None
+
 try: from info import AUTH_CHANNEL_2
 except: AUTH_CHANNEL_2 = None
 try: from info import AUTH_CHANNEL_3
@@ -440,6 +444,9 @@ except Exception as e:
 
 def format_text_results(files, query, chat_id):
     text = f"👻 **Results for:** `{query}`\n\n"
+    # 🔥 REDIRECT LOGIC FOR BOT B
+    bot_username = FILE_STORE_BOT if FILE_STORE_BOT else temp.U_NAME
+    
     for i, file in enumerate(files, 1):
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
@@ -451,7 +458,7 @@ def format_text_results(files, query, chat_id):
              clean_cap = caption.replace("<b>", "").replace("</b>", "")[:50] + "..."
              f_name = clean_cap
 
-        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
+        link = f"https://t.me/{bot_username}?start=get_{link_id}_{f_chat_id}"
         text += f"{i}. 📂 <a href='{link}'>{f_name}</a> [{f_size}]\n\n"
     return text
 
@@ -462,6 +469,9 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         f"⌛ **Time taken:** {time_taken} seconds\n"
         f"code: {len(files)}\n\n"
     )
+    # 🔥 REDIRECT LOGIC FOR BOT B
+    bot_username = FILE_STORE_BOT if FILE_STORE_BOT else temp.U_NAME
+    
     for file in files:
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
@@ -472,7 +482,7 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         if query.lower() not in f_name.lower() and query.lower() in caption.lower():
              clean_cap = caption.replace("<b>", "").replace("</b>", "")[:50] + "..."
         
-        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
+        link = f"https://t.me/{bot_username}?start=get_{link_id}_{f_chat_id}"
         
         # High Speed DB Extraction
         db_quals = file.get('quality', [])
@@ -514,12 +524,15 @@ def format_card_result(file, current_index, total_count):
 async def post_to_telegraph(files, query, chat_id):
     if not telegraph_client: return None
     html_content = f"<h3>Search Results for: {query}</h3><br>"
+    # 🔥 REDIRECT LOGIC FOR BOT B
+    bot_username = FILE_STORE_BOT if FILE_STORE_BOT else temp.U_NAME
+    
     for file in files:
         f_name = file['file_name']
         f_size = get_size(file['file_size'])
         link_id = file['link_id']
         f_chat_id = chat_id
-        link = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{f_chat_id}"
+        link = f"https://t.me/{bot_username}?start=get_{link_id}_{f_chat_id}"
         html_content += f"<p>📂 <a href='{link}'>{f_name}</a> [{f_size}]</p><hr>"
     try:
         response = telegraph_client.create_page(title=f"Results: {query}", html_content=html_content)
@@ -553,6 +566,9 @@ def get_pagination_row(search_id, current_offset, limit, total_count, active_fil
 def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
     current_files = files[offset : offset + limit]
     buttons = []
+    # 🔥 REDIRECT LOGIC FOR BOT B
+    bot_username = FILE_STORE_BOT if FILE_STORE_BOT else temp.U_NAME
+    
     for file in current_files:
         f_name = file.get('file_name', 'Unknown File')
         f_size = get_size(file.get('file_size', 0))
@@ -567,8 +583,8 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active
         
         btn_text = f"📂 {display_name} [{f_size}]"
         if link_id is not None:
-            if temp.U_NAME:
-                url = f"https://t.me/{temp.U_NAME}?start=get_{link_id}_{chat_id}"
+            if bot_username:
+                url = f"https://t.me/{bot_username}?start=get_{link_id}_{chat_id}"
                 buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     pagination = get_pagination_row(search_id, offset, limit, len(files), active_filter, active_lang, active_qual, active_year, active_size)

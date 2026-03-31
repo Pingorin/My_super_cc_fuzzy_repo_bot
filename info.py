@@ -13,7 +13,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "your_bot_token")
 # Yahan Bot B (File Store Bot) ka username daalein bina '@' lagaye. E.g., "MyMovieFileBot"
 FILE_STORE_BOT = os.environ.get("FILE_STORE_BOT", "")
 
-TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "") # Default Test Key
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "9e1353ccc623e71f80262309cda5cdfb") # Default Test Key
 
 # --- DATABASE SETTINGS ---
 DATABASE_URI = os.environ.get("DATABASE_URI", "your_mongo_uri")
@@ -31,16 +31,19 @@ if not USER_DB_URI:
     USER_DB_URI = DATABASE_URI
   
 # --- GENERAL SETTINGS ---
-ADMINS = [int(i) for i in os.environ.get("ADMINS", "").split(" ")] if os.environ.get("ADMINS") else []
+# 🔥 FIX: Ab Admin IDs bina environment variable ke bhi perfectly work karegi
+ADMINS_STR = os.environ.get("ADMINS", "7245547751") # Yahan "" ke andar default admin IDs dal sakte hain space se separate karke (e.g., "123456789 987654321")
+ADMINS = [int(i) for i in ADMINS_STR.split()] if ADMINS_STR else []
+
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0")) 
 PORT = int(os.environ.get("PORT", "8080"))
 CHANNELS = [int(ch) for ch in os.environ.get("CHANNELS", "0").split()] if os.environ.get("CHANNELS") else []
 
 # Yahan -1001234567890 ki jagah apna asli Channel ID daalein
-TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", ""))
+TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "-1003719921511"))
 
 # 👇 NAYA FEATURE: Streaming ke liye Bin Channel (Apne Database Channel ki ID daalein)
-BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", ""))
+BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", "-1003173929836"))
 
 # ✅ SITE URL (REQUIRED FOR SITE MODE)
 # Render/Heroku users must set this in Environment Variables (e.g., https://my-app.onrender.com)

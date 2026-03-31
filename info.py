@@ -8,7 +8,12 @@ id_pattern = re.compile(r'^-?\d+$')
 API_ID = int(os.environ.get("API_ID", "12345")) 
 API_HASH = os.environ.get("API_HASH", "your_api_hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "your_bot_token")
-TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "9e1353ccc623e71f80262309cda5cdfb") # Default Test Key
+
+# 🔥 NAYA FEATURE: Redirect Search Results to Another Bot (Bot B)
+# Yahan Bot B (File Store Bot) ka username daalein bina '@' lagaye. E.g., "MyMovieFileBot"
+FILE_STORE_BOT = os.environ.get("FILE_STORE_BOT", "")
+
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "") # Default Test Key
 
 # --- DATABASE SETTINGS ---
 DATABASE_URI = os.environ.get("DATABASE_URI", "your_mongo_uri")
@@ -32,10 +37,10 @@ PORT = int(os.environ.get("PORT", "8080"))
 CHANNELS = [int(ch) for ch in os.environ.get("CHANNELS", "0").split()] if os.environ.get("CHANNELS") else []
 
 # Yahan -1001234567890 ki jagah apna asli Channel ID daalein
-TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "-1003719921511"))
+TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", ""))
 
 # 👇 NAYA FEATURE: Streaming ke liye Bin Channel (Apne Database Channel ki ID daalein)
-BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", "-1003173929836"))
+BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", ""))
 
 # ✅ SITE URL (REQUIRED FOR SITE MODE)
 # Render/Heroku users must set this in Environment Variables (e.g., https://my-app.onrender.com)

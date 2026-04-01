@@ -688,10 +688,16 @@ async def start_handler(client, message):
     # 🔥 MAIN FLOW (get_linkid_chatid) - Single File + Streaming
     # -------------------------------------------------------------------------
     if len(message.command) > 1 and message.command[1].startswith("get_"):
+
         try:
+
             data = message.command[1].split("_")
+
             link_id = int(data[1])
-            src_chat_id = data[2] if len(data) > 2 else str(message.chat.id)
+
+            # 🔥 BUG FIX: Group ID ko Number (Integer) me convert karna zaroori hai
+
+            src_chat_id = int(data[2]) if len(data) > 2 else message.chat.id
             
             if not await check_fsub(client, message.from_user.id, message): return 
             if not await check_verification(client, message.from_user.id, src_chat_id, link_id, message): return 

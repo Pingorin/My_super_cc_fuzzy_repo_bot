@@ -5,9 +5,9 @@ import re
 id_pattern = re.compile(r'^-?\d+$')
 
 # --- MANDATORY VARIABLES ---
-API_ID = int(os.environ.get("API_ID", "12345")) 
-API_HASH = os.environ.get("API_HASH", "your_api_hash")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "your_bot_token")
+API_ID = int(os.environ.get("API_ID", "")) 
+API_HASH = os.environ.get("API_HASH", "")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
 # 🔥 NAYA FEATURE: Redirect Search Results to Another Bot (Bot B)
 # Yahan Bot B (File Store Bot) ka username daalein bina '@' lagaye. E.g., "MyMovieFileBot"
@@ -16,7 +16,7 @@ FILE_STORE_BOT = os.environ.get("FILE_STORE_BOT", "")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "9e1353ccc623e71f80262309cda5cdfb") # Default Test Key
 
 # --- DATABASE SETTINGS ---
-DATABASE_URI = os.environ.get("DATABASE_URI", "your_mongo_uri")
+DATABASE_URI = os.environ.get("DATABASE_URI", "")
 
 # 🔥 NEW: MULTI-DATABASE ARCHITECTURE SETTINGS 🔥
 # Jab DB 1 full ho jaye, toh host (Render/Heroku) ke variables me inki link daal dena
@@ -24,7 +24,7 @@ DATABASE_URI_2 = os.environ.get("DATABASE_URI_2", "")
 DATABASE_URI_3 = os.environ.get("DATABASE_URI_3", "")
 INDEX_DB = int(os.environ.get("INDEX_DB", "1")) # Default DB 1 (Changeable via /setindex command)
 
-DATABASE_NAME = os.environ.get("DATABASE_NAME", "MyBotDB")
+DATABASE_NAME = os.environ.get("DATABASE_NAME", "")
 COLLECTION_NAME = os.environ.get('COLLECTION_NAME', 'Telegram_files')
 USER_DB_URI = os.environ.get("USER_DB_URI", "")
 if not USER_DB_URI:

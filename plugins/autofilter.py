@@ -122,8 +122,8 @@ async def auto_filter(client, message):
             try: temp.U_NAME = (await client.get_me()).username
             except: temp.U_NAME = "Telegram"
 
+        # 🔥 SMART STATS UPDATER (Request Count Only)
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'req'))
-        asyncio.create_task(db.update_daily_stats(message.chat.id, 'suc'))
 
         mode = group_settings.get('result_mode', 'hybrid')
         limit = group_settings.get('result_page_limit', 10)
@@ -156,6 +156,9 @@ async def auto_filter(client, message):
         ]
         
         filter_buttons = get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None, active_sort="relevance")
+
+        # 🔥 SMART STATS UPDATER (Success Count - Kyunki yahan tak aa gaya matlab file mil gayi hai)
+        asyncio.create_task(db.update_daily_stats(message.chat.id, 'suc'))
 
         if mode == 'button':
             buttons = btn_parser(files, message.chat.id, search_id, offset, limit, query)

@@ -6,7 +6,7 @@ import asyncio
 import urllib.parse
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import UserNotParticipant
+from pyrogram.errors import UserNotParticipant, UsernameInvalid, UsernameNotOccupied, PeerIdInvalid
 from database.users_chats_db import db
 from database.ia_filterdb import Media
 import info 
@@ -16,6 +16,37 @@ from Script import script
 
 logger = logging.getLogger(__name__)
 START_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg"
+
+# ==============================================================================
+# 💓 HEARTBEAT ENGINE (AUTO-FALLBACK SYSTEM)
+# ==============================================================================
+heartbeat_started = False
+
+async def bot_b_heartbeat(client):
+    """Har 10 minute me Bot B ko check karega. Ban hua toh Bot A par fallback karega."""
+    while True:
+        await asyncio.sleep(600)  # 10 minutes wait karega
+        if info.FILE_STORE_BOT and info.FILE_STORE_BOT != temp.U_NAME:
+            try:
+                # Bot B ka status check karna
+                await client.get_users(info.FILE_STORE_BOT)
+            except (UsernameInvalid, UsernameNotOccupied, PeerIdInvalid, Exception):
+                # Agar Bot B ban ho gaya ya username exist nahi karta
+                old_bot = info.FILE_STORE_BOT
+                info.FILE_STORE_BOT = temp.U_NAME  # 🔥 AUTO-FALLBACK TO BOT A
+                
+                alert_msg = (
+                    f"🚨 **EMERGENCY ALERT** 🚨\n\n"
+                    f"Aapka File Store Bot (`@{old_bot}`) ban ho gaya hai ya delete ho gaya hai!\n\n"
+                    f"✅ **Auto-Fallback Activated:** Bot A (`@{temp.U_NAME}`) ne system apne haath me le liya hai. Ab saari files direct yahi bot dega. Links break nahi honge!"
+                )
+                # Admins ko alert bhejna
+                for admin in ADMINS:
+                    try:
+                        await client.send_message(admin, alert_msg)
+                    except:
+                        pass
+                break # Fallback ho gaya, ab loop band kar do
 
 # ==============================================================================
 # 🗑️ AUTO-DELETE HELPER FUNCTIONS
@@ -364,6 +395,12 @@ async def check_fsub(client, user_id, message_obj):
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start_handler(client, message):
+    # 🔥 Start the Heartbeat Checker safely (Ek hi baar start hoga)
+    global heartbeat_started
+    if not heartbeat_started:
+        heartbeat_started = True
+        asyncio.create_task(bot_b_heartbeat(client))
+
     if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         await db.add_group(message.chat.id, message.chat.title)
         if len(message.command) == 1: return await message.reply("✅ Bot is Alive!")

@@ -25,6 +25,38 @@ logging.config.fileConfig('logging.conf')
 logging.getLogger().setLevel(logging.INFO)
 logging.getLogger("pyrogram").setLevel(logging.ERROR)
 
+# ==============================================================================
+# 🔥 TELEGRAM LOG CATCHER ENGINE 🔥
+# ==============================================================================
+class TelegramLogHandler(logging.Handler):
+    def __init__(self, client):
+        super().__init__()
+        self.client = client
+
+    def emit(self, record):
+        # Sirf ERROR aur CRITICAL logs ko Telegram par bhejenge
+        # Taaki normal INFO logs se aapka channel spam na ho
+        if record.levelno >= logging.ERROR:
+            log_entry = self.format(record)
+            if LOG_CHANNEL and LOG_CHANNEL != 0:
+                try:
+                    # Async task ko synchronous logging ke andar chalane ka tarika
+                    loop = asyncio.get_event_loop()
+                    loop.create_task(self.send_async_log(log_entry))
+                except Exception:
+                    pass
+
+    async def send_async_log(self, text):
+        try:
+            # Telegram ek baar me max 4096 characters allow karta hai
+            safe_text = text[-4000:] 
+            await self.client.send_message(
+                chat_id=LOG_CHANNEL, 
+                text=f"🚨 **SERVER ERROR ALERT** 🚨\n\n```python\n{safe_text}\n```"
+            )
+        except Exception:
+            pass
+
 class Bot(Client):
     def __init__(self):
         super().__init__(
@@ -70,6 +102,11 @@ class Bot(Client):
         
         print("⏳ Connecting to Telegram...", flush=True)
         await super().start()
+        
+        # 🔥 ACTIVATE TELEGRAM LOG CATCHER 🔥
+        tg_handler = TelegramLogHandler(self)
+        tg_handler.setFormatter(logging.Formatter('%(name)s - %(message)s'))
+        logging.getLogger().addHandler(tg_handler)
         
         me = await self.get_me()
         temp.ME = me.id

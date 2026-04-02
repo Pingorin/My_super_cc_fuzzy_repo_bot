@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import time
 import aiohttp
+import pytz
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
@@ -970,7 +971,7 @@ async def admin_access_toggle(client, query):
     await admin_access_ui(client, query)
 
 # ==============================================================================
-# 📊 DAILY STATS UI
+# 📊 DAILY STATS UI (LIVE DASHBOARD IN SETTINGS)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^daily_stats#"))
@@ -978,74 +979,78 @@ async def daily_stats_ui(client, query):
     _, chat_id, date_param = query.data.split("#")
     chat_id = int(chat_id)
     
-    # 1. Determine Date
-    today = datetime.datetime.now()
+    # 1. Determine Date (IST timezone)
+    tz = pytz.timezone('Asia/Kolkata')
+    today = datetime.datetime.now(tz)
+    
     if date_param == "today":
         target_date = today
     else:
-        target_date = datetime.datetime.strptime(date_param, "%Y-%m-%d")
+        target_date = datetime.datetime.strptime(date_param, "%Y-%m-%d").replace(tzinfo=tz)
     
     date_str = target_date.strftime("%Y-%m-%d")
     display_date = target_date.strftime("%B %d, %Y")
-    if date_str == today.strftime("%Y-%m-%d"): display_date = "Today"
+    
+    if date_str == today.strftime("%Y-%m-%d"): 
+        display_date = "Today (Live 🟢)"
 
-    # 2. Fetch Data
-    stats = await db.get_daily_stats(chat_id, date_str)
+    # 2. Fetch Data (Consistent with Daily_reporter)
+    try:
+        stats = await db.get_group_stats_by_date(chat_id, date_str)
+    except:
+        stats = None
+        
+    if not stats: 
+        stats = {} # Crash preventer if no searches happened today
+
     group_settings = await db.get_group_settings(chat_id)
-    notify_status = "ON" if group_settings.get('daily_stats_notify', True) else "OFF"
+    notify_status = "✅ ON" if group_settings.get('daily_stats_notify', True) else "❌ OFF"
     
     # 3. Extract Values
     req = stats.get('req', 0)
     suc = stats.get('suc', 0)
-    failed = req - suc
+    failed = req - suc if req > suc else 0
     spam_w = stats.get('spam_w', 0)
     spam_k = stats.get('spam_k', 0)
     refs = stats.get('referrals', 0)
     
-    link_gen = stats.get('link_gen', 0)
-    link_ver = stats.get('link_ver', 0)
-    
     # Ratios
     search_ratio = round((suc / req * 100), 2) if req > 0 else 0.0
-    link_ratio = round((link_ver / link_gen * 100), 2) if link_gen > 0 else 0.0
 
     # 4. Extract & Format Shortener Stats
     shortener_data = stats.get('shorteners', {})
     shortener_text = ""
     
     if not shortener_data:
-        shortener_text = "  - No data available."
+        shortener_text = "  └ _No shortener data available for this date._"
     else:
-        # Loop through each domain (e.g., softurl_in)
         for safe_domain, data in shortener_data.items():
-            # Restore dot: softurl_in -> softurl.in
             real_domain = safe_domain.replace('_', '.').capitalize()
-            
             gen = data.get('gen', 0)
             ver = data.get('ver', 0)
-            ratio = round((ver / gen * 100), 2) if gen > 0 else 0.0
+            failed_link = gen - ver if gen > ver else 0
+            v_ratio = round((ver / gen * 100), 2) if gen > 0 else 0.0
+            f_ratio = round((failed_link / gen * 100), 2) if gen > 0 else 0.0
             
             shortener_text += (
-                f"  - **{real_domain}**\n"
-                f"    - Generated Links: {gen}\n"
-                f"    - Verified Links: {ver}\n"
-                f"    - Success Ratio: {ratio}%\n"
+                f"  🌐 **{real_domain}**\n"
+                f"    ├ Generated: `{gen}`\n"
+                f"    ├ Verified: `{ver}` ({v_ratio}%)\n"
+                f"    └ Failed: `{failed_link}` ({f_ratio}%)\n\n"
             )
 
-    # 5. Build Text
+    # 5. Build Text (Similar to Daily Reporter)
     text = (
-        f"📊 **Daily Stats for {display_date}**\n"
-        f"_(Group ID: {chat_id})_\n\n"
-        f"**Mode:** NONE\n\n"
+        f"📊 **Analytics Dashboard**\n\n"
+        f"📅 **Date:** {display_date}\n\n"
         f"🔍 **Search Statistics:**\n"
-        f"  - Total Requests: {req}\n"
-        f"  - Successful: {suc}\n"
-        f"  - Failed: {failed}\n"
-        f"  - Success Ratio: {search_ratio}%\n\n"
-        f"🛡️ **Anti-Spam Statistics:**\n"
-        f"  - Warned Users: {spam_w}\n"
-        f"  - Kicked Users: {spam_k}\n\n"
-        f"🤝 **Today's Referrals:** {refs}\n\n"
+        f"  ├ Total Searches: `{req}`\n"
+        f"  ├ Successful: `{suc}` ({search_ratio}%)\n"
+        f"  └ Failed/Missed: `{failed}`\n\n"
+        f"🛡️ **Anti-Spam Blocks:**\n"
+        f"  ├ Warned: `{spam_w}`\n"
+        f"  └ Kicked: `{spam_k}`\n\n"
+        f"🤝 **Referrals Joined:** `{refs}`\n\n"
         f"🔗 **Shortener Statistics:**\n"
         f"{shortener_text}"
     )
@@ -1054,14 +1059,14 @@ async def daily_stats_ui(client, query):
     buttons = []
     nav_row = []
     
-    # Prev Day (Limit to 7 days back)
+    # Prev Day (Limit to 10 days back)
     prev_date = target_date - datetime.timedelta(days=1)
-    limit_date = today - datetime.timedelta(days=7)
+    limit_date = today - datetime.timedelta(days=10)
     
     if prev_date >= limit_date:
         nav_row.append(InlineKeyboardButton("⬅️ Prev Day", callback_data=f"daily_stats#{chat_id}#{prev_date.strftime('%Y-%m-%d')}"))
     
-    nav_row.append(InlineKeyboardButton("🔄", callback_data=f"daily_stats#{chat_id}#{date_str}"))
+    nav_row.append(InlineKeyboardButton("🔄 Refresh", callback_data=f"daily_stats#{chat_id}#{date_str}"))
 
     # Next Day (Only if not today)
     next_date = target_date + datetime.timedelta(days=1)
@@ -1070,8 +1075,8 @@ async def daily_stats_ui(client, query):
 
     buttons.append(nav_row)
     
-    # Toggle Notify
-    buttons.append([InlineKeyboardButton(f"Daily Notify: {notify_status}", callback_data=f"ds_notify#{chat_id}#{date_str}")])
+    # Toggle Notify & Back
+    buttons.append([InlineKeyboardButton(f"Daily Auto-Report: {notify_status}", callback_data=f"ds_notify#{chat_id}#{date_str}")])
     buttons.append([InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
 
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))

@@ -276,33 +276,66 @@ class MediaDB:
 
         unique_ids = [media.file_unique_id for media, msg in unique_batch_items]
         
-        # 🔥 MULTI-DB DEDUPLICATION (3 Nodes)
+        # 🔥 SMART UPDATE MAPPING (Teeno DB me dhoondhega ki purani file kahan hai)
+        existing_map = {}
+        link_ids_to_check = []
+        
         try:
             existing_docs_1 = await self.data_col1.find({"file_unique_id": {"$in": unique_ids}}).to_list(length=len(unique_batch_items))
-            existing_unique_ids = set(doc['file_unique_id'] for doc in existing_docs_1)
+            for doc in existing_docs_1: 
+                existing_map[doc['file_unique_id']] = {'db': 1, 'link_id': doc['_id']}
+                link_ids_to_check.append(doc['_id'])
             
             if self.has_db2:
                 existing_docs_2 = await self.data_col2.find({"file_unique_id": {"$in": unique_ids}}).to_list(length=len(unique_batch_items))
-                existing_unique_ids.update(doc['file_unique_id'] for doc in existing_docs_2)
+                for doc in existing_docs_2: 
+                    existing_map[doc['file_unique_id']] = {'db': 2, 'link_id': doc['_id']}
+                    link_ids_to_check.append(doc['_id'])
                 
             if self.has_db3:
                 existing_docs_3 = await self.data_col3.find({"file_unique_id": {"$in": unique_ids}}).to_list(length=len(unique_batch_items))
-                existing_unique_ids.update(doc['file_unique_id'] for doc in existing_docs_3)
-        except: existing_unique_ids = set()
+                for doc in existing_docs_3: 
+                    existing_map[doc['file_unique_id']] = {'db': 3, 'link_id': doc['_id']}
+                    link_ids_to_check.append(doc['_id'])
+        except: pass
 
-        new_items = [(media, msg) for media, msg in unique_batch_items if media.file_unique_id not in existing_unique_ids]
+        # 🧠 THE "BRAIN" - Purani files ke caption ki lambaai (length) nikalna
+        old_text_lengths = {}
+        if link_ids_to_check:
+            try:
+                old_search_1 = await self.search_col1.find({"link_id": {"$in": link_ids_to_check}}).to_list(length=len(link_ids_to_check))
+                for doc in old_search_1: old_text_lengths[doc['link_id']] = len(doc.get('file_name', '')) + len(doc.get('search_text', ''))
+                
+                if self.has_db2:
+                    old_search_2 = await self.search_col2.find({"link_id": {"$in": link_ids_to_check}}).to_list(length=len(link_ids_to_check))
+                    for doc in old_search_2: old_text_lengths[doc['link_id']] = len(doc.get('file_name', '')) + len(doc.get('search_text', ''))
+                
+                if self.has_db3:
+                    old_search_3 = await self.search_col3.find({"link_id": {"$in": link_ids_to_check}}).to_list(length=len(link_ids_to_check))
+                    for doc in old_search_3: old_text_lengths[doc['link_id']] = len(doc.get('file_name', '')) + len(doc.get('search_text', ''))
+            except: pass
+
+        # Nayi files aur Update hone wali files ko alag-alag karna
+        new_items = [(media, msg) for media, msg in unique_batch_items if media.file_unique_id not in existing_map]
+        update_items = [(media, msg, existing_map[media.file_unique_id]) for media, msg in unique_batch_items if media.file_unique_id in existing_map]
+        
         pre_duplicate_count = len(items) - len(new_items)
-        if not new_items: return 0, pre_duplicate_count 
             
         count = len(new_items)
-        end_sequence = await self.get_next_sequence_value("file_id_counter", increment=count)
-        if not end_sequence: return 0, 0
+        end_sequence = None
+        start_sequence = 0
+        if count > 0:
+            end_sequence = await self.get_next_sequence_value("file_id_counter", increment=count)
+            if end_sequence:
+                start_sequence = end_sequence - count + 1
         
-        start_sequence = end_sequence - count + 1
         data_docs, search_docs = [], []
         current_id = start_sequence
         
-        for media, message in new_items:
+        # Dono files ko ek sath Master Parsing Engine me bhejna
+        all_processing_items = [("new", m, msg, None) for m, msg in new_items] + [("update", m, msg, ex) for m, msg, ex in update_items]
+        
+        for process_type, media, message, ex_info in all_processing_items:
             raw_fname = media.file_name or ""
             raw_cap = message.caption.html if message.caption else ""
             
@@ -318,7 +351,6 @@ class MediaDB:
             
             clean_fname = self.clean_text(raw_fname)
             
-            # 🔥 BUG FIX: meta_regex bahar aagaya, ab bina caption wali file bhi pass hogi
             meta_regex = r"(?i)(1080p|720p|480p|4k|2160p|s\d+|e\d+|\b19\d{2}\b|\b20\d{2}\b|hindi|tamil|telugu|dual)"
             
             clean_cap_line = ""
@@ -395,45 +427,94 @@ class MediaDB:
 
             file_type = "video" if message.video else "document"
 
-            data_docs.append({'_id': current_id, 'msg_id': message.id, 'chat_id': message.chat.id, 'file_id': media.file_id, 'file_unique_id': media.file_unique_id, 'file_type': file_type})
-            
-            search_doc = {
-                'file_name': final_display_name, 'file_size': media.file_size, 'search_text': master_search_text, 
-                'link_id': current_id, 'chat_id': message.chat.id, 'file_type': file_type
-            }
-            if parsed_meta['quality']: search_doc['quality'] = parsed_meta['quality']
-            if parsed_meta['languages']: search_doc['languages'] = parsed_meta['languages']
-            if parsed_meta['year']: search_doc['year'] = parsed_meta['year']
+            # 🟢 IF THIS IS A COMPLETELY NEW FILE (Normal Insert)
+            if process_type == "new" and current_id > 0:
+                data_docs.append({'_id': current_id, 'msg_id': message.id, 'chat_id': message.chat.id, 'file_id': media.file_id, 'file_unique_id': media.file_unique_id, 'file_type': file_type})
+                
+                search_doc = {
+                    'file_name': final_display_name, 'file_size': media.file_size, 'search_text': master_search_text, 
+                    'link_id': current_id, 'chat_id': message.chat.id, 'file_type': file_type
+                }
+                if parsed_meta['quality']: search_doc['quality'] = parsed_meta['quality']
+                if parsed_meta['languages']: search_doc['languages'] = parsed_meta['languages']
+                if parsed_meta['year']: search_doc['year'] = parsed_meta['year']
 
-            search_docs.append(search_doc)
-            current_id += 1
+                search_docs.append(search_doc)
+                current_id += 1
+                
+            # 🔵 IF THIS FILE ALREADY EXISTS (Smart Comparison Overwrite)
+            elif process_type == "update":
+                db_num = ex_info['db']
+                link_id = ex_info['link_id']
+                
+                # Nayi file ka total text lambaai nikalna
+                new_text_length = len(final_display_name) + len(master_search_text)
+                # Purani file ki lambaai (jo upar nikali thi)
+                old_text_length = old_text_lengths.get(link_id, 0)
+                
+                # 🔥 THE MASTER LOGIC: Sirf tabhi update karega jab nayi file behtar/zyada detail wali ho
+                if new_text_length > old_text_length:
+                    if db_num == 3 and self.has_db3:
+                        active_data, active_search = self.data_col3, self.search_col3
+                    elif db_num == 2 and self.has_db2:
+                        active_data, active_search = self.data_col2, self.search_col2
+                    else:
+                        active_data, active_search = self.data_col1, self.search_col1
+                        
+                    data_update = {
+                        'msg_id': message.id, 
+                        'chat_id': message.chat.id, 
+                        'file_id': media.file_id, 
+                        'file_type': file_type
+                    }
+                    
+                    search_update = {
+                        'file_name': final_display_name, 
+                        'file_size': media.file_size, 
+                        'search_text': master_search_text, 
+                        'chat_id': message.chat.id, 
+                        'file_type': file_type
+                    }
+                    search_update['quality'] = parsed_meta['quality'] if parsed_meta['quality'] else []
+                    search_update['languages'] = parsed_meta['languages'] if parsed_meta['languages'] else []
+                    search_update['year'] = parsed_meta['year'] if parsed_meta['year'] else []
+
+                    try:
+                        # Database update command
+                        asyncio.create_task(active_data.update_one({'_id': link_id}, {'$set': data_update}))
+                        asyncio.create_task(active_search.update_one({'link_id': link_id}, {'$set': search_update}))
+                    except Exception: pass
+                else:
+                    # Nayi file bekaar hai, purani wali hi theek thi! (Chupchap skip kardo)
+                    pass
 
         saved_count = 0
         
-        # 🔥 SMART MANUAL ROUTING: Admin ne jo DB set kiya hai, wahi use hoga!
-        active_db_num = await self.get_active_index_db()
-        
-        if active_db_num == 3 and self.has_db3:
-            active_data_col = self.data_col3
-            active_search_col = self.search_col3
-        elif active_db_num == 2 and self.has_db2:
-            active_data_col = self.data_col2
-            active_search_col = self.search_col2
-        else:
-            active_data_col = self.data_col1
-            active_search_col = self.search_col1
+        # 🔥 Insert New Items
+        if data_docs or search_docs:
+            active_db_num = await self.get_active_index_db()
+            
+            if active_db_num == 3 and self.has_db3:
+                active_data_col = self.data_col3
+                active_search_col = self.search_col3
+            elif active_db_num == 2 and self.has_db2:
+                active_data_col = self.data_col2
+                active_search_col = self.search_col2
+            else:
+                active_data_col = self.data_col1
+                active_search_col = self.search_col1
 
-        if data_docs:
-            try:
-                await active_data_col.insert_many(data_docs, ordered=False)
-                saved_count = len(data_docs)
-            except BulkWriteError as bwe: saved_count = bwe.details['nInserted']
-            except Exception: pass 
-        
-        if search_docs:
-            try: await active_search_col.insert_many(search_docs, ordered=False)
-            except BulkWriteError: pass
-            except Exception: pass
+            if data_docs:
+                try:
+                    await active_data_col.insert_many(data_docs, ordered=False)
+                    saved_count = len(data_docs)
+                except BulkWriteError as bwe: saved_count = bwe.details['nInserted']
+                except Exception: pass 
+            
+            if search_docs:
+                try: await active_search_col.insert_many(search_docs, ordered=False)
+                except BulkWriteError: pass
+                except Exception: pass
                 
         return saved_count, pre_duplicate_count
 

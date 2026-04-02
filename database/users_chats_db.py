@@ -226,7 +226,6 @@ class UserChatDB:
                 {'$inc': {key: count}},
                 upsert=True
             )
-        # Note: We typically don't cache stats as they change frequently and aren't critical for immediate display logic like settings.
 
     async def get_daily_stats(self, chat_id, date_str):
         # Stats are fetched less frequently, usually OK to hit DB or implement separate cache if needed
@@ -246,6 +245,14 @@ class UserChatDB:
             results.append(stats)
         return results
 
+    # 🔥 NAYA FUNCTION DAILY STATS NAVIGATION KE LIYE 🔥
+    async def get_group_stats_by_date(self, chat_id, date_str):
+        """Fetches stats for a SPECIFIC group on a SPECIFIC date (For Interactive Buttons)"""
+        group = await self.groups.find_one({'id': int(chat_id)})
+        if group and 'stats' in group:
+            return group['stats'].get(date_str, None)
+        return None
+
     # --- 📰 AUTO POST HELPERS ---
 
     async def set_autopost_button(self, chat_id, slot, text, url):
@@ -256,8 +263,6 @@ class UserChatDB:
         )
         # Invalidate/Update Cache
         if int(chat_id) in SETTINGS_CACHE:
-             # Deep update for nested dictionaries can be tricky in cache. simpler to remove and let refetch or update if possible
-             # For simplicity, let's remove to force a fresh fetch next time
              del SETTINGS_CACHE[int(chat_id)]
 
 

@@ -1272,3 +1272,52 @@ async def get_grp_link_handler(client, query):
             f"*(Error: {error_msg})*",
             reply_markup=InlineKeyboardMarkup(btn)
         )
+
+# ==============================================================================
+# 🚀 SMART ID REFRESH COMMAND (For Multi-Bot Setup)
+# ==============================================================================
+@Client.on_message(filters.command("refresh_ids") & filters.user(ADMINS))
+async def refresh_ids_command(client, message):
+    if len(message.command) < 2:
+        return await message.reply("⚠️ **Syntax:** `/refresh_ids [Channel ID]`\n\nYe command sirf purani files ki ID ko naye bot ke liye update karegi.")
+    
+    try:
+        channel_id = int(message.command[1])
+    except ValueError:
+        return await message.reply("❌ Invalid Channel ID! Kripya sahi ID daalein.")
+        
+    status_msg = await message.reply("🔄 **Strict ID Refresh Started...**\n_Sirf 'Best Files' ki ID update hogi._")
+    
+    updated_count = 0
+    try:
+        # Channel ke messages ek-ek karke padhna
+        async for ch_msg in client.get_chat_history(channel_id):
+            media = ch_msg.video or ch_msg.document
+            if media:
+                file_unique_id = media.file_unique_id
+                file_id = media.file_id
+                
+                # Nayi file_id aur msg_id ka data
+                update_data = {'$set': {'file_id': file_id, 'msg_id': ch_msg.id}}
+                
+                # 🔥 STRICT FILTER: Sirf tab update karo jab Aadhar Card AUR Channel dono match hon!
+                strict_filter = {'file_unique_id': file_unique_id, 'chat_id': ch_msg.chat.id}
+                
+                # DB 1 Update
+                res1 = await Media.data_col1.update_one(strict_filter, update_data)
+                if res1.modified_count > 0: updated_count += 1
+                
+                # DB 2 Update
+                if Media.has_db2:
+                    res2 = await Media.data_col2.update_one(strict_filter, update_data)
+                    if res2.modified_count > 0: updated_count += 1
+                    
+                # DB 3 Update
+                if Media.has_db3:
+                    res3 = await Media.data_col3.update_one(strict_filter, update_data)
+                    if res3.modified_count > 0: updated_count += 1
+                    
+        await status_msg.edit(f"✅ **Strict ID Refresh Complete!**\n\n📂 Total Best IDs Updated for this Bot: `{updated_count}`")
+        
+    except Exception as e:
+        await status_msg.edit(f"❌ Error aagaya bhai: `{e}`\n\nKripya check karein ki bot channel me Admin hai ya nahi.")

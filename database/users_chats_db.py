@@ -100,6 +100,33 @@ class UserChatDB:
         return False, "Expired"
 
     # ==================================================================
+    # 👑 MANUAL ADMIN PREMIUM SYSTEM
+    # ==================================================================
+    async def add_premium_time(self, user_id, duration_seconds):
+        user = await self.users.find_one({'id': int(user_id)})
+        current_time = time.time()
+        # Agar pehle se premium hai toh purani expiry uthao, warna abhi ka time
+        current_expiry = user.get('premium_expiry', 0) if user else 0
+
+        if current_expiry > current_time:
+            new_expiry = current_expiry + duration_seconds
+        else:
+            new_expiry = current_time + duration_seconds
+
+        await self.users.update_one(
+            {'id': int(user_id)},
+            {'$set': {'premium_expiry': new_expiry}},
+            upsert=True
+        )
+        return new_expiry
+
+    async def remove_premium(self, user_id):
+        await self.users.update_one(
+            {'id': int(user_id)},
+            {'$set': {'premium_expiry': 0}}
+        )
+
+    # ==================================================================
     # ⚙️ GROUP MANAGEMENT
     # ==================================================================
 

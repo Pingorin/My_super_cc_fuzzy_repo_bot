@@ -62,7 +62,7 @@ async def auto_delete_single(file_msg, warning_msg, command_data):
     try:
         btn = [[InlineKeyboardButton("✅ ɢᴇᴛ ғɪʟᴇ ᴀɢᴀɪɴ ✅", url=f"https://t.me/{temp.U_NAME}?start={command_data}")]]
         await warning_msg.edit_text(
-            "<b>✅ ʏᴏᴜʀ ᴍᴇssᴀɢᴇ ɪs sᴜᴄᴄᴇssғᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ ɪғ ʏᴏᴜ ᴡᴀɴᴛ ᴀɢᴀɪɴ ᴛʜᴇɴ ᴄʟɪᴄᴋ ᴏɴ ʙᴇʟᴏᴡ ʙᴜᴛᴛᴏɴ</b>",
+            "<b>✅ ʏᴏᴜʀ ᴍᴇssᴀɢᴇ ɪs sᴜᴄssғᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ ɪғ ʏᴏᴜ ᴡᴀɴᴛ ᴀɢᴀɪɴ ᴛʜᴇɴ ᴄʟɪᴄᴋ ᴏɴ ʙᴇʟᴏᴡ ʙᴜᴛᴛᴏɴ</b>",
             reply_markup=InlineKeyboardMarkup(btn)
         )
     except Exception:
@@ -164,12 +164,18 @@ async def grant_full_access(user_id, chat_id):
 async def check_verification(client, user_id, chat_id, link_id, message_obj):
     if not IS_VERIFY: return True 
 
+    # 💎 Premium Check - Agar user VIP hai toh turant True return kar do (Shortener Skip)
     is_premium = await db.is_user_premium(user_id)
     if is_premium:
         return True 
 
+    group_settings = await db.get_group_settings(chat_id)
+    
+    # 🔥 FIX: Agar Settings me Shortlink Disable hai, toh yahi se aage jane do (Bypass)
+    if group_settings and group_settings.get('is_shortlink_active', True) == False:
+        return True
+
     try:
-        group_settings = await db.get_group_settings(chat_id)
         if group_settings and group_settings.get('admin_free_access', False):
             member = await client.get_chat_member(chat_id, user_id)
             if member.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
@@ -1358,3 +1364,87 @@ async def refresh_ids_command(client, message):
         
     except Exception as e:
         await status_msg.edit(f"❌ Error aagaya bhai: `{e}`\n\nKripya check karein ki bot channel me Admin hai ya nahi.")
+
+# ==============================================================================
+# 👑 ADMIN PREMIUM COMMANDS
+# ==============================================================================
+
+@Client.on_message(filters.command("addpremium") & filters.user(ADMINS))
+async def add_premium_cmd(client, message):
+    if len(message.command) < 3:
+        return await message.reply(
+            "⚠️ **Syntax:** `/addpremium [User ID] [Days]`\n\n"
+            "**Example:** `/addpremium 123456789 30` (30 din ke liye)\n"
+            "**1 Year:** `/addpremium 123456789 365`"
+        )
+
+    try:
+        target_user_id = int(message.command[1])
+        days = int(message.command[2])
+    except ValueError:
+        return await message.reply("❌ Invalid User ID ya Days. Sirf numbers use karein.")
+
+    duration_seconds = days * 86400  # Din ko seconds me convert kiya
+    new_expiry = await db.add_premium_time(target_user_id, duration_seconds)
+    
+    # Expiry date ko padhne layek format me badalna
+    expiry_date = datetime.datetime.fromtimestamp(new_expiry).strftime('%d %b %Y, %I:%M %p')
+
+    await message.reply(
+        f"✅ **Premium Successfully Added!**\n\n"
+        f"👤 **User ID:** `{target_user_id}`\n"
+        f"⏳ **Added Time:** `{days} Days`\n"
+        f"📅 **New Expiry:** `{expiry_date}`"
+    )
+
+    # User ko DM me khushkhabri dena (Agar usne bot ko block nahi kiya hai)
+    try:
+        await client.send_message(
+            target_user_id, 
+            f"🎉 **Congratulations!**\n\n"
+            f"An Admin has gifted you **{days} Days** of Premium Access! 💎\n"
+            f"Ab aap direct files download kar sakte hain bina kisi link shortener ke.\n\n"
+            f"📅 **Expiry Date:** `{expiry_date}`"
+        )
+    except:
+        pass
+
+
+@Client.on_message(filters.command("removepremium") & filters.user(ADMINS))
+async def remove_premium_cmd(client, message):
+    if len(message.command) < 2:
+        return await message.reply("⚠️ **Syntax:** `/removepremium [User ID]`")
+
+    try:
+        target_user_id = int(message.command[1])
+    except ValueError:
+        return await message.reply("❌ Invalid User ID.")
+
+    await db.remove_premium(target_user_id)
+    await message.reply(f"✅ **Premium Removed!**\nUser `{target_user_id}` is now a normal user.")
+    
+    try:
+        await client.send_message(target_user_id, "⚠️ **Notice:** Your Premium Access has been removed by an Admin.")
+    except:
+        pass
+
+
+@Client.on_message(filters.command("checkpremium") & filters.user(ADMINS))
+async def check_premium_cmd(client, message):
+    if len(message.command) < 2:
+        return await message.reply("⚠️ **Syntax:** `/checkpremium [User ID]`")
+
+    try:
+        target_user_id = int(message.command[1])
+    except ValueError:
+        return await message.reply("❌ Invalid User ID.")
+
+    is_prem, msg = await db.get_premium_status(target_user_id)
+    status_icon = "✅ Active" if is_prem else "❌ Inactive"
+    
+    await message.reply(
+        f"📊 **Premium Status Check**\n\n"
+        f"👤 **User ID:** `{target_user_id}`\n"
+        f"**Status:** {status_icon}\n"
+        f"**Validity:** {msg}"
+    )

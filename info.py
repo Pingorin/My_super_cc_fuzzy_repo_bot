@@ -5,9 +5,9 @@ import re
 id_pattern = re.compile(r'^-?\d+$')
 
 # --- MANDATORY VARIABLES ---
-API_ID = int(os.environ.get("API_ID", "")) 
-API_HASH = os.environ.get("API_HASH", "")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+API_ID = int(os.environ.get("API_ID", "20638104")) 
+API_HASH = os.environ.get("API_HASH", "6c884690ca85d39a4c5ad7c15b194e42")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8489353109:AAHvYjHhed4a_eHkmruzeJTmIa9oU5EsINc")
 
 # 🔥 NAYA FEATURE: Redirect Search Results to Another Bot (Bot B)
 # Yahan Bot B (File Store Bot) ka username daalein bina '@' lagaye. E.g., "MyMovieFileBot"
@@ -16,7 +16,7 @@ FILE_STORE_BOT = os.environ.get("FILE_STORE_BOT", "")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "9e1353ccc623e71f80262309cda5cdfb") # Default Test Key
 
 # --- DATABASE SETTINGS ---
-DATABASE_URI = os.environ.get("DATABASE_URI", "")
+DATABASE_URI = os.environ.get("DATABASE_URI", "mongodb+srv://ronak99:ronak99@cluster0.jnxajc1.mongodb.net/?retryWrites=true&w=majority&minPoolSize=1&maxPoolSize=20")
 
 # 🔥 NEW: MULTI-DATABASE ARCHITECTURE SETTINGS 🔥
 # Jab DB 1 full ho jaye, toh host (Render/Heroku) ke variables me inki link daal dena
@@ -24,9 +24,9 @@ DATABASE_URI_2 = os.environ.get("DATABASE_URI_2", "")
 DATABASE_URI_3 = os.environ.get("DATABASE_URI_3", "")
 INDEX_DB = int(os.environ.get("INDEX_DB", "1")) # Default DB 1 (Changeable via /setindex command)
 
-DATABASE_NAME = os.environ.get("DATABASE_NAME", "")
+DATABASE_NAME = os.environ.get("DATABASE_NAME", "Cluster0")
 COLLECTION_NAME = os.environ.get('COLLECTION_NAME', 'Telegram_files')
-USER_DB_URI = os.environ.get("USER_DB_URI", "")
+USER_DB_URI = os.environ.get("USER_DB_URI", "mongodb+srv://Priya55:Priya55@cluster0.nmxnzme.mongodb.net/?retryWrites=true&w=majority&minPoolSize=1&maxPoolSize=20")
 if not USER_DB_URI:
     USER_DB_URI = DATABASE_URI
   
@@ -35,7 +35,7 @@ if not USER_DB_URI:
 ADMINS_STR = os.environ.get("ADMINS", "7245547751") # Yahan "" ke andar default admin IDs dal sakte hain space se separate karke (e.g., "123456789 987654321")
 ADMINS = [int(i) for i in ADMINS_STR.split()] if ADMINS_STR else []
 
-LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0")) 
+LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1003474604893")) 
 PORT = int(os.environ.get("PORT", "8080"))
 CHANNELS = [int(ch) for ch in os.environ.get("CHANNELS", "0").split()] if os.environ.get("CHANNELS") else []
 

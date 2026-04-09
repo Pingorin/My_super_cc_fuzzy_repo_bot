@@ -75,6 +75,10 @@ def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_siz
 @Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index", "set_shortner", "settings", "connect", "delreq", "broadcast", "admin_upload", "id", "info", "other_group", "setindex"]))
 async def auto_filter(client, message):
     try:
+        # 🚫 CHANNELS KO IGNORE KAREIN (Taaki Log messages delete na hon)
+        if message.chat.type == enums.ChatType.CHANNEL:
+            return
+
         # ✅ PM SEARCH CHECK
         if not PM_SEARCH and message.chat.type == enums.ChatType.PRIVATE:
             return
@@ -136,7 +140,9 @@ async def auto_filter(client, message):
             try: await message.react(random.choice(REACTIONS))
             except: pass 
 
-        search_id = await Media.save_search_query(query, message.from_user.id, files)
+        # ✅ FIX: Agar user anonymous hai, toh group ka chat_id use kar lenge
+        user_id = message.from_user.id if message.from_user else message.chat.id
+        search_id = await Media.save_search_query(query, user_id, files)
         if not search_id: search_id = 0
 
         if mode == 'hybrid':

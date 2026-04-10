@@ -4,7 +4,7 @@ pymongo[srv]
 motor
 marshmallow
 umongo
-git+https://github.com/Joelkb/cinemagoer/archive/master.zip
+git+https://github.com/Joelkb/cinemagoer
 Heroku3
 search_engine_parser
 wget
@@ -26,3 +26,5 @@ aiohttp_jinja2
 jinja2
 # ✅ Added for Memory Leak Fix (Spam Control)
 cachetools
+setuptools
+wheel

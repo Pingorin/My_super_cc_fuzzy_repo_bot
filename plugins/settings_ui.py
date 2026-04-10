@@ -708,6 +708,7 @@ async def auto_post_settings_ui(client, query):
     # Fetch Data
     is_enabled = group_data.get('autopost_enabled', False)
     interval = group_data.get('autopost_interval', 1800)
+    del_time = group_data.get('autopost_del_time', 60)
     ad_text = group_data.get('autopost_text')
     
     # Check Media
@@ -726,12 +727,15 @@ async def auto_post_settings_ui(client, query):
     btn_count = len(buttons_data)
     
     def t_chk(val): return "✅" if interval == val else ""
+    if del_time == 0: del_str = "Never Delete"
+    else: del_str = f"{int(del_time/60)} min"
 
     text = (
         f"📰 **Auto Post Settings for:** `{chat_id}`\n\n"
         "This feature will periodically post a custom advertisement in your group.\n\n"
         f"**Current Status:** {status_icon}\n"
-        f"**Interval:** Every {int(interval/60)} minutes.\n"
+        f"**Interval:** Every {int(interval/60)} min\n"
+        f"**Ad Auto-Delete:** {del_str}\n"
         f"**Ad Text:** {txt_status}\n"
         f"**Ad Media:** {img_status}\n"
         f"**Buttons Configured:** {btn_count}/3\n\n"
@@ -746,6 +750,8 @@ async def auto_post_settings_ui(client, query):
         [InlineKeyboardButton("Set Text", callback_data=f"ap_set_txt#{chat_id}"),
          InlineKeyboardButton("Set Media", callback_data=f"ap_set_media#{chat_id}")],
          
+        [InlineKeyboardButton(f"⏱ Set Ad Delete Time: {del_str}", callback_data=f"ap_del_menu#{chat_id}")],
+
         [InlineKeyboardButton("Manage Buttons", callback_data=f"ap_btn_menu#{chat_id}"),
          InlineKeyboardButton("Reset Ad Content", callback_data=f"ap_reset#{chat_id}")],
         
@@ -759,6 +765,42 @@ async def auto_post_settings_ui(client, query):
     ]
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+
+# ==============================================================================
+# ⏱ AD DELETE TIME PICKER
+# ==============================================================================
+@Client.on_callback_query(filters.regex(r"^ap_del_menu#"))
+async def ap_delete_time_picker(client, query):
+    chat_id = int(query.data.split("#")[1])
+    
+    text = "⏱ **Select Ad Auto-Delete Duration:**\n\nBheja gaya ad kitni der baad delete hona chahiye?"
+    
+    buttons = [
+        # Row 1: 1, 2, 3 Minutes
+        [InlineKeyboardButton("1 Min", callback_data=f"set_apdel#{chat_id}#60"),
+         InlineKeyboardButton("2 Min", callback_data=f"set_apdel#{chat_id}#120"),
+         InlineKeyboardButton("3 Min", callback_data=f"set_apdel#{chat_id}#180")],
+         
+        # Row 2: 5, 10 Minutes
+        [InlineKeyboardButton("5 Min", callback_data=f"set_apdel#{chat_id}#300"),
+         InlineKeyboardButton("10 Min", callback_data=f"set_apdel#{chat_id}#600")],
+         
+        # Row 3: 15, 30 Minutes
+        [InlineKeyboardButton("15 Min", callback_data=f"set_apdel#{chat_id}#900"),
+         InlineKeyboardButton("30 Min", callback_data=f"set_apdel#{chat_id}#1800")],
+         
+        # Row 4: Never Delete & Back
+        [InlineKeyboardButton("❌ Never Delete", callback_data=f"set_apdel#{chat_id}#0")],
+        [InlineKeyboardButton("🔙 Back", callback_data=f"autopost_ui#{chat_id}")]
+    ]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^set_apdel#"))
+async def save_ap_delete_time(client, query):
+    _, chat_id, seconds = query.data.split("#")
+    await db.update_group_settings(int(chat_id), {'autopost_del_time': int(seconds)})
+    await query.answer("✅ Ad Delete Time Updated!")
+    await auto_post_settings_ui(client, query)
 
 # --- TOGGLE & TIME HANDLERS ---
 @Client.on_callback_query(filters.regex(r"^ap_toggle#"))
@@ -796,9 +838,6 @@ async def ap_reset_handler(client, query):
             'autopost_enabled': False
         }}
     )
-    
-    # Clear Cache if using it
-    if chat_id in db.SETTINGS_CACHE: del db.SETTINGS_CACHE[chat_id]
     
     await query.answer("🔄 Ad Content Reset!", show_alert=True)
     await auto_post_settings_ui(client, query)

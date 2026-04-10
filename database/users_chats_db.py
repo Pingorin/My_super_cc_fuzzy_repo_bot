@@ -165,6 +165,7 @@ class UserChatDB:
             'autopost_image': None,         
             'autopost_media_id': None,      # ✅ ADDED FOR MULTI-MEDIA
             'autopost_media_type': None,    # ✅ ADDED FOR MULTI-MEDIA
+            'autopost_del_time': 60,       # ✅ ADDED FOR AD AUTO DELETE TIMER
             'autopost_buttons': {},         
             'admin_free_access': False,     
             'daily_stats_notify': True,     
@@ -571,6 +572,7 @@ class UserChatDB:
             'autopost_image': None,
             'autopost_media_id': None,     # ✅ ADDED FOR MULTI-MEDIA
             'autopost_media_type': None,   # ✅ ADDED FOR MULTI-MEDIA
+            'autopost_del_time': 60,      # ✅ ADDED FOR AD AUTO DELETE TIMER
             'autopost_buttons': {},
             
             # --- ADMIN ACCESS ---

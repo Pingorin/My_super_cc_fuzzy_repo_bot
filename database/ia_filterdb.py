@@ -70,8 +70,10 @@ class MediaDB:
 
     async def ensure_indexes(self):
         try:
-            try: await self.search_col1.drop_indexes()
-            except OperationFailure: pass 
+            # 🔥 OPTIMIZATION: Inko comment kar diya hai taaki 1.8 Lakh files ka index 
+            # baar-baar delete hoke CPU load na badhaye aur bot fast start ho.
+            # try: await self.search_col1.drop_indexes()
+            # except OperationFailure: pass 
 
             # 🔥 TTL BUG FIX: Purane time wale rules ko pehle hatayenge taaki clash na ho
             try: await self.search_cache.drop_index("created_at_1")
@@ -97,8 +99,8 @@ class MediaDB:
             
             # 🔥 DB 2 Indexes
             if self.has_db2:
-                try: await self.search_col2.drop_indexes()
-                except OperationFailure: pass
+                # try: await self.search_col2.drop_indexes()
+                # except OperationFailure: pass
                 
                 await self.search_col2.create_index("quality") 
                 await self.search_col2.create_index("languages") 
@@ -112,8 +114,8 @@ class MediaDB:
 
             # 🔥 DB 3 Indexes
             if self.has_db3:
-                try: await self.search_col3.drop_indexes()
-                except OperationFailure: pass
+                # try: await self.search_col3.drop_indexes()
+                # except OperationFailure: pass
                 
                 await self.search_col3.create_index("quality") 
                 await self.search_col3.create_index("languages") 
@@ -761,7 +763,7 @@ class MediaDB:
             return total
         except: return 0
 
-    # 🔥 NAYA FUNCTION: Har Database ka Alag-Alag Hisaab 🔥
+    # 🔥 NAYA FUNCTION DAILY STATS NAVIGATION KE LIYE 🔥
     async def get_detailed_stats(self):
         stats_dict = {"db1": None, "db2": None, "db3": None, "total_overall": 0}
         total_overall = 0
@@ -770,19 +772,31 @@ class MediaDB:
             db_stats1 = await self.db1.command("dbstats")
             t1 = db_stats1.get('storageSize', 0) + db_stats1.get('totalIndexSize', 0)
             
+            # ✅ FIX: Using Aggregation for Atlas Free Tier compatibility
             try:
-                search_stats1 = await self.db1.command("collStats", "files_search")
-                tx1 = search_stats1.get('indexSizes', {}).get('weighted_movie_search', 0)
-            except: tx1 = 0
+                cursor1 = self.search_col1.aggregate([{"$collStats": {"storageStats": {}}}])
+                stats_list1 = await cursor1.to_list(length=1)
+                tx1 = stats_list1[0].get("storageStats", {}).get("indexSizes", {}).get("weighted_movie_search", 0) if stats_list1 else 0
+            except Exception as e:
+                print(f"DB1 Stats Error: {e}")
+                tx1 = 0
 
             try:
-                c1 = await self.db1.command("collStats", "search_cache")
-                cache1 = c1.get('storageSize', 0) + c1.get('totalIndexSize', 0)
+                cursor_cache1 = self.search_cache.aggregate([{"$collStats": {"storageStats": {}}}])
+                c1_list = await cursor_cache1.to_list(length=1)
+                if c1_list:
+                    ss = c1_list[0].get("storageStats", {})
+                    cache1 = ss.get('storageSize', 0) + ss.get('totalIndexSize', 0)
+                else: cache1 = 0
             except: cache1 = 0
 
             try:
-                ts1 = await self.db1.command("collStats", "temp_searches")
-                temp1 = ts1.get('storageSize', 0) + ts1.get('totalIndexSize', 0)
+                cursor_temp1 = self.temp_searches.aggregate([{"$collStats": {"storageStats": {}}}])
+                ts1_list = await cursor_temp1.to_list(length=1)
+                if ts1_list:
+                    ss = ts1_list[0].get("storageStats", {})
+                    temp1 = ss.get('storageSize', 0) + ss.get('totalIndexSize', 0)
+                else: temp1 = 0
             except: temp1 = 0
 
             cache_total = cache1 + temp1
@@ -795,8 +809,9 @@ class MediaDB:
                 db_stats2 = await self.db2.command("dbstats")
                 t2 = db_stats2.get('storageSize', 0) + db_stats2.get('totalIndexSize', 0)
                 try:
-                    s2 = await self.db2.command("collStats", "files_search")
-                    tx2 = s2.get('indexSizes', {}).get('weighted_movie_search', 0)
+                    cursor2 = self.search_col2.aggregate([{"$collStats": {"storageStats": {}}}])
+                    stats_list2 = await cursor2.to_list(length=1)
+                    tx2 = stats_list2[0].get("storageStats", {}).get("indexSizes", {}).get("weighted_movie_search", 0) if stats_list2 else 0
                 except: tx2 = 0
                 main2 = t2 - tx2
                 stats_dict["db2"] = {"total": t2, "text": tx2, "main": max(main2, 0)}
@@ -807,8 +822,9 @@ class MediaDB:
                 db_stats3 = await self.db3.command("dbstats")
                 t3 = db_stats3.get('storageSize', 0) + db_stats3.get('totalIndexSize', 0)
                 try:
-                    s3 = await self.db3.command("collStats", "files_search")
-                    tx3 = s3.get('indexSizes', {}).get('weighted_movie_search', 0)
+                    cursor3 = self.search_col3.aggregate([{"$collStats": {"storageStats": {}}}])
+                    stats_list3 = await cursor3.to_list(length=1)
+                    tx3 = stats_list3[0].get("storageStats", {}).get("indexSizes", {}).get("weighted_movie_search", 0) if stats_list3 else 0
                 except: tx3 = 0
                 main3 = t3 - tx3
                 stats_dict["db3"] = {"total": t3, "text": tx3, "main": max(main3, 0)}
@@ -816,7 +832,9 @@ class MediaDB:
 
             stats_dict["total_overall"] = total_overall
             return stats_dict
+            
         except Exception as e:
+            print(f"Overall Stats Error: {e}")
             return {"total_size": 0, "text_index_size": 0, "cache_size": 0, "other_size": 0}
 
     async def save_search_results(self, query, files, chat_id):

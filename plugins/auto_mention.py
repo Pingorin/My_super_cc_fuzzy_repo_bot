@@ -1,18 +1,47 @@
 import asyncio
 import time
+import random
+import datetime
+import pytz
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
 
 # ==============================================================================
-# ⏳ BACKGROUND SCHEDULER (Auto Mention)
+# 🧹 HELPER: AUTO-DELETE MENTION MESSAGE
+# ==============================================================================
+async def delete_mention_msg(message, delay=600):
+    """10 Minute (600 seconds) baad mention message ko chupchap delete kar dega"""
+    await asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+# ==============================================================================
+# 🔄 DEFAULT ROTATING MESSAGES
+# ==============================================================================
+MSG_LIST = [
+    "Hey {mentions} 👋\n\nLooking for the latest movies and series? Just type the name in the group to get instant download links!",
+    "Welcome back {mentions} 🍿\n\nWeekend aa gaya hai! Grab your popcorn aur apni favorite movie search karke download karein.",
+    "Hello {mentions} 🎬\n\nDid you know? Aap is group mein koi bhi movie high quality mein HD links ke sath direct download kar sakte hain. Try searching now!",
+    "Hey {mentions} ⚡\n\nBore ho rahe ho? Click on the 'Trending' button below ya apni manpasand series ka naam likh kar turant link lijiye."
+]
+
+# ==============================================================================
+# ⏳ BACKGROUND SCHEDULER (Auto Mention - PRO VERSION)
 # ==============================================================================
 
 async def auto_mention_scheduler(client):
     while True:
         try:
-            # Check every 60 seconds
-            await asyncio.sleep(60)
+            await asyncio.sleep(60) # Check every 60 seconds
+            
+            # 🌙 SLEEP MODE CHECK (Raat 12 se subah 6 baje tak koi mention nahi hoga)
+            tz = pytz.timezone('Asia/Kolkata')
+            current_time_ist = datetime.datetime.now(tz).time()
+            if datetime.time(0, 0) <= current_time_ist <= datetime.time(6, 0):
+                continue # Skip loop during quiet hours
             
             # Iterate through all groups in DB where automention is enabled
             async for group in db.groups.find({"automention_enabled": True}):
@@ -29,26 +58,36 @@ async def auto_mention_scheduler(client):
                     mentions = []
                     for uid in users_to_mention:
                         try:
-                            # Try to get user info (might be cached)
+                            # Try to get user info
                             user = await client.get_chat_member(chat_id, uid)
                             mentions.append(user.user.mention)
                         except:
-                            # If user left or error, skip
-                            pass
+                            pass # If user left or error, skip
                     
                     if mentions:
-                        text = (
-                            f"Hey {', '.join(mentions)}\n\n"
-                            f"Looking for the latest movies and series? Just type the name in the group to get instant download links!"
-                        )
+                        # 📝 CUSTOM YA RANDOM TEXT SELECT KAREIN
+                        custom_text = group.get('custom_mention_text')
+                        if custom_text:
+                            text = custom_text.replace("{mentions}", ', '.join(mentions))
+                        else:
+                            text = random.choice(MSG_LIST).format(mentions=', '.join(mentions))
                         
-                        # ✅ Button triggers the NEW Trending Plugin (trending.py)
+                        # 🔘 BUTTONS LOGIC
                         btn = [[InlineKeyboardButton("🔥 Today Popular Movies", callback_data="trend_list#0")]]
                         
+                        # ⁉️ HOW TO DOWNLOAD BUTTON (Agar DB me set hai)
+                        howto_url = group.get('howto_url')
+                        if howto_url:
+                            btn.append([InlineKeyboardButton("⁉️ How To Download", url=howto_url)])
+                        
                         try:
-                            await client.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(btn))
+                            # Send Mention Message
+                            sent_msg = await client.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(btn))
                             
-                            # Cleanup DB: Remove mentioned users
+                            # 🧹 TRIGGER AUTO-DELETE TIMER (600 Sec = 10 Min)
+                            asyncio.create_task(delete_mention_msg(sent_msg, 600))
+                            
+                            # Cleanup DB: Remove mentioned users & update time
                             await db.remove_pending_mentions(chat_id, users_to_mention)
                         except Exception as e:
                             print(f"AutoMention Send Error ({chat_id}): {e}")

@@ -6,6 +6,8 @@ WORKDIR /app
 # Saari files copy karna
 COPY . /app
 
+RUN apt-get update && apt-get install -y git
+
 # Requirements install karna
 RUN pip install --no-cache-dir -r requirements.txt
 

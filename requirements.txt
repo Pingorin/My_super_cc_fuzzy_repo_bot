@@ -26,5 +26,3 @@ aiohttp_jinja2
 jinja2
 # ✅ Added for Memory Leak Fix (Spam Control)
 cachetools
-setuptools
-wheel

@@ -163,6 +163,8 @@ class UserChatDB:
             'last_autopost_time': 0,        
             'autopost_text': None,          
             'autopost_image': None,         
+            'autopost_media_id': None,      # ✅ ADDED FOR MULTI-MEDIA
+            'autopost_media_type': None,    # ✅ ADDED FOR MULTI-MEDIA
             'autopost_buttons': {},         
             'admin_free_access': False,     
             'daily_stats_notify': True,     
@@ -307,6 +309,8 @@ class UserChatDB:
             {'$set': {
                 'autopost_text': None, 
                 'autopost_image': None, 
+                'autopost_media_id': None,    # ✅ ADDED FOR MULTI-MEDIA
+                'autopost_media_type': None,  # ✅ ADDED FOR MULTI-MEDIA
                 'autopost_buttons': {}
             }}
         )
@@ -565,6 +569,8 @@ class UserChatDB:
             'autopost_interval': 1800,
             'autopost_text': None,
             'autopost_image': None,
+            'autopost_media_id': None,     # ✅ ADDED FOR MULTI-MEDIA
+            'autopost_media_type': None,   # ✅ ADDED FOR MULTI-MEDIA
             'autopost_buttons': {},
             
             # --- ADMIN ACCESS ---

@@ -7,7 +7,7 @@ id_pattern = re.compile(r'^-?\d+$')
 # --- MANDATORY VARIABLES ---
 API_ID = int(os.environ.get("API_ID", "20638104")) 
 API_HASH = os.environ.get("API_HASH", "6c884690ca85d39a4c5ad7c15b194e42")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8527539919:AAFFu37tTXtn7PQS0ioJj4lVlEVgQT3Cr5A")
 
 # 🔥 NAYA FEATURE: Redirect Search Results to Another Bot (Bot B)
 # Yahan Bot B (File Store Bot) ka username daalein bina '@' lagaye. E.g., "MyMovieFileBot"

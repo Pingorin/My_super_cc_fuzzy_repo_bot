@@ -72,8 +72,8 @@ def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_siz
 # ==============================================================================
 # 1. MAIN SEARCH HANDLER
 # ==============================================================================
-# 👇 Yahan se lambi commands ki list hata di gayi hai
-@Client.on_message(filters.text & filters.incoming)
+# 👇 Maine yahan 'group=10' add kar diya hai
+@Client.on_message(filters.text & filters.incoming, group=10)
 async def auto_filter(client, message):
     try:
         # 🔥 PERMANENT FIX: Agar message '/' se shuru hota hai (yani command hai), toh usey turant ignore karo!

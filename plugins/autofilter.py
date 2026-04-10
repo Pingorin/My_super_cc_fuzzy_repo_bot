@@ -72,7 +72,7 @@ def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_siz
 # ==============================================================================
 # 1. MAIN SEARCH HANDLER
 # ==============================================================================
-@Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index", "set_shortner", "settings", "connect", "delreq", "broadcast", "admin_upload", "id", "info", "other_group", "setindex"]))
+@Client.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "stats", "delete_all", "fix_index", "set_shortner", "settings", "connect", "delreq", "broadcast", "admin_upload", "id", "info", "other_group", "setindex", "addpremium", "removepremium", "checkpremium"]))
 async def auto_filter(client, message):
     try:
         # 🚫 CHANNELS KO IGNORE KAREIN (Taaki Log messages delete na hon)

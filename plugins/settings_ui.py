@@ -678,7 +678,7 @@ async def auto_mention_settings_ui(client, query):
          InlineKeyboardButton(f"30min{t_chk(1800)}", callback_data=f"am_time#{chat_id}#1800"),
          InlineKeyboardButton(f"60min{t_chk(3600)}", callback_data=f"am_time#{chat_id}#3600")],
          
-        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
+        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
     ]
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
@@ -744,7 +744,7 @@ async def auto_post_settings_ui(client, query):
         
         # Content Management
         [InlineKeyboardButton("Set Text", callback_data=f"ap_set_txt#{chat_id}"),
-         InlineKeyboardButton("Set Media", callback_data=f"ap_set_media#{chat_id}")], # Button changed
+         InlineKeyboardButton("Set Media", callback_data=f"ap_set_media#{chat_id}")],
          
         [InlineKeyboardButton("Manage Buttons", callback_data=f"ap_btn_menu#{chat_id}"),
          InlineKeyboardButton("Reset Ad Content", callback_data=f"ap_reset#{chat_id}")],

@@ -5,7 +5,18 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
 
 # ==============================================================================
-# ⏳ AUTO POST SCHEDULER (PRO VERSION - MULTI MEDIA SUPPORT)
+# 🧹 HELPER: AUTO-DELETE AD MESSAGE
+# ==============================================================================
+async def delete_autopost_msg(message, delay):
+    """Bheje gaye ad ko delay (seconds) ke baad chupchap delete karega"""
+    await asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+# ==============================================================================
+# ⏳ AUTO POST SCHEDULER (PRO VERSION - MULTI MEDIA & AUTO-DELETE)
 # ==============================================================================
 
 async def auto_post_scheduler(client):
@@ -32,6 +43,9 @@ async def auto_post_scheduler(client):
                     
                     ad_buttons_data = group.get('autopost_buttons', {})
                     
+                    # Fetch Ad Delete Time (Default 1 mins = 60 sec)
+                    ad_del_time = group.get('autopost_del_time', 60)
+                    
                     # Validation: Must have at least Text or Media
                     if not ad_text and not ad_media:
                         continue 
@@ -45,26 +59,37 @@ async def auto_post_scheduler(client):
                     reply_markup = InlineKeyboardMarkup(markup) if markup else None
                     
                     try:
+                        sent_msg = None
+                        sent_msg_text = None # Sticker ke sath alag text bhejna padta hai
+                        
                         # Send Ad based on Media Type
                         if ad_media:
                             if media_type == 'video':
-                                await client.send_video(chat_id, video=ad_media, caption=ad_text or "", reply_markup=reply_markup)
+                                sent_msg = await client.send_video(chat_id, video=ad_media, caption=ad_text or "", reply_markup=reply_markup)
                             elif media_type == 'animation':
-                                await client.send_animation(chat_id, animation=ad_media, caption=ad_text or "", reply_markup=reply_markup)
+                                sent_msg = await client.send_animation(chat_id, animation=ad_media, caption=ad_text or "", reply_markup=reply_markup)
                             elif media_type == 'audio':
-                                await client.send_audio(chat_id, audio=ad_media, caption=ad_text or "", reply_markup=reply_markup)
+                                sent_msg = await client.send_audio(chat_id, audio=ad_media, caption=ad_text or "", reply_markup=reply_markup)
                             elif media_type == 'sticker':
                                 # Stickers cannot have captions in Telegram
-                                await client.send_sticker(chat_id, sticker=ad_media, reply_markup=reply_markup if not ad_text else None)
+                                sent_msg = await client.send_sticker(chat_id, sticker=ad_media, reply_markup=reply_markup if not ad_text else None)
                                 # If there is text along with the sticker, send it separately
                                 if ad_text:
-                                    await client.send_message(chat_id, text=ad_text, reply_markup=reply_markup)
+                                    sent_msg_text = await client.send_message(chat_id, text=ad_text, reply_markup=reply_markup)
                             else:
                                 # Default is Photo
-                                await client.send_photo(chat_id, photo=ad_media, caption=ad_text or "", reply_markup=reply_markup)
+                                sent_msg = await client.send_photo(chat_id, photo=ad_media, caption=ad_text or "", reply_markup=reply_markup)
                         else:
                             # If only Text is available
-                            await client.send_message(chat_id, text=ad_text, reply_markup=reply_markup)
+                            sent_msg = await client.send_message(chat_id, text=ad_text, reply_markup=reply_markup)
+                        
+                        # 🔥 TIMER: 1, 2, 3, 5, 10, 15, 30 Min baad Ad delete
+                        if sent_msg and ad_del_time > 0:
+                            asyncio.create_task(delete_autopost_msg(sent_msg, ad_del_time))
+                        
+                        # Agar sticker ke sath alag se text bheja tha, toh use bhi delete karo
+                        if sent_msg_text and ad_del_time > 0:
+                            asyncio.create_task(delete_autopost_msg(sent_msg_text, ad_del_time))
                         
                         # Update Last Run Time
                         await db.groups.update_one(

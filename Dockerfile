@@ -15,4 +15,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 EXPOSE 7860
 
 # Bot ko start karna
-CMD ["python3", "Bot.py"]
+CMD ["python3", "bot.py"]

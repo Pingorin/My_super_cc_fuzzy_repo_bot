@@ -4,7 +4,7 @@ pymongo[srv]
 motor
 marshmallow
 umongo
-git+https://github.com/Joelkb/cinemagoer
+git+https://github.com/Joelkb/cinemagoer/archive/master.zip
 Heroku3
 search_engine_parser
 wget

@@ -1,0 +1,19 @@
+name: Sync to Hugging Face hub
+
+on:
+  push:
+    branches: [main] # Agar aapki branch ka naam 'master' hai toh isko 'master' kar dein
+  workflow_dispatch:
+
+jobs:
+  sync-to-hub:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          lfs: true
+      - name: Push to hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: git push --force https://Sona55:$HF_TOKEN@huggingface.co/spaces/Sona55/My-sup-c-Bot main

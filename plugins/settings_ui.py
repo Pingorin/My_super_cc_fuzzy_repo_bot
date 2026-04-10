@@ -678,7 +678,7 @@ async def auto_mention_settings_ui(client, query):
          InlineKeyboardButton(f"30min{t_chk(1800)}", callback_data=f"am_time#{chat_id}#1800"),
          InlineKeyboardButton(f"60min{t_chk(3600)}", callback_data=f"am_time#{chat_id}#3600")],
          
-        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
+        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
     ]
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
@@ -697,7 +697,7 @@ async def am_time_handler(client, query):
     await auto_mention_settings_ui(client, query)
 
 # ==============================================================================
-# 📰 AUTO POST SETTINGS UI
+# 📰 AUTO POST SETTINGS UI (UPDATED WITH MULTI-MEDIA)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^autopost_ui#"))
@@ -709,7 +709,11 @@ async def auto_post_settings_ui(client, query):
     is_enabled = group_data.get('autopost_enabled', False)
     interval = group_data.get('autopost_interval', 1800)
     ad_text = group_data.get('autopost_text')
-    ad_image = group_data.get('autopost_image')
+    
+    # Check Media
+    ad_media = group_data.get('autopost_media_id') or group_data.get('autopost_image')
+    media_type = group_data.get('autopost_media_type', 'photo' if group_data.get('autopost_image') else 'none')
+    
     buttons_data = group_data.get('autopost_buttons', {})
     
     # Display Logic
@@ -718,7 +722,7 @@ async def auto_post_settings_ui(client, query):
     toggle_val = "off" if is_enabled else "on"
     
     txt_status = "Set" if ad_text else "Not Set"
-    img_status = "Set" if ad_image else "Not Set"
+    img_status = f"Set ({media_type.capitalize()})" if ad_media else "Not Set"
     btn_count = len(buttons_data)
     
     def t_chk(val): return "✅" if interval == val else ""
@@ -729,9 +733,9 @@ async def auto_post_settings_ui(client, query):
         f"**Current Status:** {status_icon}\n"
         f"**Interval:** Every {int(interval/60)} minutes.\n"
         f"**Ad Text:** {txt_status}\n"
-        f"**Ad Image:** {img_status}\n"
+        f"**Ad Media:** {img_status}\n"
         f"**Buttons Configured:** {btn_count}/3\n\n"
-        f"[Auto Ads Demo](https://graph.org/file/4d61886e61dfa37a25945.jpg)"
+        f"_(You can now set Photo, Video, GIF, Audio, or Sticker as Ad Media!)_"
     )
     
     buttons = [
@@ -740,7 +744,7 @@ async def auto_post_settings_ui(client, query):
         
         # Content Management
         [InlineKeyboardButton("Set Text", callback_data=f"ap_set_txt#{chat_id}"),
-         InlineKeyboardButton("Set Image", callback_data=f"ap_set_img#{chat_id}")],
+         InlineKeyboardButton("Set Media", callback_data=f"ap_set_media#{chat_id}")], # Button changed
          
         [InlineKeyboardButton("Manage Buttons", callback_data=f"ap_btn_menu#{chat_id}"),
          InlineKeyboardButton("Reset Ad Content", callback_data=f"ap_reset#{chat_id}")],
@@ -764,8 +768,8 @@ async def ap_toggle_handler(client, query):
     # Check if content exists before enabling
     if action == "on":
         g_data = await db.get_group_settings(chat_id)
-        if not g_data.get('autopost_text') and not g_data.get('autopost_image'):
-            return await query.answer("❌ Set Text or Image first!", show_alert=True)
+        if not g_data.get('autopost_text') and not g_data.get('autopost_media_id') and not g_data.get('autopost_image'):
+            return await query.answer("❌ Set Text or Media first!", show_alert=True)
             
     await db.update_group_settings(chat_id, {'autopost_enabled': (action == "on")})
     await auto_post_settings_ui(client, query)
@@ -779,14 +783,28 @@ async def ap_time_handler(client, query):
 @Client.on_callback_query(filters.regex(r"^ap_reset#"))
 async def ap_reset_handler(client, query):
     chat_id = int(query.data.split("#")[1])
-    await db.reset_autopost_content(chat_id)
-    await db.update_group_settings(chat_id, {'autopost_enabled': False}) # Disable on reset
+    
+    # Nayi Fields ko bhi reset karna hoga
+    await db.groups.update_one(
+        {'id': chat_id},
+        {'$set': {
+            'autopost_text': None, 
+            'autopost_image': None, 
+            'autopost_media_id': None,
+            'autopost_media_type': None,
+            'autopost_buttons': {},
+            'autopost_enabled': False
+        }}
+    )
+    
+    # Clear Cache if using it
+    if chat_id in db.SETTINGS_CACHE: del db.SETTINGS_CACHE[chat_id]
+    
     await query.answer("🔄 Ad Content Reset!", show_alert=True)
     await auto_post_settings_ui(client, query)
 
-
 # ==============================================================================
-# 📝 CONTENT SETTERS (TEXT & IMAGE)
+# 📝 CONTENT SETTERS (TEXT & MEDIA)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^ap_set_txt#"))
@@ -798,7 +816,7 @@ async def ap_set_text(client, query):
     try:
         msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
         if msg.text:
-            await db.update_group_settings(chat_id, {'autopost_text': msg.text})
+            await db.groups.update_one({'id': chat_id}, {'$set': {'autopost_text': msg.text}})
             await msg.reply("✅ **Ad text has been saved.**")
             await asyncio.sleep(1)
             await auto_post_settings_ui(client, query)
@@ -807,21 +825,52 @@ async def ap_set_text(client, query):
             await auto_post_settings_ui(client, query)
     except: pass
 
-@Client.on_callback_query(filters.regex(r"^ap_set_img#"))
-async def ap_set_image(client, query):
+@Client.on_callback_query(filters.regex(r"^ap_set_img#") | filters.regex(r"^ap_set_media#"))
+async def ap_set_media(client, query):
     chat_id = int(query.data.split("#")[1])
     cancel_btn = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"autopost_ui#{chat_id}")]]
     
-    await query.message.edit_text("🖼️ **Please send the ad image.**", reply_markup=InlineKeyboardMarkup(cancel_btn))
+    await query.message.edit_text(
+        "🖼️ **Please send the Ad Media.**\n\n"
+        "You can now send a **Photo, Video, GIF (Animation), Audio, or Sticker**.", 
+        reply_markup=InlineKeyboardMarkup(cancel_btn)
+    )
     try:
         msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        
+        media_id = None
+        media_type = None
+        
         if msg.photo:
-            await db.update_group_settings(chat_id, {'autopost_image': msg.photo.file_id})
-            await msg.reply("✅ **Ad image has been saved.**")
+            media_id = msg.photo.file_id
+            media_type = 'photo'
+        elif msg.video:
+            media_id = msg.video.file_id
+            media_type = 'video'
+        elif msg.animation:
+            media_id = msg.animation.file_id
+            media_type = 'animation'
+        elif msg.audio:
+            media_id = msg.audio.file_id
+            media_type = 'audio'
+        elif msg.sticker:
+            media_id = msg.sticker.file_id
+            media_type = 'sticker'
+            
+        if media_id:
+            await db.groups.update_one(
+                {'id': chat_id}, 
+                {'$set': {
+                    'autopost_media_id': media_id, 
+                    'autopost_media_type': media_type,
+                    'autopost_image': media_id if media_type == 'photo' else None 
+                }}
+            )
+            await msg.reply(f"✅ **Ad {media_type.capitalize()} has been saved.**")
             await asyncio.sleep(1)
             await auto_post_settings_ui(client, query)
         else:
-            await msg.reply("❌ Photo only.")
+            await msg.reply("❌ Invalid format. Please send a valid Photo, Video, GIF, Audio, or Sticker.")
             await auto_post_settings_ui(client, query)
     except: pass
 

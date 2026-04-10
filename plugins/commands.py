@@ -1371,80 +1371,123 @@ async def refresh_ids_command(client, message):
 
 @Client.on_message(filters.command("addpremium") & filters.user(ADMINS))
 async def add_premium_cmd(client, message):
-    if len(message.command) < 3:
-        return await message.reply(
-            "⚠️ **Syntax:** `/addpremium [User ID] [Days]`\n\n"
-            "**Example:** `/addpremium 123456789 30` (30 din ke liye)\n"
-            "**1 Year:** `/addpremium 123456789 365`"
-        )
+    if len(message.command) != 3:
+        return await message.reply("⚠️ **Sahi syntax:** `/addpremium [User_ID] [Days]`\n\nExample: `/addpremium 1729007340 365`")
 
     try:
-        target_user_id = int(message.command[1])
+        target_id = int(message.command[1])
         days = int(message.command[2])
     except ValueError:
-        return await message.reply("❌ Invalid User ID ya Days. Sirf numbers use karein.")
+        return await message.reply("❌ **Error:** User ID aur Days dono numbers hone chahiye.")
 
-    duration_seconds = days * 86400  # Din ko seconds me convert kiya
-    new_expiry = await db.add_premium_time(target_user_id, duration_seconds)
+    duration_seconds = days * 86400
+    current_time = time.time()
+
+    # 1. Database mein user check karna
+    user = await db.users.find_one({'id': target_id})
     
-    # Expiry date ko padhne layek format me badalna
-    expiry_date = datetime.datetime.fromtimestamp(new_expiry).strftime('%d %b %Y, %I:%M %p')
+    if user:
+        current_expiry = user.get('premium_expiry', 0)
+        # Agar pehle se premium hai, toh usme aur din add kar do
+        if current_expiry > current_time:
+            new_expiry = current_expiry + duration_seconds
+        else:
+            new_expiry = current_time + duration_seconds
+    else:
+        # Agar naya user hai, toh DB me add karke premium do
+        await db.add_user(target_id)
+        new_expiry = current_time + duration_seconds
 
+    # 2. Database Update karna
+    await db.users.update_one(
+        {'id': target_id},
+        {'$set': {'premium_expiry': new_expiry}},
+        upsert=True
+    )
+
+    # 3. Expiry Date ko readable format me banana
+    expiry_date = datetime.datetime.fromtimestamp(new_expiry).strftime('%Y-%m-%d %H:%M:%S')
+
+    # 4. Admin ko Success Message bhejna
     await message.reply(
         f"✅ **Premium Successfully Added!**\n\n"
-        f"👤 **User ID:** `{target_user_id}`\n"
-        f"⏳ **Added Time:** `{days} Days`\n"
+        f"👤 **User ID:** `{target_id}`\n"
+        f"⏳ **Added Days:** `{days} Days`\n"
         f"📅 **New Expiry:** `{expiry_date}`"
     )
 
-    # User ko DM me khushkhabri dena (Agar usne bot ko block nahi kiya hai)
+    # 5. User ko PM bhejna
     try:
         await client.send_message(
-            target_user_id, 
-            f"🎉 **Congratulations!**\n\n"
-            f"An Admin has gifted you **{days} Days** of Premium Access! 💎\n"
-            f"Ab aap direct files download kar sakte hain bina kisi link shortener ke.\n\n"
+            target_id,
+            f"🎉 **Congratulations!** 🎉\n\n"
+            f"Aapke account mein **{days} Days** ka Premium Access add kar diya gaya hai.\n"
+            f"Ab aap bina kisi shortener ke direct files download kar sakte hain!\n\n"
             f"📅 **Expiry Date:** `{expiry_date}`"
         )
-    except:
-        pass
-
+    except Exception as e:
+        # Agar user ne bot start nahi kiya hai ya block kar diya hai
+        await message.reply(f"⚠️ **Note:** User ka premium DB me add ho gaya hai, lekin user ne bot block kar rakha hai ya kabhi start nahi kiya isliye usko PM nahi gaya.\n*(Error: {e})*")
 
 @Client.on_message(filters.command("removepremium") & filters.user(ADMINS))
 async def remove_premium_cmd(client, message):
-    if len(message.command) < 2:
-        return await message.reply("⚠️ **Syntax:** `/removepremium [User ID]`")
+    if len(message.command) != 2:
+        return await message.reply("⚠️ **Sahi syntax:** `/removepremium [User_ID]`\n\nExample: `/removepremium 1729007340`")
 
     try:
-        target_user_id = int(message.command[1])
+        target_id = int(message.command[1])
     except ValueError:
-        return await message.reply("❌ Invalid User ID.")
+        return await message.reply("❌ **Error:** User ID number hona chahiye.")
 
-    await db.remove_premium(target_user_id)
-    await message.reply(f"✅ **Premium Removed!**\nUser `{target_user_id}` is now a normal user.")
-    
+    # Database me expiry 0 set karna
+    await db.users.update_one(
+        {'id': target_id},
+        {'$set': {'premium_expiry': 0}}
+    )
+
+    await message.reply(f"✅ **Done!** User `{target_id}` ka premium successully hata diya gaya hai.")
+
+    # User ko alert bhejna
     try:
-        await client.send_message(target_user_id, "⚠️ **Notice:** Your Premium Access has been removed by an Admin.")
-    except:
-        pass
-
+        await client.send_message(
+            target_id,
+            "⚠️ **Premium Expired / Removed** ⚠️\n\nAapka premium access khatam ho gaya hai. Ab file download karne ke liye aapko wapas shortener links use karne honge."
+        )
+    except Exception:
+        pass # Agar block kiya hoga toh ignore ho jayega
 
 @Client.on_message(filters.command("checkpremium") & filters.user(ADMINS))
 async def check_premium_cmd(client, message):
-    if len(message.command) < 2:
-        return await message.reply("⚠️ **Syntax:** `/checkpremium [User ID]`")
+    if len(message.command) != 2:
+        return await message.reply("⚠️ **Sahi syntax:** `/checkpremium [User_ID]`\n\nExample: `/checkpremium 1729007340`")
 
     try:
-        target_user_id = int(message.command[1])
+        target_id = int(message.command[1])
     except ValueError:
-        return await message.reply("❌ Invalid User ID.")
+        return await message.reply("❌ **Error:** User ID number hona chahiye.")
 
-    is_prem, msg = await db.get_premium_status(target_user_id)
-    status_icon = "✅ Active" if is_prem else "❌ Inactive"
+    user = await db.users.find_one({'id': target_id})
     
-    await message.reply(
-        f"📊 **Premium Status Check**\n\n"
-        f"👤 **User ID:** `{target_user_id}`\n"
-        f"**Status:** {status_icon}\n"
-        f"**Validity:** {msg}"
-    )
+    if not user:
+        return await message.reply("❌ **Database Error:** Ye user database mein maujood nahi hai.")
+
+    expiry = user.get('premium_expiry', 0)
+    current_time = time.time()
+
+    if expiry > current_time:
+        # Agar premium hai toh exact date aur time nikalna
+        expiry_date = datetime.datetime.fromtimestamp(expiry).strftime('%Y-%m-%d %H:%M:%S')
+        remaining_days = int((expiry - current_time) / 86400)
+        
+        await message.reply(
+            f"🌟 **User Premium Status: ACTIVE** 🌟\n\n"
+            f"👤 **User ID:** `{target_id}`\n"
+            f"⏳ **Remaining:** `{remaining_days} Days`\n"
+            f"📅 **Expiry Date:** `{expiry_date}`"
+        )
+    else:
+        await message.reply(
+            f"❌ **User Premium Status: INACTIVE** ❌\n\n"
+            f"👤 **User ID:** `{target_id}`\n"
+            f"ℹ️ Is user ke paas koi active premium nahi hai."
+        )

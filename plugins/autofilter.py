@@ -72,14 +72,10 @@ def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_siz
 # ==============================================================================
 # 1. MAIN SEARCH HANDLER
 # ==============================================================================
-# 👇 Maine yahan 'group=10' add kar diya hai
-@Client.on_message(filters.text & filters.incoming, group=10)
+# 👇 Yahan se maine 'group=10' hata diya hai aur ek smart Regex Filter laga diya hai
+@Client.on_message(filters.text & filters.incoming & ~filters.regex(r"^/"))
 async def auto_filter(client, message):
     try:
-        # 🔥 PERMANENT FIX: Agar message '/' se shuru hota hai (yani command hai), toh usey turant ignore karo!
-        if message.text and message.text.startswith("/"):
-            return
-
         # 🚫 CHANNELS KO IGNORE KAREIN (Taaki Log messages delete na hon)
         if message.chat.type == enums.ChatType.CHANNEL:
             return

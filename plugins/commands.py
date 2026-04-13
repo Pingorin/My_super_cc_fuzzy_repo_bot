@@ -1491,3 +1491,45 @@ async def check_premium_cmd(client, message):
             f"👤 **User ID:** `{target_id}`\n"
             f"ℹ️ Is user ke paas koi active premium nahi hai."
         )
+
+# ==============================================================================
+# 🌟 RESULT STICKER SETTINGS
+# ==============================================================================
+
+@Client.on_message(filters.command("setsticker") & filters.group)
+async def set_sticker_cmd(client, message):
+    user_id = message.from_user.id
+    
+    # 1. Check if user is Admin or Owner
+    try:
+        member = await client.get_chat_member(message.chat.id, user_id)
+        if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR] and user_id not in ADMINS:
+            return await message.reply("❌ **Access Denied:** Ye command sirf Admins ke liye hai.")
+    except Exception:
+        return
+
+    # 2. Check if replied to a sticker
+    if not message.reply_to_message or not message.reply_to_message.sticker:
+        return await message.reply("⚠️ **Sahi Tarika:** Group mein koi Sticker bhejiye, fir us sticker par Reply karke `/setsticker` likhiye.")
+
+    # 3. Save to Database
+    sticker_id = message.reply_to_message.sticker.file_id
+    await db.update_group_settings(message.chat.id, {'result_sticker': sticker_id})
+    
+    await message.reply("✅ **Search Result Sticker Successfully Set!**\nAb jab bhi koi movie search karega, results ke sath ye sticker aayega.")
+
+@Client.on_message(filters.command("removesticker") & filters.group)
+async def remove_sticker_cmd(client, message):
+    user_id = message.from_user.id
+    
+    # Admin Check
+    try:
+        member = await client.get_chat_member(message.chat.id, user_id)
+        if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR] and user_id not in ADMINS:
+            return await message.reply("❌ **Access Denied:** Ye command sirf Admins ke liye hai.")
+    except Exception:
+        return
+
+    # Remove from Database
+    await db.update_group_settings(message.chat.id, {'result_sticker': None})
+    await message.reply("🗑️ **Sticker Removed!** Ab search results ke sath koi sticker nahi aayega.")

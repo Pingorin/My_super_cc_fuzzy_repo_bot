@@ -141,7 +141,7 @@ async def auto_filter(client, message):
             try: await message.react(random.choice(REACTIONS))
             except: pass 
 
-        # ✅ FIX: Agar user anonymous hai, toh group ka chat_id use kar lenge
+        # ✅ FIX: Agar user anonymous hai, toh group ka chat_id use laglenge
         user_id = message.from_user.id if message.from_user else message.chat.id
         search_id = await Media.save_search_query(query, user_id, files)
         if not search_id: search_id = 0
@@ -306,7 +306,7 @@ async def handle_language_selection(client, query):
             search_id, lang, f_type, qual, year, size, sort, offset = data[2], data[3], data[4], data[5], "none", "none", "relevance", data[6]
         query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{sort}_{offset}"
         await handle_combined_filter(client, query)
-    except: pass
+    except Exception: pass
 
 @Client.on_callback_query(filters.regex(r"^filter_qual_"))
 async def handle_quality_selection(client, query):
@@ -318,7 +318,7 @@ async def handle_quality_selection(client, query):
             search_id, qual, f_type, lang, year, size, sort, offset = data[2], data[3], data[4], data[5], "none", "none", "relevance", data[6]
         query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{sort}_{offset}"
         await handle_combined_filter(client, query)
-    except: pass
+    except Exception: pass
 
 @Client.on_callback_query(filters.regex(r"^filter_year_"))
 async def handle_year_selection(client, query):
@@ -330,7 +330,7 @@ async def handle_year_selection(client, query):
             search_id, year, f_type, lang, qual, size, sort, offset = data[2], data[3], data[4], data[5], "none", "none", "relevance", data[6]
         query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{sort}_{offset}"
         await handle_combined_filter(client, query)
-    except: pass
+    except Exception: pass
 
 @Client.on_callback_query(filters.regex(r"^filter_size_"))
 async def handle_size_selection(client, query):
@@ -340,7 +340,7 @@ async def handle_size_selection(client, query):
             search_id, size, f_type, lang, qual, year, sort, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]
             query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{sort}_{offset}"
             await handle_combined_filter(client, query)
-    except: pass
+    except Exception: pass
 
 @Client.on_callback_query(filters.regex(r"^filter_sort_"))
 async def handle_sort_selection(client, query):
@@ -350,7 +350,7 @@ async def handle_sort_selection(client, query):
             search_id, sort, f_type, lang, qual, year, size, offset = data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]
             query.data = f"filter_{search_id}_{f_type}_{lang}_{qual}_{year}_{size}_{sort}_{offset}"
             await handle_combined_filter(client, query)
-    except: pass
+    except Exception: pass
 
 # ==============================================================================
 # 4. MASTER FILTER HANDLER
@@ -512,7 +512,10 @@ async def handle_language_menu(client, query):
         
         buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn, search_id)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
-    except: pass
+    except MessageNotModified:
+        pass
+    except Exception:
+        pass
 
 @Client.on_callback_query(filters.regex(r"^qual_menu_"))
 async def handle_quality_menu(client, query):
@@ -547,7 +550,10 @@ async def handle_quality_menu(client, query):
         
         buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn, search_id)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
-    except: pass
+    except MessageNotModified:
+        pass
+    except Exception:
+        pass
 
 @Client.on_callback_query(filters.regex(r"^year_menu_"))
 async def handle_year_menu(client, query):
@@ -583,7 +589,10 @@ async def handle_year_menu(client, query):
         
         buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn, search_id)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
-    except: pass
+    except MessageNotModified:
+        pass
+    except Exception:
+        pass
 
 @Client.on_callback_query(filters.regex(r"^size_menu_"))
 async def handle_size_menu(client, query):
@@ -609,7 +618,10 @@ async def handle_size_menu(client, query):
         
         buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn, search_id)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
-    except: pass
+    except MessageNotModified:
+        pass
+    except Exception:
+        pass
 
 @Client.on_callback_query(filters.regex(r"^sort_menu_"))
 async def handle_sort_menu(client, query):
@@ -635,6 +647,8 @@ async def handle_sort_menu(client, query):
         middle_buttons = type_buttons + sort_buttons
         buttons = arrange_buttons([], [], 10, middle_buttons, howto_btn, free_prem_btn, search_id)
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+    except MessageNotModified:
+        pass
     except Exception as e:
         logger.error(f"Sort Menu Error: {e}")
         traceback.print_exc()
@@ -699,7 +713,10 @@ async def card_next_nav(client, query):
         if next_index < total - 1: nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{search_id}_{next_index}"))
         btn.append(nav_row)
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
-    except: pass
+    except MessageNotModified:
+        pass
+    except Exception:
+        pass
 
 @Client.on_callback_query(filters.regex(r"^card_prev_"))
 async def card_prev_nav(client, query):
@@ -742,4 +759,7 @@ async def card_prev_nav(client, query):
         if prev_index < total - 1: nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"card_next_{search_id}_{prev_index}"))
         btn.append(nav_row)
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
-    except: pass
+    except MessageNotModified:
+        pass
+    except Exception:
+        pass

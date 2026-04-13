@@ -1492,44 +1492,59 @@ async def check_premium_cmd(client, message):
             f"ℹ️ Is user ke paas koi active premium nahi hai."
         )
 
+
 # ==============================================================================
-# 🌟 RESULT STICKER SETTINGS
+# 🌟 MULTI-STICKER SYSTEM
 # ==============================================================================
 
-@Client.on_message(filters.command("setsticker") & filters.group)
-async def set_sticker_cmd(client, message):
+@Client.on_message(filters.command("addsticker") & filters.group)
+async def add_sticker_cmd(client, message):
     user_id = message.from_user.id
     
-    # 1. Check if user is Admin or Owner
+    # 1. Admin Check
     try:
         member = await client.get_chat_member(message.chat.id, user_id)
         if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR] and user_id not in ADMINS:
             return await message.reply("❌ **Access Denied:** Ye command sirf Admins ke liye hai.")
-    except Exception:
+    except:
         return
 
-    # 2. Check if replied to a sticker
+    # 2. Reply Check
     if not message.reply_to_message or not message.reply_to_message.sticker:
-        return await message.reply("⚠️ **Sahi Tarika:** Group mein koi Sticker bhejiye, fir us sticker par Reply karke `/setsticker` likhiye.")
+        return await message.reply("⚠️ **Sahi Tarika:** Group mein koi Sticker bhejiye, fir us par Reply karke `/addsticker` likhiye.")
 
-    # 3. Save to Database
+    # 3. Save to Database (List System)
     sticker_id = message.reply_to_message.sticker.file_id
-    await db.update_group_settings(message.chat.id, {'result_sticker': sticker_id})
+    group_data = await db.get_group_settings(message.chat.id)
     
-    await message.reply("✅ **Search Result Sticker Successfully Set!**\nAb jab bhi koi movie search karega, results ke sath ye sticker aayega.")
+    # Purane stickers ki list nikalna
+    current_stickers = group_data.get('result_stickers', [])
+    if not isinstance(current_stickers, list):
+        current_stickers = []
 
-@Client.on_message(filters.command("removesticker") & filters.group)
-async def remove_sticker_cmd(client, message):
+    # Max 5 stickers ki limit
+    if len(current_stickers) >= 5:
+        return await message.reply("⚠️ **Limit Reached!** Aap pehle se 5 stickers add kar chuke hain. Naye add karne ke liye pehle `/clearstickers` dabayein.")
+
+    if sticker_id not in current_stickers:
+        current_stickers.append(sticker_id)
+        await db.update_group_settings(message.chat.id, {'result_stickers': current_stickers})
+        await message.reply(f"✅ **Sticker Added! ({len(current_stickers)}/5)**\nAb bot in stickers ko badal-badal kar bhejega.")
+    else:
+        await message.reply("⚠️ Ye sticker aapne pehle hi add kar diya hai.")
+
+@Client.on_message(filters.command("clearstickers") & filters.group)
+async def clear_stickers_cmd(client, message):
     user_id = message.from_user.id
     
     # Admin Check
     try:
         member = await client.get_chat_member(message.chat.id, user_id)
         if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR] and user_id not in ADMINS:
-            return await message.reply("❌ **Access Denied:** Ye command sirf Admins ke liye hai.")
-    except Exception:
+            return await message.reply("❌ **Access Denied!**")
+    except:
         return
 
-    # Remove from Database
-    await db.update_group_settings(message.chat.id, {'result_sticker': None})
-    await message.reply("🗑️ **Sticker Removed!** Ab search results ke sath koi sticker nahi aayega.")
+    # Clear Database
+    await db.update_group_settings(message.chat.id, {'result_stickers': []})
+    await message.reply("🗑️ **All Stickers Cleared!** Ab search results ke sath koi sticker nahi aayega. Aap chahein toh naye add kar sakte hain.")

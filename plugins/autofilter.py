@@ -167,6 +167,16 @@ async def auto_filter(client, message):
         # 🔥 SMART STATS UPDATER (Success Count - Kyunki yahan tak aa gaya matlab file mil gayi hai)
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'suc'))
 
+        # 🌟 STICKER BHEJNE KA LOGIC 🌟
+        sticker_id = group_settings.get('result_sticker')
+        sent_sticker = None
+        if sticker_id:
+            try:
+                # Result se pehle sticker bhejega
+                sent_sticker = await message.reply_sticker(sticker=sticker_id)
+            except:
+                pass
+
         if mode == 'button':
             buttons = btn_parser(files, message.chat.id, search_id, offset, limit, query)
             buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn, search_id)
@@ -235,6 +245,14 @@ async def auto_filter(client, message):
                 try: await message.delete()
                 except: pass
             asyncio.create_task(auto_delete_task(sent_msg, message, auto_del_time, del_thanks, query))
+
+            # 🌟 STICKER KO BHI TIMER KE SATH DELETE KARNA 🌟
+            if sent_sticker:
+                async def del_stick():
+                    await asyncio.sleep(auto_del_time)
+                    try: await sent_sticker.delete()
+                    except: pass
+                asyncio.create_task(del_stick())
 
     except Exception as e:
         logger.error(f"Search Error: {e}")

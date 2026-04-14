@@ -946,7 +946,7 @@ async def start_handler(client, message):
             
         text = f"Hello {message.from_user.mention} 👋,\nI am a Powerul Auto Filter Bot."
         buttons = [
-            [InlineKeyboardButton('⇆ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘs ⇆', url=f'http://t.me/{temp.U_NAME}?startgroup=start')],
+            [InlineKeyboardButton('⇆ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜps ⇆', url=f'http://t.me/{temp.U_NAME}?startgroup=start')],
             [InlineKeyboardButton('⚙ ꜰᴇᴀᴛᴜʀᴇs', callback_data='features'), 
              InlineKeyboardButton('💎 Free Premium', callback_data='open_prem_menu')],
             [InlineKeyboardButton('🚫 ᴇᴀʀɴ ᴍᴏɴᴇʏ ᴡɪᴛʜ ʙᴏᴛ 🚫', callback_data='earn'), InlineKeyboardButton('🤝 ʀᴇꜰᴇʀʀᴀʟ 🤝', callback_data='refer')]
@@ -1494,18 +1494,14 @@ async def check_premium_cmd(client, message):
 
 
 # ==============================================================================
-# 🌟 MULTI-STICKER SYSTEM
+# 🌟 MULTI-STICKER SYSTEM (WITH UID & FID)
 # ==============================================================================
 
 @Client.on_message(filters.command("addsticker") & filters.group)
 async def add_sticker_cmd(client, message):
     user_id = message.from_user.id
     
-    # 1. Reply Check
-    if not message.reply_to_message or not message.reply_to_message.sticker:
-        return await message.reply("⚠️ **Sahi Tarika:** Group mein koi Sticker bhejiye, fir us par Reply karke `/addsticker` likhiye.")
-
-    # 2. Admin Check
+    # 1. Admin Check
     try:
         member = await client.get_chat_member(message.chat.id, user_id)
         if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR] and user_id not in ADMINS:
@@ -1513,22 +1509,33 @@ async def add_sticker_cmd(client, message):
     except:
         return
 
+    # 2. Reply Check
+    if not message.reply_to_message or not message.reply_to_message.sticker:
+        return await message.reply("⚠️ **Sahi Tarika:** Group mein koi Sticker bhejiye, fir us par Reply karke `/addsticker` likhiye.")
+
+    # 3. Save to Database using dict (fid and uid)
     sticker = message.reply_to_message.sticker
     sticker_data = {
         'fid': sticker.file_id,
         'uid': sticker.file_unique_id
     }
-
-    # 3. Save to Database (List of Dicts System)
+    
     group_data = await db.get_group_settings(message.chat.id)
     current_stickers = group_data.get('result_stickers', [])
-    
-    # Wipe old string-based format if present during transition
-    if current_stickers and isinstance(current_stickers[0], str):
+    if not isinstance(current_stickers, list):
         current_stickers = []
 
+    # Convert old string-based IDs to dicts to prevent crashes (Backward Compatibility)
+    clean_stickers = []
+    for s in current_stickers:
+        if isinstance(s, str):
+            clean_stickers.append({'fid': s, 'uid': s}) # Fallback
+        else:
+            clean_stickers.append(s)
+    current_stickers = clean_stickers
+
     # Check if already exists using 'uid'
-    if any(isinstance(s, dict) and s.get('uid') == sticker.file_unique_id for s in current_stickers):
+    if any(s['uid'] == sticker.file_unique_id for s in current_stickers):
         return await message.reply("⚠️ Ye sticker pehle se add hai.")
 
     # Max 5 stickers ki limit
@@ -1538,6 +1545,7 @@ async def add_sticker_cmd(client, message):
     current_stickers.append(sticker_data)
     await db.update_group_settings(message.chat.id, {'result_stickers': current_stickers})
     await message.reply(f"✅ **Sticker Added! ({len(current_stickers)}/5)**\nAb bot in stickers ko badal-badal kar bhejega.")
+
 
 @Client.on_message(filters.command("clearstickers") & filters.group)
 async def clear_stickers_cmd(client, message):
@@ -1555,6 +1563,7 @@ async def clear_stickers_cmd(client, message):
     await db.update_group_settings(message.chat.id, {'result_stickers': []})
     await message.reply("🗑️ **All Stickers Cleared!** Ab search results ke sath koi sticker nahi aayega. Aap chahein toh naye add kar sakte hain.")
 
+
 @Client.on_message(filters.command("removesticker") & filters.group)
 async def remove_specific_sticker_cmd(client, message):
     user_id = message.from_user.id
@@ -1571,17 +1580,27 @@ async def remove_specific_sticker_cmd(client, message):
     if not message.reply_to_message or not message.reply_to_message.sticker:
         return await message.reply("⚠️ **Sahi Tarika:** Jis sticker ko list se hatana hai, group mein us par Reply karke `/removesticker` likhiye.")
 
+    # 3. Remove from Database using uid
     uid = message.reply_to_message.sticker.file_unique_id
     group_data = await db.get_group_settings(message.chat.id)
-    current_stickers = group_data.get('result_stickers', [])
     
-    if current_stickers and isinstance(current_stickers[0], str):
+    current_stickers = group_data.get('result_stickers', [])
+    if not isinstance(current_stickers, list):
         current_stickers = []
 
-    # 4. Check & Remove Logic using 'uid'
-    new_list = [s for s in current_stickers if isinstance(s, dict) and s.get('uid') != uid]
+    # Convert old format if needed for safe filtering
+    clean_stickers = []
+    for s in current_stickers:
+        if isinstance(s, str):
+            clean_stickers.append({'fid': s, 'uid': s})
+        else:
+            clean_stickers.append(s)
     
-    if len(new_list) < len(current_stickers):
+    # Filter out the sticker with matching 'uid'
+    new_list = [s for s in clean_stickers if s['uid'] != uid]
+
+    # 4. Check & Remove Logic
+    if len(new_list) < len(clean_stickers):
         await db.update_group_settings(message.chat.id, {'result_stickers': new_list})
         await message.reply(f"🗑️ **Sticker Removed!**\nAb ye sticker search results mein nahi aayega.\n(Bache hue stickers: {len(new_list)}/5)")
     else:

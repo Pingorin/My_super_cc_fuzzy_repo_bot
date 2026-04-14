@@ -1501,7 +1501,11 @@ async def check_premium_cmd(client, message):
 async def add_sticker_cmd(client, message):
     user_id = message.from_user.id
     
-    # 1. Admin Check
+    # 1. Reply Check
+    if not message.reply_to_message or not message.reply_to_message.sticker:
+        return await message.reply("⚠️ **Sahi Tarika:** Group mein koi Sticker bhejiye, fir us par Reply karke `/addsticker` likhiye.")
+
+    # 2. Admin Check
     try:
         member = await client.get_chat_member(message.chat.id, user_id)
         if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR] and user_id not in ADMINS:
@@ -1509,29 +1513,31 @@ async def add_sticker_cmd(client, message):
     except:
         return
 
-    # 2. Reply Check
-    if not message.reply_to_message or not message.reply_to_message.sticker:
-        return await message.reply("⚠️ **Sahi Tarika:** Group mein koi Sticker bhejiye, fir us par Reply karke `/addsticker` likhiye.")
+    sticker = message.reply_to_message.sticker
+    sticker_data = {
+        'fid': sticker.file_id,
+        'uid': sticker.file_unique_id
+    }
 
-    # 3. Save to Database (List System)
-    sticker_id = message.reply_to_message.sticker.file_id
+    # 3. Save to Database (List of Dicts System)
     group_data = await db.get_group_settings(message.chat.id)
-    
-    # Purane stickers ki list nikalna
     current_stickers = group_data.get('result_stickers', [])
-    if not isinstance(current_stickers, list):
+    
+    # Wipe old string-based format if present during transition
+    if current_stickers and isinstance(current_stickers[0], str):
         current_stickers = []
+
+    # Check if already exists using 'uid'
+    if any(isinstance(s, dict) and s.get('uid') == sticker.file_unique_id for s in current_stickers):
+        return await message.reply("⚠️ Ye sticker pehle se add hai.")
 
     # Max 5 stickers ki limit
     if len(current_stickers) >= 5:
         return await message.reply("⚠️ **Limit Reached!** Aap pehle se 5 stickers add kar chuke hain. Naye add karne ke liye pehle `/clearstickers` dabayein.")
 
-    if sticker_id not in current_stickers:
-        current_stickers.append(sticker_id)
-        await db.update_group_settings(message.chat.id, {'result_stickers': current_stickers})
-        await message.reply(f"✅ **Sticker Added! ({len(current_stickers)}/5)**\nAb bot in stickers ko badal-badal kar bhejega.")
-    else:
-        await message.reply("⚠️ Ye sticker aapne pehle hi add kar diya hai.")
+    current_stickers.append(sticker_data)
+    await db.update_group_settings(message.chat.id, {'result_stickers': current_stickers})
+    await message.reply(f"✅ **Sticker Added! ({len(current_stickers)}/5)**\nAb bot in stickers ko badal-badal kar bhejega.")
 
 @Client.on_message(filters.command("clearstickers") & filters.group)
 async def clear_stickers_cmd(client, message):
@@ -1565,18 +1571,18 @@ async def remove_specific_sticker_cmd(client, message):
     if not message.reply_to_message or not message.reply_to_message.sticker:
         return await message.reply("⚠️ **Sahi Tarika:** Jis sticker ko list se hatana hai, group mein us par Reply karke `/removesticker` likhiye.")
 
-    # 3. Remove from Database
-    sticker_id = message.reply_to_message.sticker.file_id
+    uid = message.reply_to_message.sticker.file_unique_id
     group_data = await db.get_group_settings(message.chat.id)
-    
     current_stickers = group_data.get('result_stickers', [])
-    if not isinstance(current_stickers, list):
+    
+    if current_stickers and isinstance(current_stickers[0], str):
         current_stickers = []
 
-    # 4. Check & Remove Logic
-    if sticker_id in current_stickers:
-        current_stickers.remove(sticker_id)
-        await db.update_group_settings(message.chat.id, {'result_stickers': current_stickers})
-        await message.reply(f"🗑️ **Sticker Removed!**\nAb ye sticker search results mein nahi aayega.\n(Bache hue stickers: {len(current_stickers)}/5)")
+    # 4. Check & Remove Logic using 'uid'
+    new_list = [s for s in current_stickers if isinstance(s, dict) and s.get('uid') != uid]
+    
+    if len(new_list) < len(current_stickers):
+        await db.update_group_settings(message.chat.id, {'result_stickers': new_list})
+        await message.reply(f"🗑️ **Sticker Removed!**\nAb ye sticker search results mein nahi aayega.\n(Bache hue stickers: {len(new_list)}/5)")
     else:
         await message.reply("⚠️ Ye sticker aapki bot ki list mein add hi nahi hai.")

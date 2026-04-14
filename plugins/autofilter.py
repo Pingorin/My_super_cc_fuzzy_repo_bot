@@ -167,7 +167,7 @@ async def auto_filter(client, message):
         # 🔥 SMART STATS UPDATER (Success Count - Kyunki yahan tak aa gaya matlab file mil gayi hai)
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'suc'))
 
-        # 🌟 ROTATING MULTI-STICKER LOGIC 🌟
+        # 🌟 UPDATED ROTATING MULTI-STICKER LOGIC 🌟
         stickers_list = group_settings.get('result_stickers', [])
         sent_sticker = None
         
@@ -175,10 +175,13 @@ async def auto_filter(client, message):
         if stickers_list and isinstance(stickers_list, list) and len(stickers_list) > 0:
             try:
                 # Randomly koi ek sticker uthana
-                selected_sticker = random.choice(stickers_list)
+                selected_data = random.choice(stickers_list)
+                
+                # Naye format (dict) aur purane format (string) dono ko support karega
+                fid = selected_data['fid'] if isinstance(selected_data, dict) else selected_data
                 
                 # Result se pehle sticker bhejega
-                sent_sticker = await message.reply_sticker(sticker=selected_sticker)
+                sent_sticker = await message.reply_sticker(sticker=fid)
             except:
                 pass
 

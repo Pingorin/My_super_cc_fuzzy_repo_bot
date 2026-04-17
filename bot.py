@@ -17,8 +17,13 @@ import time
 import aiohttp_jinja2
 import jinja2
 import warnings
+
+# ✅ Aapke purane background tasks
 from plugins.auto_mention import auto_mention_scheduler
 from plugins.auto_post import auto_post_scheduler
+
+# ✅ Naya TMDB Channel Auto Poster
+from plugins.auto_poster import start_auto_poster
 
 # Logging Setup
 logging.config.fileConfig('logging.conf')
@@ -126,11 +131,17 @@ class Bot(Client):
         # ==================================================================
         asyncio.create_task(Media.ensure_indexes())   
         
+        # Aapka purana Group Mention Scheduler
         asyncio.create_task(auto_mention_scheduler(self))
         print("⏳ Auto Mention Scheduler Started", flush=True)
 
+        # Aapka purana Group Post Scheduler
         asyncio.create_task(auto_post_scheduler(self))
-        print("📰 Auto Post Scheduler Started", flush=True)
+        print("📰 Group Auto Post Scheduler Started", flush=True)
+        
+        # 🔥 NAYA: TMDB Channel Poster Scheduler
+        asyncio.create_task(start_auto_poster(self))
+        print("🎬 TMDB Channel Auto Poster Started", flush=True)
         
         # Restart Log
         if LOG_CHANNEL:

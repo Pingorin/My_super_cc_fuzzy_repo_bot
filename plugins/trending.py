@@ -5,6 +5,7 @@ import os
 import asyncio 
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.errors import MessageNotModified # 🔥 NAYA IMPORT: Error ignore karne ke liye
 from database.ia_filterdb import Media
 from database.users_chats_db import db
 # ✅ Import arrange_buttons from utils to ensure correct order
@@ -129,8 +130,11 @@ async def trending_menu_handler(client, query):
     else:
         buttons.append([InlineKeyboardButton("❌ Close", callback_data="close_data")])
     
+    # 🔥 FIX: Error handling for same-button clicks
     try:
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    except MessageNotModified:
+        pass # Chupchap ignore karo agar message same hai
     except Exception as e:
         logger.error(f"Trending UI Error: {e}")
 
@@ -189,50 +193,49 @@ async def search_from_trending(client, query, forced_query=None):
     
     filter_buttons = get_filter_buttons(search_id, files, active_sort="relevance")
 
-    # ------------------------------------------------------------------
-    # ✅ FIX: Button Order Logic
-    # ------------------------------------------------------------------
-    if mode == 'button':
-        buttons = btn_parser(files, chat_id, search_id, 0, limit, movie_name)
-        
-        # 🔥 USE arrange_buttons FUNCTION (Ensures correct order)
-        # 1. Files
-        # 2. Filters
-        # 3. How To
-        # 4. Send All / Free Premium
-        # 5. Trending Button (Added inside arrange_buttons)
-        # 6. Pagination (Moved to bottom by arrange_buttons)
-        
-        buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn, search_id)
-        
-        msg_text = f"⚡ **Results for:** `{movie_name}`\nfound {len(files)} files."
-        await query.message.edit_text(text=msg_text, reply_markup=InlineKeyboardMarkup(buttons))
+    # 🔥 FIX: Global Try-Except block for all Edit Message methods
+    try:
+        # ------------------------------------------------------------------
+        # ✅ FIX: Button Order Logic
+        # ------------------------------------------------------------------
+        if mode == 'button':
+            buttons = btn_parser(files, chat_id, search_id, 0, limit, movie_name)
+            
+            # 🔥 USE arrange_buttons FUNCTION (Ensures correct order)
+            buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn, search_id)
+            
+            msg_text = f"⚡ **Results for:** `{movie_name}`\nfound {len(files)} files."
+            await query.message.edit_text(text=msg_text, reply_markup=InlineKeyboardMarkup(buttons))
 
-    elif mode in ['text', 'detailed']:
-        page_files = files[:limit]
+        elif mode in ['text', 'detailed']:
+            page_files = files[:limit]
+            
+            if mode == 'text': text = format_text_results(page_files, movie_name, chat_id)
+            else: text = format_detailed_results(page_files, movie_name, chat_id)
+            
+            btn = []
+            if filter_buttons: 
+                for row in filter_buttons: btn.append(row)
+            if howto_btn: btn.append(howto_btn)
+            
+            # 1. Add Send All / Premium
+            btn.append(free_prem_btn)
+            
+            # 2. Add Trending Button
+            btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
+            
+            # 3. Add Pagination (Last)
+            pagination = get_pagination_row(search_id, 0, limit, len(files), active_sort="relevance")
+            if pagination: btn.append(pagination)
+            
+            await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn))
         
-        if mode == 'text': text = format_text_results(page_files, movie_name, chat_id)
-        else: text = format_detailed_results(page_files, movie_name, chat_id)
-        
-        btn = []
-        if filter_buttons: 
-            for row in filter_buttons: btn.append(row)
-        if howto_btn: btn.append(howto_btn)
-        
-        # 1. Add Send All / Premium
-        btn.append(free_prem_btn)
-        
-        # 2. Add Trending Button (Explicitly added here for Text Mode)
-        #    Format: trend_list#0#{search_id}
-        btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
-        
-        # 3. Add Pagination (Last)
-        pagination = get_pagination_row(search_id, 0, limit, len(files), active_sort="relevance")
-        if pagination: btn.append(pagination)
-        
-        await query.message.edit_text(text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(btn))
-    
-    else:
-        buttons = btn_parser(files, chat_id, search_id, 0, limit, movie_name)
-        buttons.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
-        await query.message.edit_text(f"⚡ **Results for:** `{movie_name}`", reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            buttons = btn_parser(files, chat_id, search_id, 0, limit, movie_name)
+            buttons.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
+            await query.message.edit_text(f"⚡ **Results for:** `{movie_name}`", reply_markup=InlineKeyboardMarkup(buttons))
+            
+    except MessageNotModified:
+        pass # Same message pe double click kiya, error ignore!
+    except Exception as e:
+        logger.error(f"Search UI Edit Error: {e}")

@@ -138,4 +138,4 @@ async def start_auto_poster(client):
     await asyncio.sleep(60) # Bot start hone ke 1 min baad shuru hoga
     while True:
         await post_trending_poster(client)
-        await asyncio.sleep(43200) # Har 12 Ghante mein post karega (Change to 86400 for 24 hours)
+        await asyncio.sleep(60) # Har 12 Ghante mein post karega (Change to 86400 for 24 hours)

@@ -144,4 +144,4 @@ async def start_auto_poster(client):
     await asyncio.sleep(60) 
     while True:
         await post_trending_poster(client)
-        await asyncio.sleep(60) # 1 Min ki testing
+        await asyncio.sleep(600) # 1 Min ki testing

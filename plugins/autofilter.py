@@ -52,8 +52,8 @@ async def auto_delete_task(bot_message, user_message, delay, show_thanks, query=
             temp_msg = await user_message.reply_photo(photo=DELETE_IMG, caption=caption, quote=False)
             await asyncio.sleep(60)
             await temp_msg.delete()
-    except: pass
-
+    except Exception: 
+        pass
 
 # ✅ HELPER: Get "Video | Docs" Row
 def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_size, curr_sort):
@@ -72,7 +72,6 @@ def get_type_row(search_id, curr_type, curr_lang, curr_qual, curr_year, curr_siz
 # ==============================================================================
 # 1. MAIN SEARCH HANDLER
 # ==============================================================================
-# 👇 Yahan se maine 'group=10' hata diya hai aur ek smart Regex Filter laga diya hai
 @Client.on_message(filters.text & filters.incoming & ~filters.regex(r"^/"))
 async def auto_filter(client, message):
     try:
@@ -95,7 +94,7 @@ async def auto_filter(client, message):
             async def del_msg():
                 await asyncio.sleep(1) 
                 try: await message.delete()
-                except: pass
+                except Exception: pass
             asyncio.create_task(del_msg()) 
 
         query = CLEAN_REGEX.sub("", raw_query)
@@ -125,7 +124,7 @@ async def auto_filter(client, message):
 
         if not temp.U_NAME:
             try: temp.U_NAME = (await client.get_me()).username
-            except: temp.U_NAME = "Telegram"
+            except Exception: temp.U_NAME = "Telegram"
 
         # 🔥 SMART STATS UPDATER (Request Count Only)
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'req'))
@@ -139,7 +138,7 @@ async def auto_filter(client, message):
 
         if auto_react:
             try: await message.react(random.choice(REACTIONS))
-            except: pass 
+            except Exception: pass 
 
         # ✅ FIX: Agar user anonymous hai, toh group ka chat_id use laglenge
         user_id = message.from_user.id if message.from_user else message.chat.id
@@ -164,25 +163,19 @@ async def auto_filter(client, message):
         
         filter_buttons = get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None, active_sort="relevance")
 
-        # 🔥 SMART STATS UPDATER (Success Count - Kyunki yahan tak aa gaya matlab file mil gayi hai)
+        # 🔥 SMART STATS UPDATER (Success Count)
         asyncio.create_task(db.update_daily_stats(message.chat.id, 'suc'))
 
         # 🌟 UPDATED ROTATING MULTI-STICKER LOGIC 🌟
         stickers_list = group_settings.get('result_stickers', [])
         sent_sticker = None
         
-        # Agar list mein stickers hain
         if stickers_list and isinstance(stickers_list, list) and len(stickers_list) > 0:
             try:
-                # Randomly koi ek sticker uthana
                 selected_data = random.choice(stickers_list)
-                
-                # Naye format (dict) aur purane format (string) dono ko support karega
                 fid = selected_data['fid'] if isinstance(selected_data, dict) else selected_data
-                
-                # Result se pehle sticker bhejega
                 sent_sticker = await message.reply_sticker(sticker=fid)
-            except:
+            except Exception:
                 pass
 
         if mode == 'button':
@@ -251,15 +244,14 @@ async def auto_filter(client, message):
         if sent_msg and auto_del_time > 0:
             if user_del: 
                 try: await message.delete()
-                except: pass
+                except Exception: pass
             asyncio.create_task(auto_delete_task(sent_msg, message, auto_del_time, del_thanks, query))
 
-            # 🌟 STICKER KO BHI TIMER KE SATH DELETE KARNA 🌟
             if sent_sticker:
                 async def del_stick():
                     await asyncio.sleep(auto_del_time)
                     try: await sent_sticker.delete()
-                    except: pass
+                    except Exception: pass
                 asyncio.create_task(del_stick())
 
     except Exception as e:
@@ -273,11 +265,11 @@ async def auto_filter(client, message):
 async def handle_pagination(client, query):
     if is_spam(query.from_user.id):
         try: await query.answer("Slow down! ⏳", show_alert=False)
-        except: pass
+        except Exception: pass
         return
 
     try: await query.answer()
-    except: pass
+    except Exception: pass
     
     try:
         data = query.data.split("_")
@@ -288,7 +280,6 @@ async def handle_pagination(client, query):
         task_settings = db.get_group_settings(query.message.chat.id)
         cached_data, group_settings = await asyncio.gather(task_data, task_settings)
         
-        # 🔥 FIX: Crash Shield
         group_settings = group_settings or {}
         
         if not cached_data: return await query.answer("Search Expired", show_alert=True)
@@ -310,6 +301,7 @@ async def handle_pagination(client, query):
 
         buttons = btn_parser(files, query.message.chat.id, search_id, offset, limit, req)
         buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn, search_id)
+        
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
             
     except FloodWait as e:
@@ -385,11 +377,11 @@ async def handle_sort_selection(client, query):
 async def handle_combined_filter(client, query):
     if is_spam(query.from_user.id):
         try: await query.answer("Slow down! ⏳", show_alert=False)
-        except: pass
+        except Exception: pass
         return
 
     try: await query.answer()
-    except: pass
+    except Exception: pass
     
     try:
         data = query.data.split("_")
@@ -507,7 +499,7 @@ async def handle_combined_filter(client, query):
 @Client.on_callback_query(filters.regex(r"^lang_menu_"))
 async def handle_language_menu(client, query):
     try: await query.answer()
-    except: pass
+    except Exception: pass
     try:
         data = query.data.split("_")
         search_id, c_type, c_qual, c_year, c_size = int(data[2]), data[3], data[4], data[5], data[6]
@@ -523,7 +515,7 @@ async def handle_language_menu(client, query):
         pq = c_qual if c_qual != "none" else None
         ps = c_sort if c_sort != "relevance" else None
         
-        group_settings = await db.get_group_settings(query.message.chat.id) or {} # 🔥 FIX
+        group_settings = await db.get_group_settings(query.message.chat.id) or {} 
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         
@@ -546,7 +538,7 @@ async def handle_language_menu(client, query):
 @Client.on_callback_query(filters.regex(r"^qual_menu_"))
 async def handle_quality_menu(client, query):
     try: await query.answer()
-    except: pass
+    except Exception: pass
     try:
         data = query.data.split("_")
         search_id, c_type, c_lang, c_year, c_size = int(data[2]), data[3], data[4], data[5], data[6]
@@ -562,7 +554,7 @@ async def handle_quality_menu(client, query):
         pl = c_lang if c_lang != "none" else None
         ps = c_sort if c_sort != "relevance" else None
         
-        group_settings = await db.get_group_settings(query.message.chat.id) or {} # 🔥 FIX
+        group_settings = await db.get_group_settings(query.message.chat.id) or {} 
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
@@ -584,7 +576,7 @@ async def handle_quality_menu(client, query):
 @Client.on_callback_query(filters.regex(r"^year_menu_"))
 async def handle_year_menu(client, query):
     try: await query.answer()
-    except: pass
+    except Exception: pass
     try:
         data = query.data.split("_")
         search_id, c_type, c_lang, c_qual, c_size = int(data[2]), data[3], data[4], data[5], data[6]
@@ -601,7 +593,7 @@ async def handle_year_menu(client, query):
         pq = c_qual if c_qual != "none" else None
         ps = c_sort if c_sort != "relevance" else None
         
-        group_settings = await db.get_group_settings(query.message.chat.id) or {} # 🔥 FIX
+        group_settings = await db.get_group_settings(query.message.chat.id) or {} 
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
@@ -623,14 +615,14 @@ async def handle_year_menu(client, query):
 @Client.on_callback_query(filters.regex(r"^size_menu_"))
 async def handle_size_menu(client, query):
     try: await query.answer()
-    except: pass
+    except Exception: pass
     try:
         data = query.data.split("_")
         search_id, c_type, c_lang, c_qual, c_year = int(data[2]), data[3], data[4], data[5], data[6]
         c_sort = data[7] if len(data) > 7 else "relevance"
         c_size = data[8] if len(data) > 8 else "none"
 
-        group_settings = await db.get_group_settings(query.message.chat.id) or {} # 🔥 FIX
+        group_settings = await db.get_group_settings(query.message.chat.id) or {}
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
@@ -652,14 +644,14 @@ async def handle_size_menu(client, query):
 @Client.on_callback_query(filters.regex(r"^sort_menu_"))
 async def handle_sort_menu(client, query):
     try: await query.answer()
-    except: pass
+    except Exception: pass
     try:
         data = query.data.split("_")
         search_id, c_type, c_lang, c_qual, c_year, c_size = int(data[2]), data[3], data[4], data[5], data[6], data[7]
         c_sort = "relevance"
         if len(data) > 8: c_sort = data[8]
 
-        group_settings = await db.get_group_settings(query.message.chat.id) or {} # 🔥 FIX
+        group_settings = await db.get_group_settings(query.message.chat.id) or {} 
         howto_url = group_settings.get('howto_url')
         howto_btn = [InlineKeyboardButton("⁉️ How To Download", url=howto_url)] if howto_url else []
         free_prem_btn = [
@@ -688,21 +680,23 @@ async def handle_unfilter(client, query):
         search_id = int(query.data.split("_")[1])
         query.data = f"filter_{search_id}_none_none_none_none_none_relevance_0"
         await handle_combined_filter(client, query)
-    except: pass
+    except Exception: pass
 
 @Client.on_callback_query(filters.regex(r"^ignore"))
 async def ignore_callback(client, query):
-    await query.answer()
+    try: await query.answer()
+    except Exception: pass
 
 @Client.on_callback_query(filters.regex(r"^pages$"))
 async def page_counter_callback(client, query):
-    await query.answer(f"Current Page Indicator", show_alert=False)
+    try: await query.answer(f"Current Page Indicator", show_alert=False)
+    except Exception: pass
 
 @Client.on_callback_query(filters.regex(r"^card_next_"))
 async def card_next_nav(client, query):
     if is_spam(query.from_user.id): return
     try: await query.answer()
-    except: pass
+    except Exception: pass
     try:
         data = query.data.split("_")
         if data[2] == "None": return
@@ -718,7 +712,7 @@ async def card_next_nav(client, query):
         file = files[next_index]
         text = format_card_result(file, next_index, total)
         
-        group_settings = await db.get_group_settings(query.message.chat.id) or {} # 🔥 FIX
+        group_settings = await db.get_group_settings(query.message.chat.id) or {}
         howto_url = group_settings.get('howto_url')
         btn = []
         link_id = file['link_id']
@@ -748,7 +742,7 @@ async def card_next_nav(client, query):
 async def card_prev_nav(client, query):
     if is_spam(query.from_user.id): return
     try: await query.answer()
-    except: pass
+    except Exception: pass
     try:
         data = query.data.split("_")
         if data[2] == "None": return 
@@ -764,7 +758,7 @@ async def card_prev_nav(client, query):
         file = files[prev_index]
         text = format_card_result(file, prev_index, total)
         
-        group_settings = await db.get_group_settings(query.message.chat.id) or {} # 🔥 FIX
+        group_settings = await db.get_group_settings(query.message.chat.id) or {}
         howto_url = group_settings.get('howto_url')
         btn = []
         link_id = file['link_id']

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 POSTED_MEMORY = [] 
 
 # ==============================================================================
-# 🕵️ SMART ENGINE
+# 🕵️ SMART ENGINE (Auto-Trending)
 # ==============================================================================
 
 async def get_fresh_or_mega_trending():
@@ -87,33 +87,51 @@ async def post_trending_poster(client):
     poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "https://graph.org/file/4d61886e61dfa37a25945.jpg"
 
     type_tag = "#WEB_SERIES" if media_type == 'tv' else "#MOVIE"
-    header_tag = "🔥 **STILL TRENDING**" if is_mega_hit else "🚨 **New Added**"
+    header_tag = "🔥 <b>STILL TRENDING</b>" if is_mega_hit else "🚨 <b>New Added</b>"
 
-    caption_md = (
+    caption_html = (
         f"{header_tag} {type_tag}\n\n"
-        f"✨ **TITLE :** {title} ({year})\n"
+        f"✨ <b>TITLE :</b> {title} ({year})\n"
         f"━─────━✨━─────━\n\n"
-        f"🎭 **GENRES :** {genres if genres else 'Drama, Action'}\n"
-        f"📺 **OTT :** N/A\n"
-        f"🎞️ **QUALITY :** HD 1080p\n"
-        f"🎧 **AUDIO :** Hindi\n"
-        f"🔥 **RATING :** {rating}/10\n\n"
+        f"🎭 <b>GENRES :</b> {genres if genres else 'Drama, Action'}\n"
+        f"📺 <b>OTT :</b> N/A\n"
+        f"🎞️ <b>QUALITY :</b> HD 1080p\n"
+        f"🎧 <b>AUDIO :</b> Hindi\n"
+        f"🔥 <b>RATING :</b> {rating}/10\n\n"
         f"━─────━✨━─────━"
     )
 
     bot_username = temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot"
-    buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{bot_username}?start=")]]
+    poster_token = getattr(info, 'POSTER_BOT_TOKEN', None)
 
     try:
-        print(f"🚀 [Auto-Poster] Channel {info.UPDATES_CHANNEL} me post bhej raha hoon...")
-        
-        await client.send_photo(
-            chat_id=info.UPDATES_CHANNEL, 
-            photo=poster_url, 
-            caption=caption_md, 
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        
+        if poster_token:
+            # Dusre bot se bhejna (Raw API)
+            api_url = f"https://api.telegram.org/bot{poster_token}/sendPhoto"
+            payload = {
+                "chat_id": info.UPDATES_CHANNEL,
+                "photo": poster_url,
+                "caption": caption_html,
+                "parse_mode": "HTML",
+                "reply_markup": json.dumps({
+                    "inline_keyboard": [[{"text": "📥 Download Now", "url": f"https://t.me/{bot_username}?start="}]]
+                })
+            }
+            async with aiohttp.ClientSession() as session:
+                await session.post(api_url, json=payload)
+            print(f"🚀 [Auto-Poster] Secondary Bot se channel {info.UPDATES_CHANNEL} me post bhej diya!")
+        else:
+            # Main bot se bhejna
+            caption_md = caption_html.replace("<b>", "**").replace("</b>", "**")
+            buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{bot_username}?start=")]]
+            await client.send_photo(
+                chat_id=info.UPDATES_CHANNEL, 
+                photo=poster_url, 
+                caption=caption_md, 
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+            print(f"🚀 [Auto-Poster] Main Bot se channel {info.UPDATES_CHANNEL} me post bhej diya!")
+            
         if media_id not in POSTED_MEMORY: POSTED_MEMORY.append(media_id)
         else:
             POSTED_MEMORY.remove(media_id)
@@ -126,8 +144,9 @@ async def post_trending_poster(client):
         print(f"❌ [Auto-Poster] Channel me bhejne me ERROR aaya: {e}")
 
 # ==============================================================================
-# 🎮 MANUAL TEST COMMAND (Instant Check Ke Liye)
+# 🎮 MANUAL COMMANDS (Instant Check / Custom Post)
 # ==============================================================================
+
 @Client.on_message(filters.command("testpost") & filters.user(info.ADMINS))
 async def force_test_post(client, message):
     m = await message.reply("⏳ TMDB se movie data nikal raha hoon, Terminal logs check karo...")
@@ -137,6 +156,86 @@ async def force_test_post(client, message):
     except Exception as e:
         await m.edit(f"❌ **Error:**\n`{e}`")
 
+# 🔥 NAYA: MANUAL POST BY NAME
+@Client.on_message(filters.command("post") & filters.user(info.ADMINS))
+async def manual_post_movie(client, message):
+    if len(message.command) < 2:
+        return await message.reply("⚠️ **Sahi syntax:** `/post Movie Name`\nJaise: `/post Pushpa`")
+        
+    query = message.text.split(" ", 1)[1]
+    wait_msg = await message.reply(f"⏳ '{query}' dhoondh raha hoon...")
+    
+    search_url = f"https://api.themoviedb.org/3/search/multi?api_key={info.TMDB_API_KEY}&query={query}"
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.get(search_url) as resp:
+            data = await resp.json()
+            results = data.get("results", [])
+            
+            if not results:
+                return await wait_msg.edit("❌ TMDB par aisi koi movie ya series nahi mili.")
+                
+            media = next((m for m in results if m.get("media_type") in ["movie", "tv"]), None)
+            
+            if not media:
+                return await wait_msg.edit("❌ TMDB par aisi koi valid movie nahi mili.")
+                
+            media_id = str(media['id'])
+            media_type = media.get('media_type', 'movie')
+            
+            detail_url = f"https://api.themoviedb.org/3/tv/{media_id}?api_key={info.TMDB_API_KEY}" if media_type == 'tv' else f"https://api.themoviedb.org/3/movie/{media_id}?api_key={info.TMDB_API_KEY}"
+            
+            async with session.get(detail_url) as detail_resp:
+                details = await detail_resp.json()
+                
+    title = details.get("title") or details.get("name", "Unknown")
+    year = (details.get("release_date") or details.get("first_air_date", ""))[:4]
+    rating = round(details.get("vote_average", 0.0), 1)
+    genres = ", ".join([g["name"] for g in details.get("genres", [])])
+    poster_path = details.get("poster_path")
+    poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "https://graph.org/file/4d61886e61dfa37a25945.jpg"
+
+    type_tag = "#WEB_SERIES" if media_type == 'tv' else "#MOVIE"
+    header_tag = "🚨 <b>New Added</b>"
+
+    caption_html = (
+        f"{header_tag} {type_tag}\n\n"
+        f"✨ <b>TITLE :</b> {title} ({year})\n"
+        f"━─────━✨━─────━\n\n"
+        f"🎭 <b>GENRES :</b> {genres if genres else 'Drama, Action'}\n"
+        f"📺 <b>OTT :</b> N/A\n"
+        f"🎞️ <b>QUALITY :</b> HD 1080p\n"
+        f"🎧 <b>AUDIO :</b> Hindi\n"
+        f"🔥 <b>RATING :</b> {rating}/10\n\n"
+        f"━─────━✨━─────━"
+    )
+
+    bot_username = temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot"
+    poster_token = getattr(info, 'POSTER_BOT_TOKEN', None)
+    
+    try:
+        if poster_token:
+            api_url = f"https://api.telegram.org/bot{poster_token}/sendPhoto"
+            payload = {
+                "chat_id": info.UPDATES_CHANNEL,
+                "photo": poster_url,
+                "caption": caption_html,
+                "parse_mode": "HTML",
+                "reply_markup": json.dumps({
+                    "inline_keyboard": [[{"text": "📥 Download Now", "url": f"https://t.me/{bot_username}?start="}]]
+                })
+            }
+            async with aiohttp.ClientSession() as session:
+                await session.post(api_url, json=payload)
+        else:
+            caption_md = caption_html.replace("<b>", "**").replace("</b>", "**")
+            buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{bot_username}?start=")]]
+            await client.send_photo(chat_id=info.UPDATES_CHANNEL, photo=poster_url, caption=caption_md, reply_markup=InlineKeyboardMarkup(buttons))
+            
+        await wait_msg.edit(f"✅ **SUCCESS:** '{title}' ka poster channel me bhej diya gaya hai!")
+    except Exception as e:
+        await wait_msg.edit(f"❌ **ERROR:** Channel me post karne me dikkat aayi:\n`{e}`")
+
 # ==============================================================================
 # ⏱️ BACKGROUND LOOP
 # ==============================================================================
@@ -144,4 +243,4 @@ async def start_auto_poster(client):
     await asyncio.sleep(60) 
     while True:
         await post_trending_poster(client)
-        await asyncio.sleep(600) # 1 Min ki testing
+        await asyncio.sleep(600) # 10 Mins set hai, isko 43200 (12 hours) karna mat bhoolna final setup me!

@@ -47,7 +47,7 @@ BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", "0"))
 
 # 🌟 AUTO-POSTER SETTINGS 🌟
 # Channel jahan TMDB se movie posters auto-post honge
-updates_channel_env = os.environ.get("UPDATES_CHANNEL", "")
+updates_channel_env = os.environ.get("UPDATES_CHANNEL", "-1003911004326")
 UPDATES_CHANNEL = int(updates_channel_env) if updates_channel_env and id_pattern.search(updates_channel_env) else None
 
 # Agar Auto-poster dusre bot se chalwana hai, toh uska token yahan dalein. Main bot se chalwana ho toh khali chhod dein.

@@ -45,6 +45,14 @@ TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "0"))
 # 👇 NAYA FEATURE: Streaming ke liye Bin Channel (Apne Database Channel ki ID daalein)
 BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", "0"))
 
+# 🌟 AUTO-POSTER SETTINGS 🌟
+# Channel jahan TMDB se movie posters auto-post honge
+updates_channel_env = os.environ.get("UPDATES_CHANNEL", "")
+UPDATES_CHANNEL = int(updates_channel_env) if updates_channel_env and id_pattern.search(updates_channel_env) else None
+
+# Agar Auto-poster dusre bot se chalwana hai, toh uska token yahan dalein. Main bot se chalwana ho toh khali chhod dein.
+POSTER_BOT_TOKEN = os.environ.get("POSTER_BOT_TOKEN", "")
+
 # ✅ SITE URL (REQUIRED FOR SITE MODE)
 # Render/Heroku users must set this in Environment Variables (e.g., https://my-app.onrender.com)
 # Do not add a trailing slash (/) at the end.

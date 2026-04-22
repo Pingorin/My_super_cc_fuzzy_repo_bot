@@ -70,11 +70,6 @@ class MediaDB:
 
     async def ensure_indexes(self):
         try:
-            # 🔥 OPTIMIZATION: Inko comment kar diya hai taaki 1.8 Lakh files ka index 
-            # baar-baar delete hoke CPU load na badhaye aur bot fast start ho.
-            # try: await self.search_col1.drop_indexes()
-            # except OperationFailure: pass 
-
             # 🔥 TTL BUG FIX: Purane time wale rules ko pehle hatayenge taaki clash na ho
             try: await self.search_cache.drop_index("created_at_1")
             except Exception: pass
@@ -99,9 +94,6 @@ class MediaDB:
             
             # 🔥 DB 2 Indexes
             if self.has_db2:
-                # try: await self.search_col2.drop_indexes()
-                # except OperationFailure: pass
-                
                 await self.search_col2.create_index("quality") 
                 await self.search_col2.create_index("languages") 
                 await self.search_col2.create_index("year") 
@@ -114,9 +106,6 @@ class MediaDB:
 
             # 🔥 DB 3 Indexes
             if self.has_db3:
-                # try: await self.search_col3.drop_indexes()
-                # except OperationFailure: pass
-                
                 await self.search_col3.create_index("quality") 
                 await self.search_col3.create_index("languages") 
                 await self.search_col3.create_index("year") 
@@ -278,7 +267,7 @@ class MediaDB:
 
         unique_ids = [media.file_unique_id for media, msg in unique_batch_items]
         
-        # 🔥 SMART UPDATE MAPPING (Teeno DB me dhoondhega ki purani file kahan hai)
+        # 🔥 SMART UPDATE MAPPING
         existing_map = {}
         link_ids_to_check = []
         
@@ -301,7 +290,6 @@ class MediaDB:
                     link_ids_to_check.append(doc['_id'])
         except: pass
 
-        # 🧠 THE "BRAIN" - Purani files ke caption ki lambaai (length) nikalna
         old_text_lengths = {}
         if link_ids_to_check:
             try:
@@ -317,7 +305,6 @@ class MediaDB:
                     for doc in old_search_3: old_text_lengths[doc['link_id']] = len(doc.get('file_name', '')) + len(doc.get('search_text', ''))
             except: pass
 
-        # Nayi files aur Update hone wali files ko alag-alag karna
         new_items = [(media, msg) for media, msg in unique_batch_items if media.file_unique_id not in existing_map]
         update_items = [(media, msg, existing_map[media.file_unique_id]) for media, msg in unique_batch_items if media.file_unique_id in existing_map]
         
@@ -334,7 +321,6 @@ class MediaDB:
         data_docs, search_docs = [], []
         current_id = start_sequence
         
-        # Dono files ko ek sath Master Parsing Engine me bhejna
         all_processing_items = [("new", m, msg, None) for m, msg in new_items] + [("update", m, msg, ex) for m, msg, ex in update_items]
         
         for process_type, media, message, ex_info in all_processing_items:
@@ -429,7 +415,6 @@ class MediaDB:
 
             file_type = "video" if message.video else "document"
 
-            # 🟢 IF THIS IS A COMPLETELY NEW FILE (Normal Insert)
             if process_type == "new" and current_id > 0:
                 data_docs.append({'_id': current_id, 'msg_id': message.id, 'chat_id': message.chat.id, 'file_id': media.file_id, 'file_unique_id': media.file_unique_id, 'file_type': file_type})
                 
@@ -444,17 +429,13 @@ class MediaDB:
                 search_docs.append(search_doc)
                 current_id += 1
                 
-            # 🔵 IF THIS FILE ALREADY EXISTS (Smart Comparison Overwrite)
             elif process_type == "update":
                 db_num = ex_info['db']
                 link_id = ex_info['link_id']
                 
-                # Nayi file ka total text lambaai nikalna
                 new_text_length = len(final_display_name) + len(master_search_text)
-                # Purani file ki lambaai (jo upar nikali thi)
                 old_text_length = old_text_lengths.get(link_id, 0)
                 
-                # 🔥 THE MASTER LOGIC: Sirf tabhi update karega jab nayi file behtar/zyada detail wali ho
                 if new_text_length > old_text_length:
                     if db_num == 3 and self.has_db3:
                         active_data, active_search = self.data_col3, self.search_col3
@@ -482,17 +463,12 @@ class MediaDB:
                     search_update['year'] = parsed_meta['year'] if parsed_meta['year'] else []
 
                     try:
-                        # Database update command
                         asyncio.create_task(active_data.update_one({'_id': link_id}, {'$set': data_update}))
                         asyncio.create_task(active_search.update_one({'link_id': link_id}, {'$set': search_update}))
                     except Exception: pass
-                else:
-                    # Nayi file bekaar hai, purani wali hi theek thi! (Chupchap skip kardo)
-                    pass
 
         saved_count = 0
         
-        # 🔥 Insert New Items
         if data_docs or search_docs:
             active_db_num = await self.get_active_index_db()
             
@@ -521,35 +497,26 @@ class MediaDB:
         return saved_count, pre_duplicate_count
 
     async def get_file_details(self, link_id):
-        # Scan Primary DB
         doc = await self.data_col1.find_one({'_id': int(link_id)})
-        # Scan Secondary DB
         if not doc and self.has_db2: doc = await self.data_col2.find_one({'_id': int(link_id)})
-        # Scan Tertiary DB
         if not doc and self.has_db3: doc = await self.data_col3.find_one({'_id': int(link_id)})
         return doc
 
-    # 🔥 NAYA FUNCTION (Error Fix ke liye) 🔥
     async def get_search_data(self, link_id):
         doc = await self.search_col1.find_one({'link_id': int(link_id)})
         if not doc and self.has_db2: doc = await self.search_col2.find_one({'link_id': int(link_id)})
         if not doc and self.has_db3: doc = await self.search_col3.find_one({'link_id': int(link_id)})
         return doc
 
-    # 🔥 ON-DEMAND CACHING ENGINE 🔥
     async def update_file_id(self, old_file_id, new_file_id):
-        """Purani file_id ko nayi se replace karta hai teeno DBs me"""
         try:
-            # Check and Update DB 1
             res1 = await self.data_col1.update_one({'file_id': old_file_id}, {'$set': {'file_id': new_file_id}})
             if res1.modified_count > 0: return True
             
-            # Check and Update DB 2
             if self.has_db2:
                 res2 = await self.data_col2.update_one({'file_id': old_file_id}, {'$set': {'file_id': new_file_id}})
                 if res2.modified_count > 0: return True
                 
-            # Check and Update DB 3
             if self.has_db3:
                 res3 = await self.data_col3.update_one({'file_id': old_file_id}, {'$set': {'file_id': new_file_id}})
                 if res3.modified_count > 0: return True
@@ -590,12 +557,18 @@ class MediaDB:
                     
             clean_query_for_text = " ".join(expanded_text_words) if expanded_text_words else " ".join(raw_words)
             words = raw_words 
+            
+            # 🔥 THE DOUBLE QUOTES HACK FOR EXACT PHRASE MATCH 🔥
+            if " " in clean_query_for_text:
+                smart_search_string = f'"{clean_query_for_text}" {clean_query_for_text}'
+            else:
+                smart_search_string = clean_query_for_text
 
             meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series"}
             title_words = [w for w in words if not (re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords)]
             if not title_words: title_words = words 
 
-            match_filters = {"$text": {"$search": clean_query_for_text}}
+            match_filters = {"$text": {"$search": smart_search_string}}
 
             if file_type and file_type != "none": match_filters["file_type"] = "video" if file_type.lower() == "video" else "document"
             if lang and lang != "none":
@@ -651,15 +624,15 @@ class MediaDB:
                 {"$addFields": {"custom_score": {"$add": match_conditions}}}
             ]
 
+            # 🔥 TEXTSCORE ADDED TO PIPELINE SORT 🔥
             if sort == "new": pipeline.append({"$sort": {"_id": -1}}) 
             elif sort == "old": pipeline.append({"$sort": {"_id": 1}}) 
             elif sort == "large": pipeline.append({"$sort": {"file_size": -1}}) 
             elif sort == "small": pipeline.append({"$sort": {"file_size": 1}}) 
-            else: pipeline.append({"$sort": {"custom_score": -1, "name_length": 1, "_id": -1}}) 
+            else: pipeline.append({"$sort": {"score": -1, "custom_score": -1, "name_length": 1, "_id": -1}}) 
 
             pipeline.append({"$limit": 100}) 
             
-            # 🔥 MULTI-DATABASE SEARCH (DB1 + DB2 + DB3)
             cursor1 = self.search_col1.aggregate(pipeline)
             files = await cursor1.to_list(length=100)
             
@@ -712,7 +685,6 @@ class MediaDB:
 
                 fallback_pipeline.append({"$limit": 30})
                 
-                # 🔥 MULTI-DATABASE FALLBACK SEARCH
                 cursor1 = self.search_col1.aggregate(fallback_pipeline)
                 files = await cursor1.to_list(length=30)
                 
@@ -729,7 +701,7 @@ class MediaDB:
             except Exception as inner_e:
                 files = []
 
-        # 🔥 UNIFIED PYTHON RE-RANKING
+        # 🔥 UNIFIED PYTHON RE-RANKING (With Native TextScore) 🔥
         if files:
             query_title = " ".join(title_words).lower()
             for file in files:
@@ -739,7 +711,8 @@ class MediaDB:
                 else:
                     file['fuzzy_score'] = difflib.SequenceMatcher(None, query_title, fname).ratio()
             
-            files.sort(key=lambda x: (x.get('custom_score', 0), x.get('fuzzy_score', 0)), reverse=True)
+            # Yahan x.get('score', 0) lagaya hai taaki exact phrase match sabse upar rahe
+            files.sort(key=lambda x: (x.get('score', 0), x.get('custom_score', 0), x.get('fuzzy_score', 0)), reverse=True)
             files = files[:100] 
 
         return files
@@ -763,22 +736,18 @@ class MediaDB:
             return total
         except: return 0
 
-    # 🔥 NAYA FUNCTION DAILY STATS NAVIGATION KE LIYE 🔥
     async def get_detailed_stats(self):
         stats_dict = {"db1": None, "db2": None, "db3": None, "total_overall": 0}
         total_overall = 0
         try:
-            # 🟢 DB 1 Stats
             db_stats1 = await self.db1.command("dbstats")
             t1 = db_stats1.get('storageSize', 0) + db_stats1.get('totalIndexSize', 0)
             
-            # ✅ FIX: Using Aggregation for Atlas Free Tier compatibility
             try:
                 cursor1 = self.search_col1.aggregate([{"$collStats": {"storageStats": {}}}])
                 stats_list1 = await cursor1.to_list(length=1)
                 tx1 = stats_list1[0].get("storageStats", {}).get("indexSizes", {}).get("weighted_movie_search", 0) if stats_list1 else 0
             except Exception as e:
-                print(f"DB1 Stats Error: {e}")
                 tx1 = 0
 
             try:
@@ -804,7 +773,6 @@ class MediaDB:
             stats_dict["db1"] = {"total": t1, "text": tx1, "cache": cache_total, "main": max(main1, 0)}
             total_overall += t1
 
-            # 🔵 DB 2 Stats
             if self.has_db2:
                 db_stats2 = await self.db2.command("dbstats")
                 t2 = db_stats2.get('storageSize', 0) + db_stats2.get('totalIndexSize', 0)
@@ -817,7 +785,6 @@ class MediaDB:
                 stats_dict["db2"] = {"total": t2, "text": tx2, "main": max(main2, 0)}
                 total_overall += t2
 
-            # 🟣 DB 3 Stats
             if self.has_db3:
                 db_stats3 = await self.db3.command("dbstats")
                 t3 = db_stats3.get('storageSize', 0) + db_stats3.get('totalIndexSize', 0)

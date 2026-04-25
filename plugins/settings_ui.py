@@ -419,7 +419,7 @@ async def custom_welcome_config(client, query):
          InlineKeyboardButton("🖼️ Set Photo", callback_data=f"wel_set_img#{chat_id}")],
          
         [InlineKeyboardButton("🔄 Reset Custom Welcome", callback_data=f"wel_reset#{chat_id}")],
-        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
+        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")] 
     ]
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -535,7 +535,7 @@ async def antispam_settings_ui(client, query):
             InlineKeyboardButton(f"60m{time_chk(3600)}", callback_data=f"as_time#{chat_id}#3600")
         ])
         
-    buttons.append([InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
+    buttons.append([InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -586,7 +586,7 @@ async def auto_mention_settings_ui(client, query):
          InlineKeyboardButton(f"10min{t_chk(600)}", callback_data=f"am_time#{chat_id}#600"),
          InlineKeyboardButton(f"30min{t_chk(1800)}", callback_data=f"am_time#{chat_id}#1800"),
          InlineKeyboardButton(f"60min{t_chk(3600)}", callback_data=f"am_time#{chat_id}#3600")],
-        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
+        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
     ]
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)

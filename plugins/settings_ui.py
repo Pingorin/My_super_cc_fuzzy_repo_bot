@@ -136,9 +136,10 @@ async def main_settings_menu(client, query):
         [InlineKeyboardButton("💎 Free Premium (Referral)", callback_data=f"ref_sys_menu#{chat_id}"),
          InlineKeyboardButton("💡 Request Features", callback_data=f"req_feature#{chat_id}")],
 
+        # 🔥 Row 9 (NEW): MOVIE UPDATE
         [InlineKeyboardButton("🎬 Set Movie Update", callback_data=f"mu_main#{chat_id}")],
+        
         # Row 10 (Back)
-
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
     

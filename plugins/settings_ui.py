@@ -535,7 +535,7 @@ async def antispam_settings_ui(client, query):
             InlineKeyboardButton(f"60m{time_chk(3600)}", callback_data=f"as_time#{chat_id}#3600")
         ])
         
-    buttons.append([InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
+    buttons.append([InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 

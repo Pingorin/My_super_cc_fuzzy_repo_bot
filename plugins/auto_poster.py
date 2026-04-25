@@ -9,7 +9,6 @@ from utils import temp
 
 logger = logging.getLogger(__name__)
 
-# Error se bachne ke liye Temporary Memory (DB ki jagah)
 POSTED_MEMORY = [] 
 
 async def get_fresh_or_mega_trending():
@@ -257,4 +256,4 @@ async def start_auto_poster(client):
     await asyncio.sleep(60) 
     while True:
         await post_trending_poster(client)
-        await asyncio.sleep(600) # 10 Mins set hai, isko 43200 (12 hours) karna mat bhoolna final setup me!
+        await asyncio.sleep(43200) # 12 hours

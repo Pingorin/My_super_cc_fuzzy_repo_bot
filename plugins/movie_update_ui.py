@@ -21,7 +21,7 @@ def get_mu_settings(group_settings):
     return group_settings.get('movie_update', default)
 
 # ==============================================================================
-# 🎬 MAIN MENU
+# MAIN MENU
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^mu_main#"))
 async def mu_main_menu(client, query):
@@ -59,7 +59,7 @@ async def mu_main_menu(client, query):
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
 
 # ==============================================================================
-# 📝 SLOTS MENU (Set Post Chats)
+# SLOTS MENU
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^mu_slots#"))
 async def mu_slots_menu(client, query):
@@ -118,7 +118,7 @@ async def mu_clear_slot(client, query):
     await mu_slots_menu(client, query)
 
 # ==============================================================================
-# 🔗 GROUP LINK MENU
+# GROUP LINK MENU
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^mu_group#"))
 async def mu_group_ask(client, query):
@@ -134,7 +134,7 @@ async def mu_group_ask(client, query):
     WAITING_FOR_INPUT[query.from_user.id] = {'action': 'set_group', 'chat_id': int(chat_id), 'msg_id': msg.id}
 
 # ==============================================================================
-# 🔘 FOOTER BUTTONS MENU
+# FOOTER BUTTONS MENU
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^mu_footer#"))
 async def mu_footer_menu(client, query):
@@ -185,7 +185,7 @@ async def mu_clearfooter(client, query):
     await mu_footer_menu(client, query)
 
 # ==============================================================================
-# 📥 MESSAGE LISTENER (Catches ALL inputs)
+# MESSAGE LISTENER
 # ==============================================================================
 @Client.on_message(filters.private & filters.text & ~filters.command(["start", "help"]))
 async def input_listener(client, message):
@@ -195,7 +195,6 @@ async def input_listener(client, message):
     state = WAITING_FOR_INPUT[user_id]
     group_chat_id = state['chat_id']
     
-    # 1. SLOT INPUT
     if state['action'] == 'set_slot':
         channel_id_str = message.text.strip()
         slot = state['slot']
@@ -222,7 +221,6 @@ async def input_listener(client, message):
         btn = [[InlineKeyboardButton("🔙 Back to Slots", callback_data=f"mu_slots#{group_chat_id}")]]
         await wait_msg.edit(f"✅ **Slot {slot} set successfully!**\nChat ID: `{target_channel}`", reply_markup=InlineKeyboardMarkup(btn))
 
-    # 2. GROUP LINK INPUT
     elif state['action'] == 'set_group':
         link = message.text.strip()
         settings = await db.get_group_settings(group_chat_id)
@@ -243,7 +241,6 @@ async def input_listener(client, message):
         btn = [[InlineKeyboardButton("🔙 Back to Menu", callback_data=f"mu_main#{group_chat_id}")]]
         await message.reply(msg_txt, reply_markup=InlineKeyboardMarkup(btn))
 
-    # 3. FOOTER BUTTON INPUT
     elif state['action'] == 'set_footer':
         btn_data = message.text.strip()
         
@@ -269,7 +266,7 @@ async def input_listener(client, message):
         await message.reply(f"✅ Button Added: **{text_part}**", reply_markup=InlineKeyboardMarkup(btn))
 
 # ==============================================================================
-# 🧪 TEST & TOGGLES
+# TEST & TOGGLES
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^mu_test#"))
 async def mu_test_post(client, query):
@@ -286,7 +283,6 @@ async def mu_test_post(client, query):
     success_count = 0
     for channel in active_channels:
         try:
-            # Hum group_chat_id bhej rahe hain taaki poster bot settings fetch kar sake
             await post_trending_poster(client, custom_channel_id=channel, group_chat_id=chat_id) 
             success_count += 1
         except Exception as e:

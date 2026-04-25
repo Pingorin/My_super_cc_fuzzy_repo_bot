@@ -8,9 +8,6 @@ from plugins.auto_poster import post_trending_poster
 
 logger = logging.getLogger(__name__)
 
-# Temporary Memory for taking user inputs
-WAITING_FOR_INPUT = {}
-
 def get_mu_settings(group_settings):
     default = {
         'is_active': True,
@@ -92,6 +89,7 @@ async def mu_slots_menu(client, query):
 @Client.on_callback_query(filters.regex(r"^mu_setslot#"))
 async def mu_ask_slot(client, query):
     _, slot, chat_id = query.data.split("#")
+    chat_id = int(chat_id)
     text = (
         f"**Set Post Chat Slot {slot}**\n\n"
         "Please send the Chat ID where you want to post movie updates.\n\n"
@@ -102,9 +100,45 @@ async def mu_ask_slot(client, query):
         "_Send the ID now in this chat..._"
     )
     btn = [[InlineKeyboardButton("❌ Cancel", callback_data=f"mu_slots#{chat_id}")]]
-    msg = await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
     
-    WAITING_FOR_INPUT[query.from_user.id] = {'action': 'set_slot', 'slot': slot, 'chat_id': int(chat_id), 'msg_id': msg.id}
+    try:
+        # 🔥 FIX: Pyromod ka listen() use kar rahe hain taaki ID direct pakde
+        msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if msg.text:
+            channel_id_str = msg.text.strip()
+            
+            try: 
+                target_channel = int(channel_id_str)
+            except ValueError: 
+                await msg.reply("❌ Invalid ID! Numeric ID bhejein (e.g., `-100123...`).")
+                return await mu_slots_menu(client, query)
+                
+            wait_msg = await msg.reply("⏳ Checking Admin Permissions...")
+            
+            try:
+                member = await client.get_chat_member(target_channel, client.me.id)
+                if not member.privileges or not member.privileges.can_post_messages:
+                    await wait_msg.edit("❌ Bot is admin but lacks 'Post Messages' permission.")
+                    return await mu_slots_menu(client, query)
+            except ChatAdminRequired: 
+                await wait_msg.edit("❌ Error: Mujhe us channel me Admin banao pehle!")
+                return await mu_slots_menu(client, query)
+            except Exception as e: 
+                await wait_msg.edit(f"❌ Error: Channel nahi mila.\n`{e}`")
+                return await mu_slots_menu(client, query)
+
+            settings = await db.get_group_settings(chat_id)
+            mu = get_mu_settings(settings)
+            mu['slots'][str(slot)] = target_channel
+            settings['movie_update'] = mu
+            await db.update_group_settings(chat_id, settings)
+            
+            btn = [[InlineKeyboardButton("🔙 Back to Slots", callback_data=f"mu_slots#{chat_id}")]]
+            await wait_msg.edit(f"✅ **Slot {slot} set successfully!**\nChat ID: `{target_channel}`", reply_markup=InlineKeyboardMarkup(btn))
+            
+    except asyncio.TimeoutError:
+        pass
 
 @Client.on_callback_query(filters.regex(r"^mu_clearslot#"))
 async def mu_clear_slot(client, query):
@@ -122,7 +156,7 @@ async def mu_clear_slot(client, query):
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^mu_group#"))
 async def mu_group_ask(client, query):
-    chat_id = query.data.split("#")[1]
+    chat_id = int(query.data.split("#")[1])
     text = (
         "**🔗 Set Group Link**\n\n"
         "Please send your Group Link.\n"
@@ -130,16 +164,39 @@ async def mu_group_ask(client, query):
         "To remove the link, send `clear` or `0`."
     )
     btn = [[InlineKeyboardButton("❌ Cancel", callback_data=f"mu_main#{chat_id}")]]
-    msg = await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
-    WAITING_FOR_INPUT[query.from_user.id] = {'action': 'set_group', 'chat_id': int(chat_id), 'msg_id': msg.id}
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
+    
+    try:
+        msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if msg.text:
+            link = msg.text.strip()
+            settings = await db.get_group_settings(chat_id)
+            mu = get_mu_settings(settings)
+            
+            if link.lower() in ['0', 'clear', 'none']:
+                mu['group_link'] = None
+                msg_txt = "✅ Group Link removed successfully!"
+            else:
+                if not link.startswith("http"):
+                    await msg.reply("❌ Invalid Link! Link must start with http:// or https://")
+                    return await mu_main_menu(client, query)
+                mu['group_link'] = link
+                msg_txt = f"✅ Group Link saved!\nLink: {link}"
+                
+            settings['movie_update'] = mu
+            await db.update_group_settings(chat_id, settings)
+            btn = [[InlineKeyboardButton("🔙 Back to Menu", callback_data=f"mu_main#{chat_id}")]]
+            await msg.reply(msg_txt, reply_markup=InlineKeyboardMarkup(btn))
+    except asyncio.TimeoutError:
+        pass
 
 # ==============================================================================
 # FOOTER BUTTONS MENU
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^mu_footer#"))
 async def mu_footer_menu(client, query):
-    chat_id = query.data.split("#")[1]
-    settings = await db.get_group_settings(int(chat_id))
+    chat_id = int(query.data.split("#")[1])
+    settings = await db.get_group_settings(chat_id)
     mu = get_mu_settings(settings)
     footers = mu.get('footer', [])
     
@@ -161,7 +218,7 @@ async def mu_footer_menu(client, query):
 
 @Client.on_callback_query(filters.regex(r"^mu_addfooter#"))
 async def mu_addfooter_ask(client, query):
-    chat_id = query.data.split("#")[1]
+    chat_id = int(query.data.split("#")[1])
     text = (
         "**🔘 Add Footer Button**\n\n"
         "Please send the button details in this format:\n"
@@ -170,8 +227,36 @@ async def mu_addfooter_ask(client, query):
         "`Join Channel | https://t.me/filmy_studioo`"
     )
     btn = [[InlineKeyboardButton("❌ Cancel", callback_data=f"mu_footer#{chat_id}")]]
-    msg = await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
-    WAITING_FOR_INPUT[query.from_user.id] = {'action': 'set_footer', 'chat_id': int(chat_id), 'msg_id': msg.id}
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
+    
+    try:
+        msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
+        if msg.text:
+            btn_data = msg.text.strip()
+            
+            if "|" not in btn_data:
+                await msg.reply("❌ Invalid Format!\nPlease use `Name | Link` format.")
+                return await mu_footer_menu(client, query)
+                
+            text_part, url_part = btn_data.split("|", 1)
+            text_part = text_part.strip()
+            url_part = url_part.strip()
+            
+            if not url_part.startswith("http"):
+                await msg.reply("❌ Invalid URL! Must start with http:// or https://")
+                return await mu_footer_menu(client, query)
+                
+            settings = await db.get_group_settings(chat_id)
+            mu = get_mu_settings(settings)
+            
+            mu['footer'].append({'text': text_part, 'url': url_part})
+            settings['movie_update'] = mu
+            await db.update_group_settings(chat_id, settings)
+            
+            btn = [[InlineKeyboardButton("🔙 Back to Footers", callback_data=f"mu_footer#{chat_id}")]]
+            await msg.reply(f"✅ Button Added: **{text_part}**", reply_markup=InlineKeyboardMarkup(btn))
+    except asyncio.TimeoutError:
+        pass
 
 @Client.on_callback_query(filters.regex(r"^mu_clearfooter#"))
 async def mu_clearfooter(client, query):
@@ -183,88 +268,6 @@ async def mu_clearfooter(client, query):
     await db.update_group_settings(chat_id, settings)
     await query.answer("✅ All Footer Buttons Cleared!", show_alert=True)
     await mu_footer_menu(client, query)
-
-# ==============================================================================
-# MESSAGE LISTENER (FIXED 🔥)
-# ==============================================================================
-# 🔥 FIX: Ab ye un messages ko ignore karega jo "/" (commands) se shuru hote hain.
-@Client.on_message(filters.private & filters.text & ~filters.regex(r"^/"))
-async def input_listener(client, message):
-    user_id = message.from_user.id
-    if user_id not in WAITING_FOR_INPUT: return
-        
-    state = WAITING_FOR_INPUT[user_id]
-    group_chat_id = state['chat_id']
-    
-    if state['action'] == 'set_slot':
-        channel_id_str = message.text.strip()
-        slot = state['slot']
-        
-        try: target_channel = int(channel_id_str)
-        except ValueError: return await message.reply("❌ Invalid ID! Numeric ID bhejein (e.g., `-100123...`).")
-            
-        wait_msg = await message.reply("⏳ Checking Admin Permissions...")
-        
-        try:
-            member = await client.get_chat_member(target_channel, client.me.id)
-            if not member.privileges or not member.privileges.can_post_messages:
-                return await wait_msg.edit("❌ Bot is admin but lacks 'Post Messages' permission.")
-        except ChatAdminRequired: return await wait_msg.edit("❌ Error: Mujhe us channel me Admin banao pehle!")
-        except Exception as e: return await wait_msg.edit(f"❌ Error: Channel nahi mila.\n`{e}`")
-
-        settings = await db.get_group_settings(group_chat_id)
-        mu = get_mu_settings(settings)
-        mu['slots'][str(slot)] = target_channel
-        settings['movie_update'] = mu
-        await db.update_group_settings(group_chat_id, settings)
-        
-        del WAITING_FOR_INPUT[user_id]
-        btn = [[InlineKeyboardButton("🔙 Back to Slots", callback_data=f"mu_slots#{group_chat_id}")]]
-        await wait_msg.edit(f"✅ **Slot {slot} set successfully!**\nChat ID: `{target_channel}`", reply_markup=InlineKeyboardMarkup(btn))
-
-    elif state['action'] == 'set_group':
-        link = message.text.strip()
-        settings = await db.get_group_settings(group_chat_id)
-        mu = get_mu_settings(settings)
-        
-        if link.lower() in ['0', 'clear', 'none']:
-            mu['group_link'] = None
-            msg_txt = "✅ Group Link removed successfully!"
-        else:
-            if not link.startswith("http"):
-                return await message.reply("❌ Invalid Link! Link must start with http:// or https://")
-            mu['group_link'] = link
-            msg_txt = f"✅ Group Link saved!\nLink: {link}"
-            
-        settings['movie_update'] = mu
-        await db.update_group_settings(group_chat_id, settings)
-        del WAITING_FOR_INPUT[user_id]
-        btn = [[InlineKeyboardButton("🔙 Back to Menu", callback_data=f"mu_main#{group_chat_id}")]]
-        await message.reply(msg_txt, reply_markup=InlineKeyboardMarkup(btn))
-
-    elif state['action'] == 'set_footer':
-        btn_data = message.text.strip()
-        
-        if "|" not in btn_data:
-            return await message.reply("❌ Invalid Format!\nPlease use `Name | Link` format.")
-            
-        text_part, url_part = btn_data.split("|", 1)
-        text_part = text_part.strip()
-        url_part = url_part.strip()
-        
-        if not url_part.startswith("http"):
-            return await message.reply("❌ Invalid URL! Must start with http:// or https://")
-            
-        settings = await db.get_group_settings(group_chat_id)
-        mu = get_mu_settings(settings)
-        
-        mu['footer'].append({'text': text_part, 'url': url_part})
-        settings['movie_update'] = mu
-        await db.update_group_settings(group_chat_id, settings)
-        
-        del WAITING_FOR_INPUT[user_id]
-        btn = [[InlineKeyboardButton("🔙 Back to Footers", callback_data=f"mu_footer#{group_chat_id}")]]
-        await message.reply(f"✅ Button Added: **{text_part}**", reply_markup=InlineKeyboardMarkup(btn))
 
 # ==============================================================================
 # TEST & TOGGLES

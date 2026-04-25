@@ -60,7 +60,8 @@ async def get_fresh_or_mega_trending():
             
     return None, False
 
-async def post_trending_poster(client):
+# 🔥 NAYA: custom_channel_id aur group_chat_id parameters add kiye hain
+async def post_trending_poster(client, custom_channel_id=None, group_chat_id=None):
     global POSTED_MEMORY
     
     media, is_mega_hit = await get_fresh_or_mega_trending()
@@ -103,34 +104,62 @@ async def post_trending_poster(client):
 
     bot_username = temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot"
     poster_token = getattr(info, 'POSTER_BOT_TOKEN', None)
+    
+    # 🔥 DYNAMIC TARGET CHANNEL 🔥
+    TARGET_CHANNEL = custom_channel_id if custom_channel_id else info.UPDATES_CHANNEL
+    
+    if not TARGET_CHANNEL:
+        print("❌ [Auto-Poster] Koi Target Channel set nahi hai!")
+        return
+
+    # 🔥 DYNAMIC BUTTON BUILDER 🔥
+    buttons = []
+    buttons.append([InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{bot_username}?start=")])
+
+    if group_chat_id:
+        from database.users_chats_db import db
+        settings = await db.get_group_settings(group_chat_id)
+        mu_settings = settings.get('movie_update', {})
+        
+        # Add Group Link
+        if mu_settings.get('group_link'):
+            buttons.append([InlineKeyboardButton("👥 Group", url=mu_settings['group_link'])])
+            
+        # Add Footer Buttons
+        footer_btns = mu_settings.get('footer', [])
+        if footer_btns:
+            f_row = [InlineKeyboardButton(btn['text'], url=btn['url']) for btn in footer_btns]
+            buttons.append(f_row)
 
     try:
         if poster_token:
-            # Dusre bot se bhejna (Raw API)
             api_url = f"https://api.telegram.org/bot{poster_token}/sendPhoto"
+            
+            # Convert Pyrogram InlineKeyboardButton to Raw API format
+            raw_inline_keyboard = []
+            for row in buttons:
+                raw_row = [{"text": btn.text, "url": btn.url} for btn in row]
+                raw_inline_keyboard.append(raw_row)
+
             payload = {
-                "chat_id": info.UPDATES_CHANNEL,
+                "chat_id": TARGET_CHANNEL,
                 "photo": poster_url,
                 "caption": caption_html,
                 "parse_mode": "HTML",
-                "reply_markup": json.dumps({
-                    "inline_keyboard": [[{"text": "📥 Download Now", "url": f"https://t.me/{bot_username}?start="}]]
-                })
+                "reply_markup": json.dumps({"inline_keyboard": raw_inline_keyboard})
             }
             async with aiohttp.ClientSession() as session:
                 await session.post(api_url, json=payload)
-            print(f"🚀 [Auto-Poster] Secondary Bot se channel {info.UPDATES_CHANNEL} me post bhej diya!")
+            print(f"🚀 [Auto-Poster] Secondary Bot se channel {TARGET_CHANNEL} me post bhej diya!")
         else:
-            # Main bot se bhejna
             caption_md = caption_html.replace("<b>", "**").replace("</b>", "**")
-            buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{bot_username}?start=")]]
             await client.send_photo(
-                chat_id=info.UPDATES_CHANNEL, 
+                chat_id=TARGET_CHANNEL, 
                 photo=poster_url, 
                 caption=caption_md, 
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
-            print(f"🚀 [Auto-Poster] Main Bot se channel {info.UPDATES_CHANNEL} me post bhej diya!")
+            print(f"🚀 [Auto-Poster] Main Bot se channel {TARGET_CHANNEL} me post bhej diya!")
             
         if media_id not in POSTED_MEMORY: POSTED_MEMORY.append(media_id)
         else:
@@ -156,7 +185,6 @@ async def force_test_post(client, message):
     except Exception as e:
         await m.edit(f"❌ **Error:**\n`{e}`")
 
-# 🔥 NAYA: MANUAL POST BY NAME
 @Client.on_message(filters.command("post") & filters.user(info.ADMINS))
 async def manual_post_movie(client, message):
     if len(message.command) < 2:
@@ -212,12 +240,16 @@ async def manual_post_movie(client, message):
 
     bot_username = temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot"
     poster_token = getattr(info, 'POSTER_BOT_TOKEN', None)
-    
+    TARGET_CHANNEL = getattr(info, 'UPDATES_CHANNEL', None)
+
+    if not TARGET_CHANNEL:
+        return await wait_msg.edit("❌ **Error:** info.py me UPDATES_CHANNEL set nahi hai.")
+
     try:
         if poster_token:
             api_url = f"https://api.telegram.org/bot{poster_token}/sendPhoto"
             payload = {
-                "chat_id": info.UPDATES_CHANNEL,
+                "chat_id": TARGET_CHANNEL,
                 "photo": poster_url,
                 "caption": caption_html,
                 "parse_mode": "HTML",
@@ -230,7 +262,7 @@ async def manual_post_movie(client, message):
         else:
             caption_md = caption_html.replace("<b>", "**").replace("</b>", "**")
             buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{bot_username}?start=")]]
-            await client.send_photo(chat_id=info.UPDATES_CHANNEL, photo=poster_url, caption=caption_md, reply_markup=InlineKeyboardMarkup(buttons))
+            await client.send_photo(chat_id=TARGET_CHANNEL, photo=poster_url, caption=caption_md, reply_markup=InlineKeyboardMarkup(buttons))
             
         await wait_msg.edit(f"✅ **SUCCESS:** '{title}' ka poster channel me bhej diya gaya hai!")
     except Exception as e:

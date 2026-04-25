@@ -8,7 +8,6 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
 from info import ADMINS
 
-# --- HELPER: CHECK SHORTENER ---
 async def check_shortener_link(domain, api):
     test_url = "https://google.com"
     api_url = f"https://{domain}/api?api={api}&url={test_url}"
@@ -22,7 +21,6 @@ async def check_shortener_link(domain, api):
     except: pass
     return False
 
-# --- HELPER: TIME FORMATTER ---
 def seconds_to_str(seconds):
     if seconds == 0: return "0s"
     if seconds < 60: return f"{seconds}s"
@@ -30,21 +28,18 @@ def seconds_to_str(seconds):
     if seconds < 86400: return f"{int(seconds/3600)}hr"
     return f"{int(seconds/86400)}days"
 
-# --- /settings COMMAND (PM ONLY WITH SMART REDIRECT & ULTRA FAST DB CACHE) ---
 @Client.on_message(filters.command("settings"))
 async def settings_command(client, message):
     user_id = message.from_user.id
     
-    # 1. AGAR GROUP MEIN USE KIYA TOH PM MEIN BHEJ DO
     if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         try:
             member = await client.get_chat_member(message.chat.id, user_id)
             if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR] and user_id not in ADMINS:
-                return # Normal users ko ignore karega
+                return 
         except:
             return
         
-        # Chupchap DB me Admins ko save kar lo taaki PM me "No Group Found" na aaye
         try:
             admin_ids = []
             async for admin in client.get_chat_members(message.chat.id, filter=enums.ChatMembersFilter.ADMINISTRATORS):
@@ -61,12 +56,10 @@ async def settings_command(client, message):
             reply_markup=InlineKeyboardMarkup(btn)
         )
 
-    # 2. AGAR PM MEIN USE KIYA (Ultra-Fast DB Query - NO LIVE CHECK)
     elif message.chat.type == enums.ChatType.PRIVATE:
         user_groups = []
         seen_chats = set()
         
-        # Sirf wahi group check karega jisme aap Admin hain
         db_query = {"admins": user_id}
         
         async for group in db.groups.find(db_query):
@@ -75,10 +68,8 @@ async def settings_command(client, message):
             if chat_id in seen_chats:
                 continue
                 
-            # ✅ INSTANT FAST: Seedha Database se title uthao, API call mat karo
             title = group.get('title')
             
-            # Agar title missing hai, ya ID jaisa dikhta hai (channel error prevention), toh list me mat dikhao
             if not title or str(title) == str(chat_id) or str(title).startswith("-100"):
                 continue 
                 
@@ -94,9 +85,6 @@ async def settings_command(client, message):
         
         await message.reply_text("⚙️ **Select your Group:**", reply_markup=InlineKeyboardMarkup(buttons))
 
-# ==============================================================================
-# ⚙️ MAIN SETTINGS MENU
-# ==============================================================================
 @Client.on_callback_query(filters.regex(r"^set_main#"))
 async def main_settings_menu(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -104,50 +92,36 @@ async def main_settings_menu(client, query):
     except: title = str(chat_id)
 
     buttons = [
-        # Row 1
         [InlineKeyboardButton("💰 Earning method", callback_data=f"set_earn#{chat_id}"),
          InlineKeyboardButton("📢 Force Subscribe", callback_data=f"fsub_menu#{chat_id}")],
         
-        # Row 2 (Result Mode & Per Page)
         [InlineKeyboardButton("📜 Result mode", callback_data=f"set_res_mode#{chat_id}"),
          InlineKeyboardButton("📄 Result per page", callback_data=f"set_page_limit#{chat_id}")],
         
-        # Row 3 (Auto Features)
         [InlineKeyboardButton("🗑️ Auto-Delete", callback_data=f"autodel_menu#{chat_id}"),
          InlineKeyboardButton("👍 Auto Reaction", callback_data=f"autoreact_ui#{chat_id}")],
 
-        # Row 4 (Welcome & Anti-Spam)
         [InlineKeyboardButton("👋 Welcome Settings", callback_data=f"welcome_ui#{chat_id}"),
          InlineKeyboardButton("🛡️ Anti-Spam", callback_data=f"antispam_ui#{chat_id}")],
         
-        # Row 5 (Auto Mention & Auto Post)
         [InlineKeyboardButton("📢 Auto Post", callback_data=f"autopost_ui#{chat_id}"),
          InlineKeyboardButton("📣 Auto Mention", callback_data=f"automention_ui#{chat_id}")],
         
-        # Row 6 (Admin Access & Daily Stats)
         [InlineKeyboardButton("👑 Admin Free Access", callback_data=f"adm_access_ui#{chat_id}"),
          InlineKeyboardButton("📊 Daily Stats", callback_data=f"daily_stats#{chat_id}#today")],
          
-        # Row 7 (Reset & Other URLs)
         [InlineKeyboardButton("🧨 Reset Settings", callback_data=f"reset_grp_ui#{chat_id}"),
          InlineKeyboardButton("🔗 Other URLs", callback_data=f"other_urls_ui#{chat_id}")],
          
-        # Row 8: REFERRAL & REQUEST
         [InlineKeyboardButton("💎 Free Premium (Referral)", callback_data=f"ref_sys_menu#{chat_id}"),
          InlineKeyboardButton("💡 Request Features", callback_data=f"req_feature#{chat_id}")],
 
-        # 🔥 Row 9 (NEW): MOVIE UPDATE
         [InlineKeyboardButton("🎬 Set Movie Update", callback_data=f"mu_main#{chat_id}")],
 
-        # Row 10 (Back)
         [InlineKeyboardButton("🔙 Back to Groups", callback_data="set_back_home")]
     ]
     
     await query.message.edit_text(f"⚙️ **Settings for:** {title}", reply_markup=InlineKeyboardMarkup(buttons))
-
-# ==============================================================================
-# 📜 RESULT MODE SETTINGS
-# ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^set_res_mode#"))
 async def result_mode_settings(client, query):
@@ -193,10 +167,6 @@ async def set_result_mode_handler(client, query):
     await query.answer(f"Updated to {mode.capitalize()} Mode!")
     await result_mode_settings(client, query)
 
-# ==============================================================================
-# 📄 RESULT PER PAGE SETTINGS
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^set_page_limit#"))
 async def page_limit_settings(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -234,10 +204,6 @@ async def save_page_limit(client, query):
     query.data = f"set_page_limit#{chat_id}"
     await page_limit_settings(client, query)
 
-# ==============================================================================
-# 👍 AUTO REACTION UI
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^autoreact_ui#"))
 async def auto_reaction_ui(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -273,10 +239,6 @@ async def set_reaction_handler(client, query):
     
     await auto_reaction_ui(client, query)
 
-# ==============================================================================
-# 🗑️ AUTO DELETE MENU
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^autodel_menu#"))
 async def auto_delete_menu(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -294,16 +256,12 @@ async def auto_delete_menu(client, query):
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-# ==============================================================================
-# 🤖 BOT MESSAGE AUTO-DELETE UI
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^bot_del_ui#"))
 async def bot_auto_delete_ui(client, query):
     chat_id = int(query.data.split("#")[1])
     group_data = await db.get_group_settings(chat_id)
     
-    del_time = group_data.get('auto_delete_time', 300) # Default 5 mins
+    del_time = group_data.get('auto_delete_time', 300) 
     thanks_msg = group_data.get('delete_thanks_msg', True)
     
     def t_btn(label, seconds):
@@ -353,10 +311,6 @@ async def toggle_thanks_msg(client, query):
     await db.update_group_settings(chat_id, {'delete_thanks_msg': not curr})
     await bot_auto_delete_ui(client, query)
 
-# ==============================================================================
-# 👤 USER MESSAGE AUTO-DELETE UI
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^usr_del_ui#"))
 async def user_auto_delete_ui(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -392,23 +346,16 @@ async def set_user_delete_handler(client, query):
     
     await user_auto_delete_ui(client, query)
 
-# ==============================================================================
-# 👋 WELCOME SETTINGS MENU
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^welcome_ui#"))
 async def welcome_settings_ui(client, query):
     chat_id = int(query.data.split("#")[1])
     group_data = await db.get_group_settings(chat_id)
     
-    # Fetch Settings
     is_enabled = group_data.get('welcome_enabled', True)
-    mode = group_data.get('welcome_mode', 'default') # 'default' or 'custom'
+    mode = group_data.get('welcome_mode', 'default') 
     
-    # Toggle Texts
     status_icon = "✅ON" if is_enabled else "❌OFF"
     
-    # Checkmark Logic
     def chk(val): return "✅" if mode == val else ""
     
     text = (
@@ -418,15 +365,11 @@ async def welcome_settings_ui(client, query):
     )
     
     buttons = [
-        # Toggle On/Off
         [InlineKeyboardButton(f"Welcome Message: {status_icon}", callback_data=f"wel_toggle#{chat_id}")],
-        
-        # Mode Selection
         [InlineKeyboardButton(f"Default (Image){chk('default')}", callback_data=f"wel_mode#{chat_id}#default"),
          InlineKeyboardButton(f"Custom{chk('custom')}", callback_data=f"wel_mode#{chat_id}#custom")],
     ]
     
-    # Show "Configure Custom" only if Custom is selected
     if mode == 'custom':
         buttons.append([InlineKeyboardButton("🎨 Configure Custom Welcome", callback_data=f"wel_cust_conf#{chat_id}")])
         
@@ -434,7 +377,6 @@ async def welcome_settings_ui(client, query):
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
 
-# Toggle Handler
 @Client.on_callback_query(filters.regex(r"^wel_toggle#"))
 async def welcome_toggle_handler(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -443,18 +385,12 @@ async def welcome_toggle_handler(client, query):
     await db.update_group_settings(chat_id, {'welcome_enabled': not curr})
     await welcome_settings_ui(client, query)
 
-# Mode Handler
 @Client.on_callback_query(filters.regex(r"^wel_mode#"))
 async def welcome_mode_handler(client, query):
     _, chat_id, mode = query.data.split("#")
     chat_id = int(chat_id)
     await db.update_group_settings(chat_id, {'welcome_mode': mode})
     await welcome_settings_ui(client, query)
-
-
-# ==============================================================================
-# 🎨 CONFIGURE CUSTOM WELCOME
-# ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^wel_cust_conf#"))
 async def custom_welcome_config(client, query):
@@ -464,18 +400,12 @@ async def custom_welcome_config(client, query):
     custom_text = group_data.get('custom_welcome_text')
     custom_photo = group_data.get('custom_welcome_photo')
     
-    # Generate Preview Text
     if not custom_text and not custom_photo:
         preview = "_Nothing set. Custom welcome is currently inactive._"
     else:
-        # Show text preview
         txt_prev = custom_text if custom_text else "_No text set._"
-        # Format a dummy preview
         txt_prev = txt_prev.replace("{mention}", "User").replace("{username}", "@User").replace("{chat_name}", "Group")
-        
-        # Show photo status
         img_prev = "🖼️ _A custom photo is set._" if custom_photo else "🖼️ _No custom photo is set._"
-        
         preview = f"{txt_prev}\n\n{img_prev}"
         
     text = (
@@ -494,11 +424,9 @@ async def custom_welcome_config(client, query):
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-# --- SET TEXT HANDLER ---
 @Client.on_callback_query(filters.regex(r"^wel_set_txt#"))
 async def set_welcome_text(client, query):
     chat_id = int(query.data.split("#")[1])
-    
     cancel_btn = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"wel_cust_conf#{chat_id}")]]
     
     await query.message.edit_text(
@@ -517,14 +445,13 @@ async def set_welcome_text(client, query):
             await db.update_group_settings(chat_id, {'custom_welcome_text': msg.text})
             await msg.reply("✅ **Custom welcome text has been set.**")
             await asyncio.sleep(1)
-            await custom_welcome_config(client, query) # Return to menu
+            await custom_welcome_config(client, query) 
         else:
             await msg.reply("❌ Text only.")
             await custom_welcome_config(client, query)
     except Exception as e:
-        pass # Timeout or error
+        pass 
 
-# --- SET PHOTO HANDLER ---
 @Client.on_callback_query(filters.regex(r"^wel_set_img#"))
 async def set_welcome_photo(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -533,7 +460,6 @@ async def set_welcome_photo(client, query):
     
     cancel_btn = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"wel_cust_conf#{chat_id}")]]
     
-    # Logic to show current photo if exists
     if current_photo:
         await query.message.reply_photo(
             photo=current_photo,
@@ -553,14 +479,13 @@ async def set_welcome_photo(client, query):
             await db.update_group_settings(chat_id, {'custom_welcome_photo': file_id})
             await msg.reply("✅ **Custom welcome photo has been saved.**")
             await asyncio.sleep(1)
-            await custom_welcome_config(client, query) # Return to menu
+            await custom_welcome_config(client, query) 
         else:
             await msg.reply("❌ Photo only.")
             await custom_welcome_config(client, query)
     except Exception as e:
         pass 
 
-# --- RESET HANDLER ---
 @Client.on_callback_query(filters.regex(r"^wel_reset#"))
 async def reset_welcome(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -573,20 +498,15 @@ async def reset_welcome(client, query):
     await query.answer("🔄 Custom Welcome Reset!", show_alert=True)
     await custom_welcome_config(client, query)
 
-# ==============================================================================
-# 🛡️ ANTI-SPAM SETTINGS UI
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^antispam_ui#"))
 async def antispam_settings_ui(client, query):
     chat_id = int(query.data.split("#")[1])
     group_data = await db.get_group_settings(chat_id)
     
     is_enabled = group_data.get('antispam_enabled', False)
-    action = group_data.get('antispam_action', 'mute') # 'mute' = Warn/Mute, 'kick' = Kick
+    action = group_data.get('antispam_action', 'mute') 
     mute_dur = group_data.get('mute_duration', 600)
     
-    # Text Formatters
     status_icon = "✅ON" if is_enabled else "❌OFF"
     
     def act_chk(val): return "✅" if action == val else ""
@@ -597,21 +517,16 @@ async def antispam_settings_ui(client, query):
         "Automatically delete messages containing links or usernames from non-admin users."
     )
     
-    # Conditional Text for Mute Duration
     if action == 'mute':
         minutes = int(mute_dur / 60)
         text += f"\n\n**Mute Duration:** {minutes} minutes"
 
     buttons = [
-        # Toggle
         [InlineKeyboardButton(f"Anti-Spam: {status_icon}", callback_data=f"as_toggle#{chat_id}")],
-        
-        # Action Mode
         [InlineKeyboardButton(f"Action: Warn{act_chk('mute')}", callback_data=f"as_action#{chat_id}#mute"),
          InlineKeyboardButton(f"Action: Kick{act_chk('kick')}", callback_data=f"as_action#{chat_id}#kick")]
     ]
     
-    # Show Time Options only if "Warn" (Mute) is selected
     if action == 'mute':
         buttons.append([
             InlineKeyboardButton(f"10m{time_chk(600)}", callback_data=f"as_time#{chat_id}#600"),
@@ -624,7 +539,6 @@ async def antispam_settings_ui(client, query):
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-# Handlers
 @Client.on_callback_query(filters.regex(r"^as_toggle#"))
 async def as_toggle(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -644,10 +558,6 @@ async def as_time(client, query):
     await db.update_group_settings(int(chat_id), {'mute_duration': int(val)})
     await antispam_settings_ui(client, query)
 
-# ==============================================================================
-# 📣 AUTO MENTION SETTINGS UI
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^automention_ui#"))
 async def auto_mention_settings_ui(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -660,7 +570,6 @@ async def auto_mention_settings_ui(client, query):
     btn_text = "Disable" if is_enabled else "Enable"
     toggle_val = "off" if is_enabled else "on"
     
-    # Time Check
     def t_chk(val): return "✅" if interval == val and is_enabled else ""
 
     text = (
@@ -672,15 +581,11 @@ async def auto_mention_settings_ui(client, query):
     )
     
     buttons = [
-        # Toggle
         [InlineKeyboardButton(btn_text, callback_data=f"am_toggle#{chat_id}#{toggle_val}")],
-        
-        # Time Options
         [InlineKeyboardButton(f"5min{t_chk(300)}", callback_data=f"am_time#{chat_id}#300"),
          InlineKeyboardButton(f"10min{t_chk(600)}", callback_data=f"am_time#{chat_id}#600"),
          InlineKeyboardButton(f"30min{t_chk(1800)}", callback_data=f"am_time#{chat_id}#1800"),
          InlineKeyboardButton(f"60min{t_chk(3600)}", callback_data=f"am_time#{chat_id}#3600")],
-         
         [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
     ]
     
@@ -699,28 +604,21 @@ async def am_time_handler(client, query):
     await db.update_group_settings(int(chat_id), {'mention_interval': int(val)})
     await auto_mention_settings_ui(client, query)
 
-# ==============================================================================
-# 📰 AUTO POST SETTINGS UI (UPDATED WITH MULTI-MEDIA)
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^autopost_ui#"))
 async def auto_post_settings_ui(client, query):
     chat_id = int(query.data.split("#")[1])
     group_data = await db.get_group_settings(chat_id)
     
-    # Fetch Data
     is_enabled = group_data.get('autopost_enabled', False)
     interval = group_data.get('autopost_interval', 1800)
     del_time = group_data.get('autopost_del_time', 60)
     ad_text = group_data.get('autopost_text')
     
-    # Check Media
     ad_media = group_data.get('autopost_media_id') or group_data.get('autopost_image')
     media_type = group_data.get('autopost_media_type', 'photo' if group_data.get('autopost_image') else 'none')
     
     buttons_data = group_data.get('autopost_buttons', {})
     
-    # Display Logic
     status_icon = "✅ Enabled" if is_enabled else "❌ Disabled"
     btn_text = "Disable" if is_enabled else "Enable"
     toggle_val = "off" if is_enabled else "on"
@@ -746,32 +644,21 @@ async def auto_post_settings_ui(client, query):
     )
     
     buttons = [
-        # Toggle
         [InlineKeyboardButton(btn_text, callback_data=f"ap_toggle#{chat_id}#{toggle_val}")],
-        
-        # Content Management
         [InlineKeyboardButton("Set Text", callback_data=f"ap_set_txt#{chat_id}"),
          InlineKeyboardButton("Set Media", callback_data=f"ap_set_media#{chat_id}")],
-         
         [InlineKeyboardButton(f"⏱ Set Ad Delete Time: {del_str}", callback_data=f"ap_del_menu#{chat_id}")],
-
         [InlineKeyboardButton("Manage Buttons", callback_data=f"ap_btn_menu#{chat_id}"),
          InlineKeyboardButton("Reset Ad Content", callback_data=f"ap_reset#{chat_id}")],
-        
-        # Time Intervals
         [InlineKeyboardButton(f"5min{t_chk(300)}", callback_data=f"ap_time#{chat_id}#300"),
          InlineKeyboardButton(f"10min{t_chk(600)}", callback_data=f"ap_time#{chat_id}#600"),
          InlineKeyboardButton(f"30min{t_chk(1800)}", callback_data=f"ap_time#{chat_id}#1800"),
          InlineKeyboardButton(f"60min{t_chk(3600)}", callback_data=f"ap_time#{chat_id}#3600")],
-         
         [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
     ]
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
 
-# ==============================================================================
-# ⏱ AD DELETE TIME PICKER
-# ==============================================================================
 @Client.on_callback_query(filters.regex(r"^ap_del_menu#"))
 async def ap_delete_time_picker(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -779,20 +666,13 @@ async def ap_delete_time_picker(client, query):
     text = "⏱ **Select Ad Auto-Delete Duration:**\n\nBheja gaya ad kitni der baad delete hona chahiye?"
     
     buttons = [
-        # Row 1: 1, 2, 3 Minutes
         [InlineKeyboardButton("1 Min", callback_data=f"set_apdel#{chat_id}#60"),
          InlineKeyboardButton("2 Min", callback_data=f"set_apdel#{chat_id}#120"),
          InlineKeyboardButton("3 Min", callback_data=f"set_apdel#{chat_id}#180")],
-         
-        # Row 2: 5, 10 Minutes
         [InlineKeyboardButton("5 Min", callback_data=f"set_apdel#{chat_id}#300"),
          InlineKeyboardButton("10 Min", callback_data=f"set_apdel#{chat_id}#600")],
-         
-        # Row 3: 15, 30 Minutes
         [InlineKeyboardButton("15 Min", callback_data=f"set_apdel#{chat_id}#900"),
          InlineKeyboardButton("30 Min", callback_data=f"set_apdel#{chat_id}#1800")],
-         
-        # Row 4: Never Delete & Back
         [InlineKeyboardButton("❌ Never Delete", callback_data=f"set_apdel#{chat_id}#0")],
         [InlineKeyboardButton("🔙 Back", callback_data=f"autopost_ui#{chat_id}")]
     ]
@@ -805,12 +685,10 @@ async def save_ap_delete_time(client, query):
     await query.answer("✅ Ad Delete Time Updated!")
     await auto_post_settings_ui(client, query)
 
-# --- TOGGLE & TIME HANDLERS ---
 @Client.on_callback_query(filters.regex(r"^ap_toggle#"))
 async def ap_toggle_handler(client, query):
     _, chat_id, action = query.data.split("#")
     chat_id = int(chat_id)
-    # Check if content exists before enabling
     if action == "on":
         g_data = await db.get_group_settings(chat_id)
         if not g_data.get('autopost_text') and not g_data.get('autopost_media_id') and not g_data.get('autopost_image'):
@@ -829,7 +707,6 @@ async def ap_time_handler(client, query):
 async def ap_reset_handler(client, query):
     chat_id = int(query.data.split("#")[1])
     
-    # Nayi Fields ko bhi reset karna hoga
     await db.groups.update_one(
         {'id': chat_id},
         {'$set': {
@@ -844,10 +721,6 @@ async def ap_reset_handler(client, query):
     
     await query.answer("🔄 Ad Content Reset!", show_alert=True)
     await auto_post_settings_ui(client, query)
-
-# ==============================================================================
-# 📝 CONTENT SETTERS (TEXT & MEDIA)
-# ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^ap_set_txt#"))
 async def ap_set_text(client, query):
@@ -916,11 +789,6 @@ async def ap_set_media(client, query):
             await auto_post_settings_ui(client, query)
     except: pass
 
-
-# ==============================================================================
-# 🎛️ MANAGE BUTTONS UI
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^ap_btn_menu#"))
 async def ap_buttons_menu(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -955,16 +823,13 @@ async def ap_set_button_step1(client, query):
     chat_id = int(chat_id)
     cancel_btn = [[InlineKeyboardButton("🔙 Cancel", callback_data=f"ap_btn_menu#{chat_id}")]]
     
-    # Step 1: Name
     await query.message.edit_text(f"📝 **Send button name for Slot {slot}**", reply_markup=InlineKeyboardMarkup(cancel_btn))
     
     try:
-        # Listen for Name
         name_msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
         if not name_msg.text: return await query.message.edit_text("❌ Text only.", reply_markup=InlineKeyboardMarkup(cancel_btn))
         btn_name = name_msg.text
         
-        # Step 2: URL
         await query.message.edit_text(
             f"✅ Button text set to **{btn_name}**.\n\nNow, please send the **Full URL** for this button.",
             reply_markup=InlineKeyboardMarkup(cancel_btn)
@@ -974,7 +839,6 @@ async def ap_set_button_step1(client, query):
         if not url_msg.text: return await query.message.edit_text("❌ Text only.", reply_markup=InlineKeyboardMarkup(cancel_btn))
         btn_url = url_msg.text
         
-        # Save
         await db.set_autopost_button(chat_id, slot, btn_name, btn_url)
         await query.message.edit_text(f"✅ **Button for Slot {slot} has been saved.**")
         await asyncio.sleep(1)
@@ -989,10 +853,6 @@ async def ap_delete_button(client, query):
     await db.remove_autopost_button(int(chat_id), slot)
     await ap_buttons_menu(client, query)
 
-# ==============================================================================
-# 👑 ADMIN FREE ACCESS UI
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^adm_access_ui#"))
 async def admin_access_ui(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -1000,7 +860,6 @@ async def admin_access_ui(client, query):
     
     is_enabled = group_data.get('admin_free_access', False)
     
-    # 1. Get Real-Time Member Count
     try:
         count = await client.get_chat_members_count(chat_id)
     except Exception as e:
@@ -1008,10 +867,8 @@ async def admin_access_ui(client, query):
         
     REQ_COUNT = 100
     
-    # 2. Determine Status Text
     status_icon = "✅ Enable" if is_enabled else "❌ Disabled"
     
-    # 3. Determine Requirement Text
     if count >= REQ_COUNT:
         req_text = f"✅ Group must have over {REQ_COUNT} members (Currently: {count})."
         can_enable = True
@@ -1030,14 +887,12 @@ async def admin_access_ui(client, query):
     
     buttons = []
     
-    # 4. Button Logic
     if can_enable:
         if is_enabled:
             buttons.append([InlineKeyboardButton("Disable Admin Access", callback_data=f"adm_acc_toggle#{chat_id}#off")])
         else:
             buttons.append([InlineKeyboardButton("Enable Admin Access", callback_data=f"adm_acc_toggle#{chat_id}#on")])
     else:
-        # If requirements not met, show Re-check
         buttons.append([InlineKeyboardButton("🔄 Re-check Requirements", callback_data=f"adm_access_ui#{chat_id}")])
 
     buttons.append([InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
@@ -1049,7 +904,6 @@ async def admin_access_toggle(client, query):
     _, chat_id, action = query.data.split("#")
     chat_id = int(chat_id)
     
-    # Double Check Count (Security)
     try: count = await client.get_chat_members_count(chat_id)
     except: count = 0
     
@@ -1061,16 +915,11 @@ async def admin_access_toggle(client, query):
     
     await admin_access_ui(client, query)
 
-# ==============================================================================
-# 📊 DAILY STATS UI (LIVE DASHBOARD IN SETTINGS)
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^daily_stats#"))
 async def daily_stats_ui(client, query):
     _, chat_id, date_param = query.data.split("#")
     chat_id = int(chat_id)
     
-    # 1. Determine Date (IST timezone)
     tz = pytz.timezone('Asia/Kolkata')
     today = datetime.datetime.now(tz)
     
@@ -1085,19 +934,17 @@ async def daily_stats_ui(client, query):
     if date_str == today.strftime("%Y-%m-%d"): 
         display_date = "Today (Live 🟢)"
 
-    # 2. Fetch Data (Consistent with Daily_reporter)
     try:
         stats = await db.get_group_stats_by_date(chat_id, date_str)
     except:
         stats = None
         
     if not stats: 
-        stats = {} # Crash preventer if no searches happened today
+        stats = {} 
 
     group_settings = await db.get_group_settings(chat_id)
     notify_status = "✅ ON" if group_settings.get('daily_stats_notify', True) else "❌ OFF"
     
-    # 3. Extract Values
     req = stats.get('req', 0)
     suc = stats.get('suc', 0)
     failed = req - suc if req > suc else 0
@@ -1105,10 +952,8 @@ async def daily_stats_ui(client, query):
     spam_k = stats.get('spam_k', 0)
     refs = stats.get('referrals', 0)
     
-    # Ratios
     search_ratio = round((suc / req * 100), 2) if req > 0 else 0.0
 
-    # 4. Extract & Format Shortener Stats
     shortener_data = stats.get('shorteners', {})
     shortener_text = ""
     
@@ -1130,7 +975,6 @@ async def daily_stats_ui(client, query):
                 f"    └ Failed: `{failed_link}` ({f_ratio}%)\n\n"
             )
 
-    # 5. Build Text (Similar to Daily Reporter)
     text = (
         f"📊 **Analytics Dashboard**\n\n"
         f"📅 **Date:** {display_date}\n\n"
@@ -1146,11 +990,9 @@ async def daily_stats_ui(client, query):
         f"{shortener_text}"
     )
 
-    # 6. Build Buttons (Navigation)
     buttons = []
     nav_row = []
     
-    # Prev Day (Limit to 10 days back)
     prev_date = target_date - datetime.timedelta(days=1)
     limit_date = today - datetime.timedelta(days=10)
     
@@ -1159,14 +1001,12 @@ async def daily_stats_ui(client, query):
     
     nav_row.append(InlineKeyboardButton("🔄 Refresh", callback_data=f"daily_stats#{chat_id}#{date_str}"))
 
-    # Next Day (Only if not today)
     next_date = target_date + datetime.timedelta(days=1)
     if next_date <= today:
         nav_row.append(InlineKeyboardButton("Next Day ➡️", callback_data=f"daily_stats#{chat_id}#{next_date.strftime('%Y-%m-%d')}"))
 
     buttons.append(nav_row)
     
-    # Toggle Notify & Back
     buttons.append([InlineKeyboardButton(f"Daily Auto-Report: {notify_status}", callback_data=f"ds_notify#{chat_id}#{date_str}")])
     buttons.append([InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
 
@@ -1180,17 +1020,11 @@ async def daily_stats_notify_toggle(client, query):
     curr = group_settings.get('daily_stats_notify', True)
     
     await db.update_group_settings(chat_id, {'daily_stats_notify': not curr})
-    # Refresh View
     query.data = f"daily_stats#{chat_id}#{current_view_date}"
     await daily_stats_ui(client, query)
 
-# ==============================================================================
-# 📊 ADMIN FULL REPORT PAGINATION
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^admin_report#"))
 async def admin_full_report_nav(client, query):
-    # data format: admin_report#{date_str}#{page_index}
     parts = query.data.split("#")
     date_str = parts[1]
     page = int(parts[2])
@@ -1204,10 +1038,8 @@ async def admin_full_report_nav(client, query):
     if page >= total_groups: page = 0
     if page < 0: page = total_groups - 1
     
-    # Get specific group data
     data = all_groups[page]
     
-    # Build Display
     req = data.get('req', 0)
     suc = data.get('suc', 0)
     failed = req - suc
@@ -1217,7 +1049,6 @@ async def admin_full_report_nav(client, query):
     link_ver = data.get('link_ver', 0)
     l_ratio = round((link_ver / link_gen * 100), 2) if link_gen > 0 else 0.0
 
-    # Extract & Format Shortener Stats for Full Report
     shortener_data = data.get('shorteners', {})
     shortener_text = ""
     
@@ -1258,10 +1089,6 @@ async def admin_full_report_nav(client, query):
     buttons.append([InlineKeyboardButton("❌ Close", callback_data="close_data")])
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
-
-# ==============================================================================
-# 🔥 FSUB SELECTION MENU
-# ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^fsub_menu#"))
 async def fsub_configure_menu(client, query):
@@ -1364,10 +1191,6 @@ async def normal_fsub_menu(client, query):
 
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-# ==============================================================================
-# ✍️ SET FSUB HANDLER
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^set_fsub#"))
 async def set_fsub_input(client, query):
     _, chat_id, slot = query.data.split("#")
@@ -1441,10 +1264,6 @@ async def set_fsub_input(client, query):
         if slot in ['1', '2', '4']: await request_fsub_menu(client, query)
         else: await normal_fsub_menu(client, query)
 
-# ==============================================================================
-# 🗑️ CLEAR & REMOVE HANDLERS
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^clr_fsub#"))
 async def clear_single_fsub(client, query):
     _, chat_id, slot = query.data.split("#")
@@ -1470,11 +1289,6 @@ async def remove_norm_all(client, query):
     await db.remove_fsub_channel(chat_id, '5')
     await query.answer("All Normal Fsub Channels Removed!", show_alert=True)
     await normal_fsub_menu(client, query)
-
-
-# ==============================================================================
-# 💰 EARNING & SHORTENER SETTINGS
-# ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^set_earn#"))
 async def earning_settings(client, query):
@@ -1695,10 +1509,6 @@ async def toggle_act(client, query):
     await db.update_group_settings(int(chat_id), {'is_shortlink_active': (action == "on")})
     await disable_menu(client, query)
 
-# ==============================================================================
-# 🧨 RESET SETTINGS UI
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^reset_grp_ui#"))
 async def reset_confirm_ui(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -1720,36 +1530,27 @@ async def reset_confirm_ui(client, query):
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-
 @Client.on_callback_query(filters.regex(r"^reset_grp_now#"))
 async def reset_group_now(client, query):
     chat_id = int(query.data.split("#")[1])
     
-    # 1. Perform Reset (Reset Settings Only, DO NOT Delete Group)
     await db.reset_group_settings(chat_id)
     
-    # 2. Show Success Message
     text = (
         "✅ **Settings Reset Complete!**\n\n"
         "All settings (Shorteners, Fsub, Welcome, etc.) have been restored to **Default**.\n"
         "The bot is still connected to the group."
     )
     
-    # 3. Return to Main Settings
     btn = [[InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]]
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
-
-# ==============================================================================
-# 🔗 OTHER URLS & BUTTON SETTINGS UI
-# ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^other_urls_ui#"))
 async def other_urls_ui(client, query):
     chat_id = int(query.data.split("#")[1])
     group_data = await db.get_group_settings(chat_id)
     
-    # Check Statuses
     cap_url = "Set" if group_data.get('caption_url') else "Not Set"
     cap_btn = "Set" if (group_data.get('caption_btn_text') and group_data.get('caption_btn_url')) else "Not Set"
     howto = "Set" if group_data.get('howto_url') else "Not Set"
@@ -1773,11 +1574,6 @@ async def other_urls_ui(client, query):
     ]
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
-
-
-# ==============================================================================
-# 1. CAPTION URL SETTER
-# ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^set_cap_url#"))
 async def set_caption_url_handler(client, query):
@@ -1812,11 +1608,6 @@ async def set_caption_url_handler(client, query):
             await other_urls_ui(client, query)
     except: pass
 
-
-# ==============================================================================
-# 2. CAPTION BUTTON SETTINGS (SUB-MENU)
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^cap_btn_ui#"))
 async def caption_btn_ui(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -1849,7 +1640,6 @@ async def caption_btn_ui(client, query):
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
 
-# Set CB Text
 @Client.on_callback_query(filters.regex(r"^set_cb_txt#"))
 async def set_cap_btn_text(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -1866,7 +1656,6 @@ async def set_cap_btn_text(client, query):
             await caption_btn_ui(client, query)
     except: pass
 
-# Set CB URL
 @Client.on_callback_query(filters.regex(r"^set_cb_url#"))
 async def set_cap_btn_url(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -1886,18 +1675,12 @@ async def set_cap_btn_url(client, query):
             await caption_btn_ui(client, query)
     except: pass
 
-# Reset CB
 @Client.on_callback_query(filters.regex(r"^reset_cb#"))
 async def reset_caption_btn(client, query):
     chat_id = int(query.data.split("#")[1])
     await db.update_group_settings(chat_id, {'caption_btn_text': None, 'caption_btn_url': None})
     await query.answer("Button Reset!", show_alert=True)
     await caption_btn_ui(client, query)
-
-
-# ==============================================================================
-# 3. HOW TO DOWNLOAD URL
-# ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^set_howto#"))
 async def set_howto_url_handler(client, query):
@@ -1931,11 +1714,6 @@ async def set_howto_url_handler(client, query):
             await asyncio.sleep(1)
             await other_urls_ui(client, query)
     except: pass
-
-
-# ==============================================================================
-# 4. GROUP LINK
-# ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^set_grp_link#"))
 async def set_group_link_handler(client, query):
@@ -1971,10 +1749,6 @@ async def set_group_link_handler(client, query):
             await other_urls_ui(client, query)
     except: pass
 
-# ==============================================================================
-# 🤝 REFERRAL SYSTEM SETTINGS
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^ref_sys_menu#"))
 async def referral_settings_menu(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -1982,9 +1756,8 @@ async def referral_settings_menu(client, query):
     
     is_enabled = group_data.get('referral_enabled', True)
     target = group_data.get('referral_target', 5)
-    reward_sec = group_data.get('referral_reward_time', 2592000) # Default 30 Days
+    reward_sec = group_data.get('referral_reward_time', 2592000)
     
-    # Calculate Days
     reward_days = int(reward_sec / 86400)
     
     status_icon = "✅ Enabled" if is_enabled else "❌ Disabled"
@@ -2014,7 +1787,6 @@ async def referral_toggle(client, query):
     await db.update_group_settings(int(chat_id), {'referral_enabled': (action == "on")})
     await referral_settings_menu(client, query)
 
-# --- SET POINTS MENU ---
 @Client.on_callback_query(filters.regex(r"^ref_set_points#"))
 async def referral_set_points_ui(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -2040,7 +1812,6 @@ async def save_ref_points(client, query):
     await db.update_group_settings(int(chat_id), {'referral_target': int(val)})
     await referral_set_points_ui(client, query)
 
-# --- SET TIME MENU ---
 @Client.on_callback_query(filters.regex(r"^ref_set_time#"))
 async def referral_set_time_ui(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -2070,10 +1841,6 @@ async def save_ref_time(client, query):
     await db.update_group_settings(int(chat_id), {'referral_reward_time': int(val)})
     await referral_set_time_ui(client, query)
 
-# ==============================================================================
-# 💡 FEATURE REQUEST UI
-# ==============================================================================
-
 @Client.on_callback_query(filters.regex(r"^req_feature#"))
 async def request_feature_ui(client, query):
     chat_id = int(query.data.split("#")[1])
@@ -2089,10 +1856,8 @@ async def request_feature_ui(client, query):
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
     
     try:
-        # Wait for user input
         msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
         
-        # Forward to Admins
         admin_text = f"💡 **New Feature Request!**\n\n👤 From: {msg.from_user.mention} (`{msg.from_user.id}`)\n📂 Group ID: `{chat_id}`\n\n**Request:**"
         
         for admin_id in ADMINS:
@@ -2106,22 +1871,17 @@ async def request_feature_ui(client, query):
             
         await msg.reply("✅ **Request Sent!** Thank you for your feedback.")
         await asyncio.sleep(1)
-        # Return to main settings
         await main_settings_menu(client, query)
         
     except Exception as e:
-        pass # Timeout
+        pass 
 
-# ==============================================================================
-# ✅ BACK BUTTON KO BHI FAST BANAYA GAYA HAI (INSTANT SPEED)
-# ==============================================================================
 @Client.on_callback_query(filters.regex(r"^set_back_home"))
 async def back_to_group_list(client, query):
     user_id = query.from_user.id
     user_groups = []
     seen_chats = set()
     
-    # Sirf wahi group check karega jisme aap Admin hain
     db_query = {"admins": user_id}
     
     async for group in db.groups.find(db_query):
@@ -2130,10 +1890,8 @@ async def back_to_group_list(client, query):
         if chat_id in seen_chats:
             continue
             
-        # ✅ INSTANT FAST: Seedha Database se title uthao, Telegram API call mat karo
         title = group.get('title')
         
-        # Agar galti se title ki jagah ID save hai ya title nahi hai, toh usey list me mat dikhao
         if not title or str(title) == str(chat_id):
             continue 
             

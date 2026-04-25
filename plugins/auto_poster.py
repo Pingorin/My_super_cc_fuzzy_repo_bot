@@ -252,8 +252,39 @@ async def manual_post_movie(client, message):
     except Exception as e:
         await wait_msg.edit(f"❌ **ERROR:** Channel me post karne me dikkat aayi:\n`{e}`")
 
+# ==============================================================================
+# ⏱️ BACKGROUND LOOP (UPDATED FOR SLOTS)
+# ==============================================================================
 async def start_auto_poster(client):
     await asyncio.sleep(60) 
     while True:
-        await post_trending_poster(client)
-        await asyncio.sleep(43200) # 12 hours
+        print("⏳ [Auto-Poster] Starting global background posting cycle...")
+        
+        # 1. Sabse pehle info.py wale main UPDATES_CHANNEL me post karega
+        try:
+            await post_trending_poster(client)
+        except Exception as e:
+            print(f"❌ Main Channel Post Error: {e}")
+
+        # 2. Ab Database se saare groups check karega aur unke Slots me post karega
+        try:
+            from database.users_chats_db import db
+            async for group in db.groups.find({}):
+                chat_id = group.get('id')
+                mu = group.get('movie_update', {})
+                
+                if mu.get('is_active'):
+                    slots = mu.get('slots', {})
+                    active_channels = [ch for ch in slots.values() if ch is not None]
+                    
+                    for channel in active_channels:
+                        await asyncio.sleep(3) 
+                        try:
+                            await post_trending_poster(client, custom_channel_id=channel, group_chat_id=chat_id)
+                        except Exception as e:
+                            print(f"❌ Slot Post Error for {channel}: {e}")
+        except Exception as e:
+            print(f"❌ Database Slot Fetch Error: {e}")
+
+        print("✅ [Auto-Poster] Global cycle complete! Waiting for next round...")
+        await asyncio.sleep(60) # 12 hours

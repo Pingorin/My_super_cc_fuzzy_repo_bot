@@ -9,12 +9,7 @@ from utils import temp
 
 logger = logging.getLogger(__name__)
 
-# Error se bachne ke liye Temporary Memory (DB ki jagah)
 POSTED_MEMORY = [] 
-
-# ==============================================================================
-# 🕵️ SMART ENGINE (Auto-Trending)
-# ==============================================================================
 
 async def get_fresh_or_mega_trending():
     url = f"https://api.themoviedb.org/3/trending/all/day?api_key={info.TMDB_API_KEY}"
@@ -60,7 +55,6 @@ async def get_fresh_or_mega_trending():
             
     return None, False
 
-# 🔥 NAYA: custom_channel_id aur group_chat_id parameters add kiye hain
 async def post_trending_poster(client, custom_channel_id=None, group_chat_id=None):
     global POSTED_MEMORY
     
@@ -105,14 +99,12 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
     bot_username = temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot"
     poster_token = getattr(info, 'POSTER_BOT_TOKEN', None)
     
-    # 🔥 DYNAMIC TARGET CHANNEL 🔥
     TARGET_CHANNEL = custom_channel_id if custom_channel_id else info.UPDATES_CHANNEL
     
     if not TARGET_CHANNEL:
         print("❌ [Auto-Poster] Koi Target Channel set nahi hai!")
         return
 
-    # 🔥 DYNAMIC BUTTON BUILDER 🔥
     buttons = []
     buttons.append([InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{bot_username}?start=")])
 
@@ -121,11 +113,9 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
         settings = await db.get_group_settings(group_chat_id)
         mu_settings = settings.get('movie_update', {})
         
-        # Add Group Link
         if mu_settings.get('group_link'):
             buttons.append([InlineKeyboardButton("👥 Group", url=mu_settings['group_link'])])
             
-        # Add Footer Buttons
         footer_btns = mu_settings.get('footer', [])
         if footer_btns:
             f_row = [InlineKeyboardButton(btn['text'], url=btn['url']) for btn in footer_btns]
@@ -134,8 +124,6 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
     try:
         if poster_token:
             api_url = f"https://api.telegram.org/bot{poster_token}/sendPhoto"
-            
-            # Convert Pyrogram InlineKeyboardButton to Raw API format
             raw_inline_keyboard = []
             for row in buttons:
                 raw_row = [{"text": btn.text, "url": btn.url} for btn in row]
@@ -171,10 +159,6 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
         
     except Exception as e:
         print(f"❌ [Auto-Poster] Channel me bhejne me ERROR aaya: {e}")
-
-# ==============================================================================
-# 🎮 MANUAL COMMANDS (Instant Check / Custom Post)
-# ==============================================================================
 
 @Client.on_message(filters.command("testpost") & filters.user(info.ADMINS))
 async def force_test_post(client, message):
@@ -268,11 +252,8 @@ async def manual_post_movie(client, message):
     except Exception as e:
         await wait_msg.edit(f"❌ **ERROR:** Channel me post karne me dikkat aayi:\n`{e}`")
 
-# ==============================================================================
-# ⏱️ BACKGROUND LOOP
-# ==============================================================================
 async def start_auto_poster(client):
     await asyncio.sleep(60) 
     while True:
         await post_trending_poster(client)
-        await asyncio.sleep(600) # 10 Mins set hai, isko 43200 (12 hours) karna mat bhoolna final setup me!
+        await asyncio.sleep(43200) # 12 hours

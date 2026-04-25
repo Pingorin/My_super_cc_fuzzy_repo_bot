@@ -419,7 +419,7 @@ async def custom_welcome_config(client, query):
          InlineKeyboardButton("🖼️ Set Photo", callback_data=f"wel_set_img#{chat_id}")],
          
         [InlineKeyboardButton("🔄 Reset Custom Welcome", callback_data=f"wel_reset#{chat_id}")],
-        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")])
+        [InlineKeyboardButton("🔙 Back to Main Settings", callback_data=f"set_main#{chat_id}")]
     ]
     
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))

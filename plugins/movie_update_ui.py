@@ -185,9 +185,10 @@ async def mu_clearfooter(client, query):
     await mu_footer_menu(client, query)
 
 # ==============================================================================
-# MESSAGE LISTENER
+# MESSAGE LISTENER (FIXED 🔥)
 # ==============================================================================
-@Client.on_message(filters.private & filters.text & ~filters.command(["start", "help"]))
+# 🔥 FIX: Ab ye un messages ko ignore karega jo "/" (commands) se shuru hote hain.
+@Client.on_message(filters.private & filters.text & ~filters.regex(r"^/"))
 async def input_listener(client, message):
     user_id = message.from_user.id
     if user_id not in WAITING_FOR_INPUT: return

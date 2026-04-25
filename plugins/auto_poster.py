@@ -287,4 +287,4 @@ async def start_auto_poster(client):
             print(f"❌ Database Slot Fetch Error: {e}")
 
         print("✅ [Auto-Poster] Global cycle complete! Waiting for next round...")
-        await asyncio.sleep(60) # 12 hours
+        await asyncio.sleep(3600) # 12 hours

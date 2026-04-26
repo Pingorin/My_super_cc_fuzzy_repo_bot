@@ -63,8 +63,8 @@ async def get_fresh_or_mega_trending(posted_ids):
     return None, False
 
 async def post_trending_poster(client, custom_channel_id=None, group_chat_id=None):
-    # DB se Posted IDs nikalna (Real Memory)
-    posted_data = await db.bot_settings.find_one({"_id": "posted_movies"})
+    # 🔥 BUG FIX: db.db.bot_settings use kiya gaya hai
+    posted_data = await db.db.bot_settings.find_one({"_id": "posted_movies"})
     posted_ids = posted_data.get("ids", []) if posted_data else []
 
     media, is_mega_hit = await get_fresh_or_mega_trending(posted_ids)
@@ -163,18 +163,19 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
             )
             print(f"🚀 [Auto-Poster] Main Bot se channel {TARGET_CHANNEL} me post bhej diya!")
             
-        # DB Update
+        # 🔥 BUG FIX: db.db.bot_settings use kiya gaya hai
         if media_id not in posted_ids: posted_ids.append(media_id)
         else:
             posted_ids.remove(media_id)
             posted_ids.append(media_id)
 
         if len(posted_ids) > 50: posted_ids.pop(0)
-        await db.bot_settings.update_one({"_id": "posted_movies"}, {"$set": {"ids": posted_ids}}, upsert=True)
+        await db.db.bot_settings.update_one({"_id": "posted_movies"}, {"$set": {"ids": posted_ids}}, upsert=True)
         print(f"🎉 [Auto-Poster] SUCCESS! '{title}' channel me post ho gaya.")
         
     except Exception as e:
         print(f"❌ [Auto-Poster] Channel me bhejne me ERROR aaya: {e}")
+        raise e  # Taki mu_test function fail pakad sake
 
 # ==============================================================================
 # 🎮 MANUAL COMMANDS (Instant Check / Custom Post)

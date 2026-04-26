@@ -9,7 +9,6 @@ SETTINGS_CACHE = {}
 class UserChatDB:
     def __init__(self, uri, database_name):
         # ✅ Connection Pooling Optimization
-        # Checking if parameters are already present to avoid duplication
         if "minPoolSize" not in uri:
             if "?" in uri:
                 uri += "&minPoolSize=10&maxPoolSize=100"
@@ -22,9 +21,7 @@ class UserChatDB:
         self.users = self.db.users
         self.groups = self.db.groups
         self.banned = self.db.banned 
-        # ✅ Yeh collection pending Join Requests store karega
         self.fsub_pending = self.db.fsub_pending
-        # ✅ Yeh collection warnings store karega (Anti-Spam)
         self.warnings = self.db.warnings 
 
     async def add_user(self, id):
@@ -40,10 +37,6 @@ class UserChatDB:
         return await self.users.find_one({'id': int(user_id)})
 
     async def update_referral_stats(self, referrer_id, points=10):
-        """
-        Adds points to the referrer.
-        Default points is 10, but can be customized.
-        """
         await self.users.update_one(
             {'id': int(referrer_id)},
             {'$inc': {'referral_points': points}},
@@ -63,7 +56,6 @@ class UserChatDB:
             
         current_time = time.time()
         
-        # Check if already premium, extend it. If not, start new.
         current_expiry = user.get('premium_expiry', 0)
         if current_expiry > current_time:
             new_expiry = current_expiry + duration_seconds
@@ -105,7 +97,6 @@ class UserChatDB:
     async def add_premium_time(self, user_id, duration_seconds):
         user = await self.users.find_one({'id': int(user_id)})
         current_time = time.time()
-        # Agar pehle se premium hai toh purani expiry uthao, warna abhi ka time
         current_expiry = user.get('premium_expiry', 0) if user else 0
 
         if current_expiry > current_time:
@@ -131,11 +122,8 @@ class UserChatDB:
     # ==================================================================
 
     async def add_group(self, id, title):
-        # ✅ PRO FIX: MongoDB '$setOnInsert' aur 'upsert=True' ka use kiya gaya hai.
-        # Isse kitne bhi message ek sath aayen, duplicate entry kabhi nahi banegi!
         default_settings = {
             'id': int(id),
-            # ✅ Yahan se 'title' hata diya hai kyunki wo niche $set me use ho raha hai aur conflict kar raha tha.
             'earning_method': 'shortlink', 
             'shortener_mode': 'dynamic',   
             'shorteners': {},              
@@ -163,9 +151,9 @@ class UserChatDB:
             'last_autopost_time': 0,        
             'autopost_text': None,          
             'autopost_image': None,         
-            'autopost_media_id': None,      # ✅ ADDED FOR MULTI-MEDIA
-            'autopost_media_type': None,    # ✅ ADDED FOR MULTI-MEDIA
-            'autopost_del_time': 60,       # ✅ ADDED FOR AD AUTO DELETE TIMER
+            'autopost_media_id': None,      
+            'autopost_media_type': None,    
+            'autopost_del_time': 60,       
             'autopost_buttons': {},         
             'admin_free_access': False,     
             'daily_stats_notify': True,     
@@ -183,10 +171,16 @@ class UserChatDB:
             'time_together': 604800,       
             'time_together_3': 86400,      
             'time_gap1': 300,
-            'time_gap2': 300
+            'time_gap2': 300,
+            # 🔥 NAYA: MOVIE UPDATE SETTINGS DEFAULTS 🔥
+            'movie_update': {
+                'is_active': True,
+                'slots': {'1': None, '2': None, '3': None},
+                'group_link': None,
+                'footer': [] 
+            }
         }
         
-        # Agar ID pehle se hai toh sirf title update hoga, naya hai toh defaults save honge
         await self.groups.update_one(
             {'id': int(id)}, 
             {
@@ -201,14 +195,11 @@ class UserChatDB:
     async def get_group_settings(self, id):
         chat_id = int(id)
         
-        # 1. Check RAM First (Instant)
         if chat_id in SETTINGS_CACHE:
             return SETTINGS_CACHE[chat_id]
             
-        # 2. If not in RAM, Fetch from DB
         settings = await self.groups.find_one({'id': chat_id})
         
-        # 3. Save to RAM for next time
         if settings:
             SETTINGS_CACHE[chat_id] = settings
             
@@ -217,28 +208,19 @@ class UserChatDB:
     async def update_group_settings(self, id, settings):
         chat_id = int(id)
         
-        # 1. Update DB
         await self.groups.update_one({'id': chat_id}, {'$set': settings})
         
-        # 2. Update Cache
         if chat_id in SETTINGS_CACHE:
             SETTINGS_CACHE[chat_id].update(settings)
         else:
-            # Refresh from DB if needed (though direct update is usually enough)
             SETTINGS_CACHE[chat_id] = await self.groups.find_one({'id': chat_id})
 
     # --- 📊 DAILY STATS HELPERS ---
 
     def get_today_date(self):
-        # Returns YYYY-MM-DD string
         return datetime.datetime.now().strftime("%Y-%m-%d")
 
     async def update_daily_stats(self, chat_id, field, count=1, domain=None):
-        """
-        Updates a specific stat field for TODAY.
-        Fields: 'req', 'suc', 'spam_w', 'spam_k', 'link_gen', 'link_ver'
-        If domain is provided, it updates stats.{date}.shorteners.{domain}.{field}
-        """
         today = self.get_today_date()
         
         if domain:
@@ -258,14 +240,12 @@ class UserChatDB:
             )
 
     async def get_daily_stats(self, chat_id, date_str):
-        # Stats are fetched less frequently, usually OK to hit DB or implement separate cache if needed
         group = await self.groups.find_one({'id': int(chat_id)})
         if group and 'stats' in group:
             return group['stats'].get(date_str, {})
         return {}
 
     async def get_all_groups_stats(self, date_str):
-        """Fetches stats for ALL groups for a specific date (For Admin Report)"""
         cursor = self.groups.find({f"stats.{date_str}": {"$exists": True}})
         results = []
         async for group in cursor:
@@ -275,9 +255,7 @@ class UserChatDB:
             results.append(stats)
         return results
 
-    # 🔥 NAYA FUNCTION DAILY STATS NAVIGATION KE LIYE 🔥
     async def get_group_stats_by_date(self, chat_id, date_str):
-        """Fetches stats for a SPECIFIC group on a SPECIFIC date (For Interactive Buttons)"""
         group = await self.groups.find_one({'id': int(chat_id)})
         if group and 'stats' in group:
             return group['stats'].get(date_str, None)
@@ -291,7 +269,6 @@ class UserChatDB:
             {'id': int(chat_id)},
             {'$set': {key: {'text': text, 'url': url}}}
         )
-        # Invalidate/Update Cache
         if int(chat_id) in SETTINGS_CACHE:
              del SETTINGS_CACHE[int(chat_id)]
 
@@ -310,8 +287,8 @@ class UserChatDB:
             {'$set': {
                 'autopost_text': None, 
                 'autopost_image': None, 
-                'autopost_media_id': None,    # ✅ ADDED FOR MULTI-MEDIA
-                'autopost_media_type': None,  # ✅ ADDED FOR MULTI-MEDIA
+                'autopost_media_id': None,    
+                'autopost_media_type': None,  
                 'autopost_buttons': {}
             }}
         )
@@ -320,24 +297,20 @@ class UserChatDB:
     # --- 📣 AUTO MENTION HELPERS ---
 
     async def add_pending_mention(self, chat_id, user_id):
-        """Adds a user to the pending mention list if not already present."""
         await self.groups.update_one(
             {'id': int(chat_id)},
             {'$addToSet': {'pending_mentions': int(user_id)}}
         )
 
     async def get_pending_mentions(self, chat_id):
-        """Fetches the list of pending users."""
         group = await self.groups.find_one({'id': int(chat_id)})
         return group.get('pending_mentions', []) if group else []
 
     async def remove_pending_mentions(self, chat_id, user_ids):
-        """Removes mentioned users from the list and updates timestamp."""
         await self.groups.update_one(
             {'id': int(chat_id)},
             {'$pull': {'pending_mentions': {'$in': user_ids}}}
         )
-        # Update last run time to now
         await self.groups.update_one(
             {'id': int(chat_id)},
             {'$set': {'last_mention_time': time.time()}}
@@ -380,7 +353,6 @@ class UserChatDB:
     # --- 🔒 FSUB CHANNEL MANAGEMENT ---
     
     async def update_fsub_channel(self, chat_id, slot, channel_id):
-        # ... logic to clean potential bad data ...
         try:
             group = await self.groups.find_one({'id': int(chat_id)})
             if group:
@@ -483,7 +455,6 @@ class UserChatDB:
         else:
             value = current_time 
 
-        # Auto-Fix Logic for Corrupt Data
         user = await self.users.find_one({'id': int(user_id)})
         if user:
             current_status = user.get('verify_status')
@@ -530,11 +501,9 @@ class UserChatDB:
         except:
             return False
 
-    # ✅ REQUIRED FOR "RESET SETTINGS" FEATURE (Including Other URLs)
+    # ✅ REQUIRED FOR "RESET SETTINGS" FEATURE
     async def reset_group_settings(self, chat_id):
-        """Resets a group's settings to default without removing the group."""
         default_settings = {
-            # --- CORE DEFAULTS ---
             'earning_method': 'shortlink', 
             'shortener_mode': 'dynamic',   
             'shorteners': {},              
@@ -542,61 +511,51 @@ class UserChatDB:
             'is_shortlink_active': True,
             'result_mode': 'button',
             'result_page_limit': 10,
-            
-            # --- AUTO DELETE & REACTION ---
             'auto_reaction': False,
             'auto_delete_time': 300,
             'auto_delete_user_msg': False,
             'delete_thanks_msg': True,
-            
-            # --- WELCOME ---
             'welcome_enabled': True,
             'welcome_mode': 'default',
             'custom_welcome_text': None,
             'custom_welcome_photo': None,
-            
-            # --- ANTI-SPAM ---
             'antispam_enabled': False,
             'antispam_action': 'mute',
             'mute_duration': 600,
-            
-            # --- AUTO MENTION ---
             'automention_enabled': True,
             'mention_interval': 300,
             'pending_mentions': [],
-            
-            # --- AUTO POST ---
             'autopost_enabled': False,
             'autopost_interval': 1800,
             'autopost_text': None,
             'autopost_image': None,
-            'autopost_media_id': None,     # ✅ ADDED FOR MULTI-MEDIA
-            'autopost_media_type': None,   # ✅ ADDED FOR MULTI-MEDIA
-            'autopost_del_time': 60,      # ✅ ADDED FOR AD AUTO DELETE TIMER
+            'autopost_media_id': None,     
+            'autopost_media_type': None,   
+            'autopost_del_time': 60,      
             'autopost_buttons': {},
-            
-            # --- ADMIN ACCESS ---
             'admin_free_access': False,
             'daily_stats_notify': True,
-
-            # ✅ OTHER URLs DEFAULTS
             'caption_url': None,
             'caption_btn_text': None,
             'caption_btn_url': None,
             'howto_url': None,
             'group_link': None,
-
-            # ✅ REFERRAL DEFAULTS (NEW)
-            'referral_enabled': True,       # Default: Enabled
-            'referral_target': 5,           # 5 Invites needed
-            'referral_reward_time': 2592000 # 30 Days (in seconds)
+            'referral_enabled': True,       
+            'referral_target': 5,           
+            'referral_reward_time': 2592000,
+            # 🔥 NAYA: MOVIE UPDATE DEFAULTS 🔥
+            'movie_update': {
+                'is_active': True,
+                'slots': {'1': None, '2': None, '3': None},
+                'group_link': None,
+                'footer': [] 
+            }
         }
         
         await self.groups.update_one(
             {'id': int(chat_id)},
             {'$set': default_settings}
         )
-        # Clear Cache
         if int(chat_id) in SETTINGS_CACHE:
             del SETTINGS_CACHE[int(chat_id)]
 

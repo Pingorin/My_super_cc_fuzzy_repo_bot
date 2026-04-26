@@ -5,14 +5,19 @@ import json
 import info
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from database.users_chats_db import db
 from utils import temp
 
 logger = logging.getLogger(__name__)
 
-POSTED_MEMORY = [] 
+# ==============================================================================
+# 🕵️ SMART ENGINE (Web Series + Movies + Mega-Hit Repeat + Kachra Filter)
+# ==============================================================================
 
-async def get_fresh_or_mega_trending():
+async def get_fresh_or_mega_trending(posted_ids):
     url = f"https://api.themoviedb.org/3/trending/all/day?api_key={info.TMDB_API_KEY}"
+    
+    # Kachra Filter (10766=Soap, 10764=Reality, 10767=Talk Shows)
     BANNED_TV_GENRES = [10766, 10764, 10767]
     
     print("⏳ [Auto-Poster] TMDB API se data nikal raha hoon...")
@@ -42,23 +47,27 @@ async def get_fresh_or_mega_trending():
                         top_media = valid_media[0] 
                         top_id = str(top_media["id"])
                         
-                        if top_media.get("popularity", 0) > 800 and top_id not in POSTED_MEMORY[-3:]:
+                        # Mega-Hit Logic
+                        if top_media.get("popularity", 0) > 800 and top_id not in posted_ids[-3:]:
                             return top_media, True 
                         
-                        fresh_media = [m for m in valid_media if str(m["id"]) not in POSTED_MEMORY]
+                        # Fresh Logic
+                        fresh_media = [m for m in valid_media if str(m["id"]) not in posted_ids]
                         if fresh_media:
                             import random
                             return random.choice(fresh_media), False
                             
         except Exception as e:
-            print(f"❌ [Auto-Poster] TMDB Fetch Error: {e}")
+            logger.error(f"TMDB Fetch Error: {e}")
             
     return None, False
 
 async def post_trending_poster(client, custom_channel_id=None, group_chat_id=None):
-    global POSTED_MEMORY
-    
-    media, is_mega_hit = await get_fresh_or_mega_trending()
+    # DB se Posted IDs nikalna (Real Memory)
+    posted_data = await db.bot_settings.find_one({"_id": "posted_movies"})
+    posted_ids = posted_data.get("ids", []) if posted_data else []
+
+    media, is_mega_hit = await get_fresh_or_mega_trending(posted_ids)
     if not media: 
         print("⚠️ [Auto-Poster] Aaj koi nayi movie/series nahi mili. Skip kar raha hoon.")
         return
@@ -99,30 +108,34 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
     bot_username = temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot"
     poster_token = getattr(info, 'POSTER_BOT_TOKEN', None)
     
+    # 🔥 DYNAMIC TARGET CHANNEL 🔥
     TARGET_CHANNEL = custom_channel_id if custom_channel_id else info.UPDATES_CHANNEL
     
     if not TARGET_CHANNEL:
         print("❌ [Auto-Poster] Koi Target Channel set nahi hai!")
         return
 
+    # 🔥 DYNAMIC BUTTON BUILDER 🔥
     buttons = []
     buttons.append([InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{bot_username}?start=")])
 
     if group_chat_id:
-        from database.users_chats_db import db
         settings = await db.get_group_settings(group_chat_id)
         mu_settings = settings.get('movie_update', {})
         
+        # Add Group Link
         if mu_settings.get('group_link'):
             buttons.append([InlineKeyboardButton("👥 Group", url=mu_settings['group_link'])])
             
+        # Add Footer Buttons
         footer_btns = mu_settings.get('footer', [])
         if footer_btns:
             f_row = [InlineKeyboardButton(btn['text'], url=btn['url']) for btn in footer_btns]
             buttons.append(f_row)
-
+    
     try:
         if poster_token:
+            # Dusre bot se bhejna (Raw API)
             api_url = f"https://api.telegram.org/bot{poster_token}/sendPhoto"
             raw_inline_keyboard = []
             for row in buttons:
@@ -140,6 +153,7 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
                 await session.post(api_url, json=payload)
             print(f"🚀 [Auto-Poster] Secondary Bot se channel {TARGET_CHANNEL} me post bhej diya!")
         else:
+            # Main bot se bhejna
             caption_md = caption_html.replace("<b>", "**").replace("</b>", "**")
             await client.send_photo(
                 chat_id=TARGET_CHANNEL, 
@@ -149,16 +163,22 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
             )
             print(f"🚀 [Auto-Poster] Main Bot se channel {TARGET_CHANNEL} me post bhej diya!")
             
-        if media_id not in POSTED_MEMORY: POSTED_MEMORY.append(media_id)
+        # DB Update
+        if media_id not in posted_ids: posted_ids.append(media_id)
         else:
-            POSTED_MEMORY.remove(media_id)
-            POSTED_MEMORY.append(media_id)
+            posted_ids.remove(media_id)
+            posted_ids.append(media_id)
 
-        if len(POSTED_MEMORY) > 50: POSTED_MEMORY.pop(0)
+        if len(posted_ids) > 50: posted_ids.pop(0)
+        await db.bot_settings.update_one({"_id": "posted_movies"}, {"$set": {"ids": posted_ids}}, upsert=True)
         print(f"🎉 [Auto-Poster] SUCCESS! '{title}' channel me post ho gaya.")
         
     except Exception as e:
         print(f"❌ [Auto-Poster] Channel me bhejne me ERROR aaya: {e}")
+
+# ==============================================================================
+# 🎮 MANUAL COMMANDS (Instant Check / Custom Post)
+# ==============================================================================
 
 @Client.on_message(filters.command("testpost") & filters.user(info.ADMINS))
 async def force_test_post(client, message):
@@ -253,20 +273,20 @@ async def manual_post_movie(client, message):
         await wait_msg.edit(f"❌ **ERROR:** Channel me post karne me dikkat aayi:\n`{e}`")
 
 # ==============================================================================
-# ⏱️ BACKGROUND LOOP (UPDATED FOR SLOTS)
+# ⏱️ BACKGROUND LOOP (Global Cycle for Info.py & Custom Slots)
 # ==============================================================================
 async def start_auto_poster(client):
     await asyncio.sleep(60) 
     while True:
         print("⏳ [Auto-Poster] Starting global background posting cycle...")
         
-        # 1. Sabse pehle info.py wale main UPDATES_CHANNEL me post karega
+        # 1. Post to Main UPDATES_CHANNEL (from info.py)
         try:
             await post_trending_poster(client)
         except Exception as e:
             print(f"❌ Main Channel Post Error: {e}")
 
-        # 2. Ab Database se saare groups check karega aur unke Slots me post karega
+        # 2. Post to Group Custom Slots
         try:
             from database.users_chats_db import db
             async for group in db.groups.find({}):
@@ -287,4 +307,4 @@ async def start_auto_poster(client):
             print(f"❌ Database Slot Fetch Error: {e}")
 
         print("✅ [Auto-Poster] Global cycle complete! Waiting for next round...")
-        await asyncio.sleep(3600) # 12 hours
+        await asyncio.sleep(3600) # 1 hour

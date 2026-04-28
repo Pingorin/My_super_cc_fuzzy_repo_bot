@@ -4,16 +4,10 @@ import re
 # Helper for ID parsing
 id_pattern = re.compile(r'^-?\d+$')
 
-# --- SAFE INTEGER PARSER HELPER ---
-def safe_int(env_var_name, default_value=0):
-    val = os.environ.get(env_var_name, str(default_value)).strip()
-    try:
-        return int(val) if val and val.lower() != "none" else default_value
-    except ValueError:
-        return default_value
-
 # --- MANDATORY VARIABLES ---
-API_ID = safe_int("API_ID", 0) 
+api_id_env = os.environ.get("API_ID", "")
+API_ID = int(api_id_env) if api_id_env else 0
+
 API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
@@ -30,7 +24,9 @@ DATABASE_URI = os.environ.get("DATABASE_URI", "")
 # Jab DB 1 full ho jaye, toh host (Render/Heroku) ke variables me inki link daal dena
 DATABASE_URI_2 = os.environ.get("DATABASE_URI_2", "")
 DATABASE_URI_3 = os.environ.get("DATABASE_URI_3", "")
-INDEX_DB = safe_int("INDEX_DB", 1) # Default DB 1 (Changeable via /setindex command)
+
+index_db_env = os.environ.get("INDEX_DB", "1")
+INDEX_DB = int(index_db_env) if index_db_env else 1
 
 DATABASE_NAME = os.environ.get("DATABASE_NAME", "Cluster0")
 COLLECTION_NAME = os.environ.get('COLLECTION_NAME', 'Telegram_files')
@@ -43,19 +39,26 @@ if not USER_DB_URI:
 ADMINS_STR = os.environ.get("ADMINS", "") # Yahan "" ke andar default admin IDs dal sakte hain space se separate karke (e.g., "123456789 987654321")
 ADMINS = [int(i) for i in ADMINS_STR.split()] if ADMINS_STR else []
 
-LOG_CHANNEL = safe_int("LOG_CHANNEL", 0) 
-PORT = safe_int("PORT", 8080)
-CHANNELS = [int(ch) for ch in os.environ.get("CHANNELS", "0").split()] if os.environ.get("CHANNELS") else []
+log_env = os.environ.get("LOG_CHANNEL", "")
+LOG_CHANNEL = int(log_env) if log_env else 0
+
+port_env = os.environ.get("PORT", "8080")
+PORT = int(port_env) if port_env else 8080
+
+channels_env = os.environ.get("CHANNELS", "")
+CHANNELS = [int(ch) for ch in channels_env.split()] if channels_env else []
 
 # Yahan -1001234567890 ki jagah apna asli Channel ID daalein
-TARGET_CHANNEL_ID = safe_int("TARGET_CHANNEL_ID", 0)
+target_env = os.environ.get("TARGET_CHANNEL_ID", "")
+TARGET_CHANNEL_ID = int(target_env) if target_env else 0
 
 # 👇 NAYA FEATURE: Streaming ke liye Bin Channel (Apne Database Channel ki ID daalein)
-BIN_CHANNEL = safe_int("BIN_CHANNEL", 0)
+bin_env = os.environ.get("BIN_CHANNEL", "")
+BIN_CHANNEL = int(bin_env) if bin_env else 0
 
 # 🌟 AUTO-POSTER SETTINGS 🌟
 # Channel jahan TMDB se movie posters auto-post honge
-updates_channel_env = os.environ.get("UPDATES_CHANNEL", "0")
+updates_channel_env = os.environ.get("UPDATES_CHANNEL", "")
 UPDATES_CHANNEL = int(updates_channel_env) if updates_channel_env and id_pattern.search(updates_channel_env) else None
 
 # Agar Auto-poster dusre bot se chalwana hai, toh uska token yahan dalein. Main bot se chalwana ho toh khali chhod dein.
@@ -68,9 +71,15 @@ SITE_URL = os.environ.get("SITE_URL", "")
 
 # --- VERIFICATION SETTINGS ---
 IS_VERIFY = os.environ.get("IS_VERIFY", "True").lower() in ["true", "yes", "1"]
-VERIFY_TIME = safe_int("VERIFY_TIME", 1200) # 20 Min
-VERIFY_GAP1 = safe_int("VERIFY_GAP1", 300)  # 5 Min
-VERIFY_GAP2 = safe_int("VERIFY_GAP2", 300)  # 5 Min
+
+v_time_env = os.environ.get("VERIFY_TIME", "1200")
+VERIFY_TIME = int(v_time_env) if v_time_env else 1200
+
+v_gap1_env = os.environ.get("VERIFY_GAP1", "300")
+VERIFY_GAP1 = int(v_gap1_env) if v_gap1_env else 300
+
+v_gap2_env = os.environ.get("VERIFY_GAP2", "300")
+VERIFY_GAP2 = int(v_gap2_env) if v_gap2_env else 300
 
 # --- SHORTENER SETTINGS ---
 SHORTLINK_URL_1 = os.environ.get("SHORTLINK_URL_1", "")

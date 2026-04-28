@@ -5,9 +5,7 @@ import re
 id_pattern = re.compile(r'^-?\d+$')
 
 # --- MANDATORY VARIABLES ---
-api_id_env = os.environ.get("API_ID", "20638104")
-API_ID = int(api_id_env) if api_id_env else 0
-
+API_ID = int(os.environ.get("API_ID", "20638104")) 
 API_HASH = os.environ.get("API_HASH", "6c884690ca85d39a4c5ad7c15b194e42")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8527539919:AAFFu37tTXtn7PQS0ioJj4lVlEVgQT3Cr5A")
 
@@ -24,9 +22,7 @@ DATABASE_URI = os.environ.get("DATABASE_URI", "mongodb+srv://ronak99:ronak99@clu
 # Jab DB 1 full ho jaye, toh host (Render/Heroku) ke variables me inki link daal dena
 DATABASE_URI_2 = os.environ.get("DATABASE_URI_2", "")
 DATABASE_URI_3 = os.environ.get("DATABASE_URI_3", "")
-
-index_db_env = os.environ.get("INDEX_DB", "1")
-INDEX_DB = int(index_db_env) if index_db_env else 1
+INDEX_DB = int(os.environ.get("INDEX_DB", "1")) # Default DB 1 (Changeable via /setindex command)
 
 DATABASE_NAME = os.environ.get("DATABASE_NAME", "Cluster0")
 COLLECTION_NAME = os.environ.get('COLLECTION_NAME', 'Telegram_files')
@@ -39,22 +35,15 @@ if not USER_DB_URI:
 ADMINS_STR = os.environ.get("ADMINS", "7245547751") # Yahan "" ke andar default admin IDs dal sakte hain space se separate karke (e.g., "123456789 987654321")
 ADMINS = [int(i) for i in ADMINS_STR.split()] if ADMINS_STR else []
 
-log_env = os.environ.get("LOG_CHANNEL", "-1003474604893")
-LOG_CHANNEL = int(log_env) if log_env else 0
-
-port_env = os.environ.get("PORT", "8080")
-PORT = int(port_env) if port_env else 8080
-
-channels_env = os.environ.get("CHANNELS", "")
-CHANNELS = [int(ch) for ch in channels_env.split()] if channels_env else []
+LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1003474604893")) 
+PORT = int(os.environ.get("PORT", "8080"))
+CHANNELS = [int(ch) for ch in os.environ.get("CHANNELS", "0").split()] if os.environ.get("CHANNELS") else []
 
 # Yahan -1001234567890 ki jagah apna asli Channel ID daalein
-target_env = os.environ.get("TARGET_CHANNEL_ID", "")
-TARGET_CHANNEL_ID = int(target_env) if target_env else 0
+TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "0"))
 
 # 👇 NAYA FEATURE: Streaming ke liye Bin Channel (Apne Database Channel ki ID daalein)
-bin_env = os.environ.get("BIN_CHANNEL", "")
-BIN_CHANNEL = int(bin_env) if bin_env else 0
+BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", "0"))
 
 # 🌟 AUTO-POSTER SETTINGS 🌟
 # Channel jahan TMDB se movie posters auto-post honge
@@ -71,15 +60,9 @@ SITE_URL = os.environ.get("SITE_URL", "")
 
 # --- VERIFICATION SETTINGS ---
 IS_VERIFY = os.environ.get("IS_VERIFY", "True").lower() in ["true", "yes", "1"]
-
-v_time_env = os.environ.get("VERIFY_TIME", "1200")
-VERIFY_TIME = int(v_time_env) if v_time_env else 1200
-
-v_gap1_env = os.environ.get("VERIFY_GAP1", "300")
-VERIFY_GAP1 = int(v_gap1_env) if v_gap1_env else 300
-
-v_gap2_env = os.environ.get("VERIFY_GAP2", "300")
-VERIFY_GAP2 = int(v_gap2_env) if v_gap2_env else 300
+VERIFY_TIME = int(os.environ.get("VERIFY_TIME", 1200)) # 20 Min
+VERIFY_GAP1 = int(os.environ.get("VERIFY_GAP1", 300))  # 5 Min
+VERIFY_GAP2 = int(os.environ.get("VERIFY_GAP2", 300))  # 5 Min
 
 # --- SHORTENER SETTINGS ---
 SHORTLINK_URL_1 = os.environ.get("SHORTLINK_URL_1", "")

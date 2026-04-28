@@ -138,7 +138,8 @@ async def broadcast_handler(client, message):
             except Exception:
                 pass
 
-        await asyncio.sleep(0.05)
+        # ✅ FIX: Sleep time increased from 0.05 to 0.1 for Telegram rate limit safety
+        await asyncio.sleep(0.1)
 
     time_taken = round(time.time() - start_time, 2)
     

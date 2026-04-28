@@ -4,7 +4,7 @@ from pyrogram import Client, __version__
 from pyrogram.raw.all import layer
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-from info import API_ID, API_HASH, ADMINS, BOT_TOKEN, LOG_CHANNEL, PORT
+from info import API_ID, API_HASH, ADMINS, BOT_TOKEN, LOG_CHANNEL, PORT, SITE_URL
 from utils import temp
 from typing import Union, Optional, AsyncGenerator
 from pyrogram import types
@@ -97,6 +97,10 @@ class Bot(Client):
         except Exception as e:
             print(f"⚠️ Web Server Error: {e}", flush=True)
 
+        # ✅ FIX 5: Check SITE_URL for Streaming Safety
+        if not SITE_URL or "127.0.0.1" in SITE_URL:
+            print("⚠️ WARNING: SITE_URL set nahi hai! Streaming links localhost par banengi jo cloud par kaam nahi karengi. Kripya info.py ya Env Vars me SITE_URL dalein.", flush=True)
+
         # ==================================================================
         # 2. CONNECT TO DATABASE & TELEGRAM
         # ==================================================================
@@ -139,9 +143,14 @@ class Bot(Client):
         asyncio.create_task(auto_post_scheduler(self))
         print("📰 Group Auto Post Scheduler Started", flush=True)
         
-        # 🔥 NAYA: TMDB Channel Poster Scheduler
+        # 🔥 TMDB Channel Poster Scheduler
         asyncio.create_task(start_auto_poster(self))
         print("🎬 TMDB Channel Auto Poster Started", flush=True)
+        
+        # ✅ FIX 2: START HEARTBEAT ENGINE HERE
+        from plugins.Commands import bot_b_heartbeat
+        asyncio.create_task(bot_b_heartbeat(self))
+        print("💓 Auto-Fallback Heartbeat Engine Started", flush=True)
         
         # Restart Log
         if LOG_CHANNEL:

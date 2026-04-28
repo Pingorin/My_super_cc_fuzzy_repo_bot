@@ -20,7 +20,6 @@ START_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg"
 # ==============================================================================
 # 💓 HEARTBEAT ENGINE (AUTO-FALLBACK SYSTEM)
 # ==============================================================================
-heartbeat_started = False
 
 async def bot_b_heartbeat(client):
     """Har 10 minute me Bot B ko check karega. Ban hua toh Bot A par fallback karega."""
@@ -401,12 +400,6 @@ async def check_fsub(client, user_id, message_obj):
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start_handler(client, message):
-    # 🔥 Start the Heartbeat Checker safely (Ek hi baar start hoga)
-    global heartbeat_started
-    if not heartbeat_started:
-        heartbeat_started = True
-        asyncio.create_task(bot_b_heartbeat(client))
-
     if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         await db.add_group(message.chat.id, message.chat.title)
         if len(message.command) == 1: return await message.reply("✅ Bot is Alive!")

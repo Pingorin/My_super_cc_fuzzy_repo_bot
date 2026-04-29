@@ -148,7 +148,7 @@ class Bot(Client):
         print("🎬 TMDB Channel Auto Poster Started", flush=True)
         
         # ✅ FIX 2: START HEARTBEAT ENGINE HERE
-        from plugins.Commands import bot_b_heartbeat
+        from plugins.commands import bot_b_heartbeat
         asyncio.create_task(bot_b_heartbeat(self))
         print("💓 Auto-Fallback Heartbeat Engine Started", flush=True)
         

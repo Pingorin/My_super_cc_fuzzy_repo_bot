@@ -14,11 +14,6 @@ async def telegraph_upload(client, message):
     if not reply or not (reply.photo or reply.video or reply.animation or reply.document):
         return await message.reply_text("⚠️ **Sahi Tarika:** Kripya kisi Photo ya Video (under 5MB) par reply karke `/tg` ya `/telegraph` type karein.")
 
-    # Check for valid document types
-    if reply.document:
-        if not (reply.document.mime_type.startswith("image/") or reply.document.mime_type.startswith("video/")):
-            return await message.reply_text("❌ Kripya sirf Image ya Video file bhejein.")
-
     # File size limit check (Telegraph allows max 5MB)
     file_size = getattr(reply.photo, "file_size", 0) or getattr(reply.video, "file_size", 0) or getattr(reply.animation, "file_size", 0) or getattr(reply.document, "file_size", 0)
     if file_size > 5242880:  # 5 MB in bytes
@@ -32,13 +27,12 @@ async def telegraph_upload(client, message):
         
         await msg.edit_text("📤 **Uploading to Telegraph (graph.org)...**")
         
-        # 2. Upload to graph.org API via aiohttp
+        # 2. Upload to graph.org API (Simple Method)
         async with aiohttp.ClientSession() as session:
             with open(download_path, 'rb') as f:
-                form = aiohttp.FormData()
-                form.add_field('file', f, filename=os.path.basename(download_path))
-                
-                async with session.post("https://graph.org/upload", data=form) as response:
+                # Direct file pass karne se aiohttp automatically sahi format set kar leta hai
+                async with session.post("https://graph.org/upload", data={'file': f}) as response:
+                    
                     if response.status == 200:
                         json_data = await response.json()
                         if type(json_data) is list and len(json_data) > 0 and 'src' in json_data[0]:
@@ -57,15 +51,14 @@ async def telegraph_upload(client, message):
                                 disable_web_page_preview=False
                             )
                         else:
-                            await msg.edit_text("❌ **Upload Failed!** Telegraph se koi valid response nahi mila.")
+                            await msg.edit_text("❌ **Upload Failed!** Telegraph se valid data nahi mila.")
                     else:
-                        await msg.edit_text(f"❌ **Error:** API returned status code {response.status}")
+                        await msg.edit_text(f"❌ **Upload Failed:** Server ne {response.status} error diya.")
                         
     except Exception as e:
         await msg.edit_text(f"❌ **Error Occurred:** `{e}`")
         
     finally:
-        # 4. Clean up (Delete the temporary downloaded file to save server space)
+        # 4. Clean up
         if 'download_path' in locals() and os.path.exists(download_path):
             os.remove(download_path)
-

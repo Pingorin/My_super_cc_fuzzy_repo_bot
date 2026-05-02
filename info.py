@@ -108,3 +108,13 @@ PAYMENT_SUPPORT_LINK = os.environ.get("PAYMENT_SUPPORT_LINK", "https://t.me/Aapk
 
 # Custom QR Code Image URL (Agar aap automatic QR ki jagah apni design ki hui payment photo lagana chahte hain)
 CUSTOM_QR_URL = os.environ.get("CUSTOM_QR_URL", "")
+
+# Group/Channel link jahan user screenshot bhejega
+PAYMENT_SUPPORT_LINK = os.environ.get("PAYMENT_SUPPORT_LINK", "") 
+
+# Owner se custom plan baat karne ka link
+CONTACT_OWNER_LINK = os.environ.get("CONTACT_OWNER_LINK", "") 
+
+# Agar aapko custom QR code photo lagani hai (URL), warna bot auto generate karega
+CUSTOM_QR_URL = os.environ.get("CUSTOM_QR_URL", "")
+CUSTOM_QR_URL = os.environ.get("CUSTOM_QR_URL", "")

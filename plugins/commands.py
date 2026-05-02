@@ -664,7 +664,7 @@ async def start_handler(client, message):
                     # 2️⃣ USER FILE SENDING (With On-Demand Caching & Auto-Fallback)
                     used_fallback = False
                     try:
-                        # Attempt 1: Fast Cache Method
+                        # Attempt 1: Fast Cache Method (Purani ID Try Karega)
                         sent_media = await client.send_cached_media(
                             chat_id=message.from_user.id,
                             file_id=file_details['file_id'],
@@ -673,7 +673,7 @@ async def start_handler(client, message):
                             parse_mode=enums.ParseMode.HTML
                         )
                     except Exception as cache_err:
-                        # Attempt 2: 🔥 ON-DEMAND CACHING
+                        # Attempt 2: 🔥 ON-DEMAND CACHING (Bot B nayi ID nikalega aur DB update karega)
                         try:
                             db_msg = await client.get_messages(file_details['chat_id'], file_details['msg_id'])
                             new_file_id = None
@@ -681,7 +681,10 @@ async def start_handler(client, message):
                             elif db_msg.document: new_file_id = db_msg.document.file_id
                             
                             if new_file_id:
+                                # Nayi ID mil gayi! Isko DB me permanent save karo
                                 await Media.update_file_id(file_details['file_id'], new_file_id)
+                                
+                                # Aur super-fast send_cached_media se bhej do!
                                 sent_media = await client.send_cached_media(
                                     chat_id=message.from_user.id,
                                     file_id=new_file_id,
@@ -693,7 +696,7 @@ async def start_handler(client, message):
                                 raise Exception("No media found in DB Message")
                                 
                         except Exception as update_err:
-                            # Attempt 3: 🐢 Final Fallback
+                            # Attempt 3: 🐢 Final Fallback (Agar kuch bhi kaam na kare toh copy_message use karega)
                             try:
                                 sent_media = await client.copy_message(
                                     chat_id=message.from_user.id,
@@ -710,9 +713,12 @@ async def start_handler(client, message):
                     filesarr.append(sent_media)
                     sent_count += 1
                     
+                    # ⏱️ THE ANTI-FLOOD MAGIC TIMER
                     if used_fallback:
+                        # Agar copy_message use hua hai, toh API pe load jyada hai, isliye 0.8 second ka aaram dega
                         await asyncio.sleep(0.8)
                     else:
+                        # Agar fast cache use hua hai, toh load kam hai, isliye sirf 0.3 second ka nano-gap dega
                         await asyncio.sleep(0.3)
                     
                 except Exception as e:
@@ -737,8 +743,13 @@ async def start_handler(client, message):
     if len(message.command) > 1 and message.command[1].startswith("get_"):
 
         try:
+
             data = message.command[1].split("_")
+
             link_id = int(data[1])
+
+            # 🔥 BUG FIX: Group ID ko Number (Integer) me convert karna zaroori hai
+
             src_chat_id = int(data[2]) if len(data) > 2 else message.chat.id
             
             if not await check_fsub(client, message.from_user.id, message): return 
@@ -822,7 +833,7 @@ async def start_handler(client, message):
                 caption = f"{file_name}"
             else:
                 caption = str(raw_caption)
-                caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", "", caption, flags=re.IGNORECASE)
+                caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", caption, flags=re.IGNORECASE)
                 caption = re.sub(r"https?://[^\s]+", "", caption, flags=re.IGNORECASE)
                 remove_patterns = [r"Join\s?(Now|Channel|Us|Here)", r"Aa\s?Jao", r"🤞", r"➜", r"\)⁠➜", r"👉", r"\[@\w+\]", r"@\w+"]
                 for pattern in remove_patterns:
@@ -858,6 +869,8 @@ async def start_handler(client, message):
             btn_rows.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
 
             # 🔥 SMART FALLBACK ENGINE (For Single File) 🔥
+
+            # 1️⃣ BIN CHANNEL STREAMING LINK (With Fallback)
             try:
                 bin_msg = await client.send_cached_media(chat_id=info.BIN_CHANNEL, file_id=file_data.get('file_id'))
             except Exception:
@@ -879,7 +892,9 @@ async def start_handler(client, message):
             if btn_rows:
                 reply_markup = InlineKeyboardMarkup(btn_rows)
 
+            # 2️⃣ USER FILE SENDING (With On-Demand Caching & Auto-Fallback)
             try:
+                # Attempt 1: Default Method
                 sent_media = await client.send_cached_media(
                     chat_id=message.from_user.id,
                     file_id=file_data.get('file_id'),
@@ -888,6 +903,7 @@ async def start_handler(client, message):
                     parse_mode=enums.ParseMode.HTML
                 )
             except Exception as cache_err:
+                # Attempt 2: 🔥 ON-DEMAND CACHING (Nayi ID nikal kar DB update karna)
                 try:
                     db_msg = await client.get_messages(file_data['chat_id'], file_data['msg_id'])
                     new_file_id = None
@@ -895,7 +911,10 @@ async def start_handler(client, message):
                     elif db_msg.document: new_file_id = db_msg.document.file_id
                     
                     if new_file_id:
+                        # Database Update
                         await Media.update_file_id(file_data['file_id'], new_file_id)
+                        
+                        # Nayi ID se file bhejna
                         sent_media = await client.send_cached_media(
                             chat_id=message.from_user.id,
                             file_id=new_file_id,
@@ -907,6 +926,7 @@ async def start_handler(client, message):
                         raise Exception("No media found in DB Message")
                         
                 except Exception as update_err:
+                    # Attempt 3: 🐢 Auto-Fallback to copy_message
                     try:
                         sent_media = await client.copy_message(
                             chat_id=message.from_user.id,
@@ -1009,6 +1029,7 @@ async def stats_handler(client, message):
         text += f"📂 **Total Files:** `{files}`\n\n"
         text += f"🎯 **Active Indexing DB:** `DB {current_db}`\n\n"
         
+        # 🎨 Helper function to design DB Box
         def format_db_block(name, stats, has_cache=False):
             t_mb = stats['total'] / (1024*1024)
             tx_mb = stats['text'] / (1024*1024)
@@ -1029,6 +1050,7 @@ async def stats_handler(client, message):
             blk += f" └ 📁 Main Data: `{m_mb:.2f} MB`\n\n"
             return blk
 
+        # 🖨️ Print Available Databases
         if db_stats.get('db1'): text += format_db_block("DATABASE 1 (Master)", db_stats['db1'], True)
         if db_stats.get('db2'): text += format_db_block("DATABASE 2", db_stats['db2'], False)
         if db_stats.get('db3'): text += format_db_block("DATABASE 3", db_stats['db3'], False)
@@ -1042,138 +1064,24 @@ async def stats_handler(client, message):
         await message.reply(f"❌ Error: {e}")
 
 # ==============================================================================
-# 💎 PREMIUM UI FLOW & REFERRAL CALLBACKS
+# 💎 PREMIUM & REFERRAL UI CALLBACKS
 # ==============================================================================
 
-# SAFE FALLBACK TEXTS (In case missing in Script.py)
-FALLBACK_UPGRADE = """👋 Hello {mention},
-
-🚨 Aap abhi **LIMITED** access use kar rahe hain (Ads + Slow Speed + Verification). 😒
-
-👑 **Premium activate karke sab unlock karein:**
-🚫 **NO ADS** – Zero interruption
-⚡ **FAST DOWNLOAD** – No waiting
-📂 **DIRECT FILES** – No links
-🎬 **UNLIMITED MOVIES & SERIES**
-💬 **PRIORITY SUPPORT** – Fast response
-
-━━━━━━━━━━━━━━━━━━━━
-🔥 1000+ users already upgraded
-🛡️ Safe & trusted service
-
-🎁 **FREE TRIAL AVAILABLE**
-Trial ke liye `/myplan` use karein
-
-🔥 **Limited-Time Offer** 🔥
-Kabhi bhi khatam ho sakta hai!
-━━━━━━━━━━━━━━━━━━━━"""
-
-FALLBACK_PLANS = """⚡ **FLASH SALE: LIMITED TIME DISCOUNT** ⚡
-🚨 Aaj upgrade nahi kiya toh kal Premium mehenga padega!
-
-👑 **1 YEAR:** `₹200`
-🔥 **1 MONTH:** `₹25`
-⭐ **1 WEEK:** `₹10`
-⏳ **1 DAY (Trial):** `₹1`
-
-**🚀 Premium Benefits:**
-🚫 No Ads | ⚡ Fast DL | 📂 Direct Files | 💬 Priority Support
-━━━━━━━━━━━━━━━━━━━━
-💳 **Payment Options:**
-Scan the QR Code (GPay / PhonePe / Paytm)
-Or use UPI ID: `{upi_id}` 👈
-
-⚡ 2 min activation after screenshot
-⏳ Delay karoge toh activation late hoga!"""
-
-FALLBACK_CUSTOM = """👋 Hey {mention},
-    
-🎁 **OTHER PLAN / CUSTOM PLAN**
-⏰ Customised Days
-💸 According to days you choose
-
-🏆 Agar aapko diye gaye plans ke alawa koi naya plan chahiye, toh aap direct owner se baat kar sakte hain.
-
-👨‍💻 Niche diye gaye button par click karke owner ko message karein:
-➛ Use `/plan` to see all our plans.
-➛ Check your active plan by using: `/myplan`"""
-
-FALLBACK_NO_PREM = """⚠️ **Aapka Koi Active Premium Plan Nahi Hai!**
-
-Bina ads, bina verification — direct movies access chahiye? Aaj hi Premium lein aur apna time bachayein.
-
-💡 Niche diye gaye button par click karke **5 Minute ka FREE Trial** try karein ya direct plan check karein!"""
-
-@Client.on_callback_query(filters.regex(r"^open_prem_menu$"))
+@Client.on_callback_query(filters.regex(r"^open_prem_menu"))
 async def premium_main_menu(client, query):
     await query.answer() 
-    text = getattr(script, 'PREM_UPGRADE_TXT', FALLBACK_UPGRADE).format(mention=query.from_user.mention)
     
+    text = (
+        "💎 **Premium Access**\n\n"
+        "Get premium access to enjoy direct files with no shorteners or ads.\n\n"
+        "You can either purchase it directly or earn it for free by referring new users to our bot."
+    )
     buttons = [
-        [InlineKeyboardButton("💳 Check Plans & Pricing 💰", callback_data="check_plans")],
-        [InlineKeyboardButton("🔙 Back", callback_data="start_back"),
-         InlineKeyboardButton("❌ Close", callback_data="close_data")]
+        [InlineKeyboardButton("💎 Free Premium", callback_data="free_prem_page")],
+        [InlineKeyboardButton("💸 Buy Premium", callback_data="buy_premium")], 
+        [InlineKeyboardButton("🔙 Back", callback_data="start_back")] 
     ]
-    
-    try:
-        await query.message.delete()
-        await client.send_message(query.message.chat.id, text, reply_markup=InlineKeyboardMarkup(buttons))
-    except:
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
-
-@Client.on_callback_query(filters.regex(r"^buy_premium$"))
-async def buy_premium_handler(client, query):
-    await premium_main_menu(client, query)
-
-@Client.on_callback_query(filters.regex(r"^check_plans$"))
-async def check_plans_handler(client, query):
-    await query.answer()
-    
-    UPI_ID = getattr(info, 'MERCHANT_UPI_ID', 'moviestorege@ybl')
-    SUPPORT_LINK = getattr(info, 'PAYMENT_SUPPORT_LINK', f"https://t.me/{temp.U_NAME}")
-    QR_URL = getattr(info, 'CUSTOM_QR_URL', '')
-    
-    if QR_URL:
-        qr_link = QR_URL
-    else:
-        qr_link = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=upi://pay?pa={UPI_ID}&pn=Premium"
-
-    text = getattr(script, 'PREM_PLANS_TXT', FALLBACK_PLANS).format(upi_id=UPI_ID)
-    
-    buttons = [
-        [InlineKeyboardButton("👉 📸 Send Payment Screenshot", url=SUPPORT_LINK)],
-        [InlineKeyboardButton("💎 Custom Plan 💎", callback_data="custom_plan_ui")],
-        [InlineKeyboardButton("🔙 Back", callback_data="open_prem_menu"),
-         InlineKeyboardButton("❌ Close", callback_data="close_data")]
-    ]
-    
-    try:
-        await query.message.delete() 
-        await client.send_photo(
-            chat_id=query.message.chat.id,
-            photo=qr_link,
-            caption=text,
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-    except Exception:
-        await client.send_message(query.message.chat.id, text, reply_markup=InlineKeyboardMarkup(buttons))
-
-@Client.on_callback_query(filters.regex(r"^custom_plan_ui$"))
-async def custom_plan_handler(client, query):
-    await query.answer()
-    SUPPORT_LINK = getattr(info, 'PAYMENT_SUPPORT_LINK', f"https://t.me/{temp.U_NAME}")
-    text = getattr(script, 'PREM_CUSTOM_TXT', FALLBACK_CUSTOM).format(mention=query.from_user.mention)
-    
-    buttons = [
-        [InlineKeyboardButton("☎️ Contact Owner To Know More", url=SUPPORT_LINK)],
-        [InlineKeyboardButton("🔙 Back", callback_data="check_plans")]
-    ]
-    
-    try:
-        await query.message.delete()
-        await client.send_message(query.message.chat.id, text, reply_markup=InlineKeyboardMarkup(buttons))
-    except Exception:
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 @Client.on_callback_query(filters.regex(r"^free_prem_page"))
 async def free_premium_page(client, query):
@@ -1219,13 +1127,9 @@ async def free_premium_page(client, query):
         [InlineKeyboardButton("🎁 Claim Points", callback_data="claim_points"),
          InlineKeyboardButton("❌ Close", callback_data="close_data")],
         [InlineKeyboardButton("📊 Check Premium Status", callback_data="check_prem_status"),
-         InlineKeyboardButton("🔙 Back", callback_data="start_back")]
+         InlineKeyboardButton("🔙 Back", callback_data="open_prem_menu")]
     ]
-    try:
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
-    except:
-        await query.message.delete()
-        await client.send_message(query.message.chat.id, text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
 
 @Client.on_callback_query(filters.regex(r"^claim_points"))
 async def claim_points_handler(client, query):
@@ -1291,74 +1195,6 @@ async def check_status_handler(client, query):
 async def close_data(client, query):
     await query.answer()
     await query.message.delete()
-
-# ==============================================================================
-# 🎁 MYPLAN & 5-MIN FREE TRIAL LOGIC
-# ==============================================================================
-
-@Client.on_message(filters.command(["myplan", "plan"]) & filters.private)
-async def myplan_command(client, message):
-    user_id = message.from_user.id
-    is_prem, msg = await db.get_premium_status(user_id)
-    
-    if is_prem:
-        text = (
-            f"🎉 **Congratulations {message.from_user.mention}!**\n\n"
-            f"You have an **ACTIVE PREMIUM PLAN**.\n"
-            f"⏳ **Validity:** {msg}\n\n"
-            "Enjoy Ad-free Direct Fast Downloads! 🚀"
-        )
-        buttons = [[InlineKeyboardButton("💳 Extend Premium", callback_data="check_plans")]]
-        await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
-    else:
-        text = getattr(script, 'NO_PREM_TXT', FALLBACK_NO_PREM)
-        buttons = [
-            [InlineKeyboardButton("🎁 Claim 5-Min Free Trial 🎁", callback_data="claim_5min_trial")],
-            [InlineKeyboardButton("💎 Buy Premium (Direct Files)", callback_data="open_prem_menu")]
-        ]
-        await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
-
-@Client.on_callback_query(filters.regex(r"^claim_5min_trial$"))
-async def claim_trial_handler(client, query):
-    user_id = query.from_user.id
-    
-    user_data = await db.users.find_one({'id': user_id})
-    if user_data and user_data.get('trial_claimed', False):
-        await query.answer("❌ Aap apna Free Trial pehle hi use kar chuke hain!", show_alert=True)
-        return
-        
-    await query.answer("🎉 Activating Free Trial...", show_alert=False)
-    
-    # 5 Minutes = 300 seconds
-    duration_seconds = 300
-    current_time = time.time()
-    
-    is_prem, msg = await db.get_premium_status(user_id)
-    if is_prem:
-        # Puraane expiry mein time add karna (Just in case trial mil raha ho)
-        current_expiry = user_data.get('premium_expiry', 0)
-        new_expiry = current_expiry + duration_seconds
-    else:
-        new_expiry = current_time + duration_seconds
-    
-    await db.users.update_one(
-        {'id': user_id}, 
-        {'$set': {'premium_expiry': new_expiry, 'trial_claimed': True}}, 
-        upsert=True
-    )
-    
-    text = (
-        "🎊 **CONGRATULATIONS!** 🎊\n\n"
-        "You can use the FREE TRIAL for **5 MINUTES** from now!\n\n"
-        "Experience our lightning-fast premium service. To buy a full plan, click the button below."
-    )
-    buttons = [[InlineKeyboardButton("💸 Checkout Premium Plans 💸", callback_data="check_plans")]]
-    
-    try:
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
-    except:
-        await query.message.delete()
-        await client.send_message(query.message.chat.id, text, reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
 # 🕵️ ADMIN COMMAND: ALL GROUPS LIST (/groups)
@@ -1509,7 +1345,7 @@ async def refresh_ids_command(client, message):
                 # Nayi file_id aur msg_id ka data
                 update_data = {'$set': {'file_id': file_id, 'msg_id': ch_msg.id}}
                 
-                # 🔥 STRICT FILTER
+                # 🔥 STRICT FILTER: Sirf tab update karo jab Aadhar Card AUR Channel dono match hon!
                 strict_filter = {'file_unique_id': file_unique_id, 'chat_id': ch_msg.chat.id}
                 
                 # DB 1 Update
@@ -1549,25 +1385,32 @@ async def add_premium_cmd(client, message):
     duration_seconds = days * 86400
     current_time = time.time()
 
+    # 1. Database mein user check karna
     user = await db.users.find_one({'id': target_id})
+    
     if user:
         current_expiry = user.get('premium_expiry', 0)
+        # Agar pehle se premium hai, toh usme aur din add kar do
         if current_expiry > current_time:
             new_expiry = current_expiry + duration_seconds
         else:
             new_expiry = current_time + duration_seconds
     else:
+        # Agar naya user hai, toh DB me add karke premium do
         await db.add_user(target_id)
         new_expiry = current_time + duration_seconds
 
+    # 2. Database Update karna
     await db.users.update_one(
         {'id': target_id},
         {'$set': {'premium_expiry': new_expiry}},
         upsert=True
     )
 
+    # 3. Expiry Date ko readable format me banana
     expiry_date = datetime.datetime.fromtimestamp(new_expiry).strftime('%Y-%m-%d %H:%M:%S')
 
+    # 4. Admin ko Success Message bhejna
     await message.reply(
         f"✅ **Premium Successfully Added!**\n\n"
         f"👤 **User ID:** `{target_id}`\n"
@@ -1575,6 +1418,7 @@ async def add_premium_cmd(client, message):
         f"📅 **New Expiry:** `{expiry_date}`"
     )
 
+    # 5. User ko PM bhejna
     try:
         await client.send_message(
             target_id,
@@ -1584,6 +1428,7 @@ async def add_premium_cmd(client, message):
             f"📅 **Expiry Date:** `{expiry_date}`"
         )
     except Exception as e:
+        # Agar user ne bot start nahi kiya hai ya block kar diya hai
         await message.reply(f"⚠️ **Note:** User ka premium DB me add ho gaya hai, lekin user ne bot block kar rakha hai ya kabhi start nahi kiya isliye usko PM nahi gaya.\n*(Error: {e})*")
 
 @Client.on_message(filters.command("removepremium") & filters.user(ADMINS))
@@ -1596,6 +1441,7 @@ async def remove_premium_cmd(client, message):
     except ValueError:
         return await message.reply("❌ **Error:** User ID number hona chahiye.")
 
+    # Database me expiry 0 set karna
     await db.users.update_one(
         {'id': target_id},
         {'$set': {'premium_expiry': 0}}
@@ -1603,13 +1449,14 @@ async def remove_premium_cmd(client, message):
 
     await message.reply(f"✅ **Done!** User `{target_id}` ka premium successully hata diya gaya hai.")
 
+    # User ko alert bhejna
     try:
         await client.send_message(
             target_id,
             "⚠️ **Premium Expired / Removed** ⚠️\n\nAapka premium access khatam ho gaya hai. Ab file download karne ke liye aapko wapas shortener links use karne honge."
         )
     except Exception:
-        pass 
+        pass # Agar block kiya hoga toh ignore ho jayega
 
 @Client.on_message(filters.command("checkpremium") & filters.user(ADMINS))
 async def check_premium_cmd(client, message):
@@ -1622,6 +1469,7 @@ async def check_premium_cmd(client, message):
         return await message.reply("❌ **Error:** User ID number hona chahiye.")
 
     user = await db.users.find_one({'id': target_id})
+    
     if not user:
         return await message.reply("❌ **Database Error:** Ye user database mein maujood nahi hai.")
 
@@ -1629,6 +1477,7 @@ async def check_premium_cmd(client, message):
     current_time = time.time()
 
     if expiry > current_time:
+        # Agar premium hai toh exact date aur time nikalna
         expiry_date = datetime.datetime.fromtimestamp(expiry).strftime('%Y-%m-%d %H:%M:%S')
         remaining_days = int((expiry - current_time) / 86400)
         
@@ -1645,6 +1494,7 @@ async def check_premium_cmd(client, message):
             f"ℹ️ Is user ke paas koi active premium nahi hai."
         )
 
+
 # ==============================================================================
 # 🌟 MULTI-STICKER SYSTEM (WITH UID & FID)
 # ==============================================================================
@@ -1653,6 +1503,7 @@ async def check_premium_cmd(client, message):
 async def add_sticker_cmd(client, message):
     user_id = message.from_user.id
     
+    # 1. Admin Check
     try:
         member = await client.get_chat_member(message.chat.id, user_id)
         if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR] and user_id not in ADMINS:
@@ -1660,9 +1511,11 @@ async def add_sticker_cmd(client, message):
     except:
         return
 
+    # 2. Reply Check
     if not message.reply_to_message or not message.reply_to_message.sticker:
         return await message.reply("⚠️ **Sahi Tarika:** Group mein koi Sticker bhejiye, fir us par Reply karke `/addsticker` likhiye.")
 
+    # 3. Save to Database using dict (fid and uid)
     sticker = message.reply_to_message.sticker
     sticker_data = {
         'fid': sticker.file_id,
@@ -1674,17 +1527,20 @@ async def add_sticker_cmd(client, message):
     if not isinstance(current_stickers, list):
         current_stickers = []
 
+    # Convert old string-based IDs to dicts to prevent crashes (Backward Compatibility)
     clean_stickers = []
     for s in current_stickers:
         if isinstance(s, str):
-            clean_stickers.append({'fid': s, 'uid': s}) 
+            clean_stickers.append({'fid': s, 'uid': s}) # Fallback
         else:
             clean_stickers.append(s)
     current_stickers = clean_stickers
 
+    # Check if already exists using 'uid'
     if any(s['uid'] == sticker.file_unique_id for s in current_stickers):
         return await message.reply("⚠️ Ye sticker pehle se add hai.")
 
+    # Max 5 stickers ki limit
     if len(current_stickers) >= 5:
         return await message.reply("⚠️ **Limit Reached!** Aap pehle se 5 stickers add kar chuke hain. Naye add karne ke liye pehle `/clearstickers` dabayein.")
 
@@ -1697,6 +1553,7 @@ async def add_sticker_cmd(client, message):
 async def clear_stickers_cmd(client, message):
     user_id = message.from_user.id
     
+    # Admin Check
     try:
         member = await client.get_chat_member(message.chat.id, user_id)
         if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR] and user_id not in ADMINS:
@@ -1704,6 +1561,7 @@ async def clear_stickers_cmd(client, message):
     except:
         return
 
+    # Clear Database
     await db.update_group_settings(message.chat.id, {'result_stickers': []})
     await message.reply("🗑️ **All Stickers Cleared!** Ab search results ke sath koi sticker nahi aayega. Aap chahein toh naye add kar sakte hain.")
 
@@ -1712,6 +1570,7 @@ async def clear_stickers_cmd(client, message):
 async def remove_specific_sticker_cmd(client, message):
     user_id = message.from_user.id
     
+    # 1. Admin Check
     try:
         member = await client.get_chat_member(message.chat.id, user_id)
         if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR] and user_id not in ADMINS:
@@ -1719,9 +1578,11 @@ async def remove_specific_sticker_cmd(client, message):
     except:
         return
 
+    # 2. Reply Check
     if not message.reply_to_message or not message.reply_to_message.sticker:
         return await message.reply("⚠️ **Sahi Tarika:** Jis sticker ko list se hatana hai, group mein us par Reply karke `/removesticker` likhiye.")
 
+    # 3. Remove from Database using uid
     uid = message.reply_to_message.sticker.file_unique_id
     group_data = await db.get_group_settings(message.chat.id)
     
@@ -1729,6 +1590,7 @@ async def remove_specific_sticker_cmd(client, message):
     if not isinstance(current_stickers, list):
         current_stickers = []
 
+    # Convert old format if needed for safe filtering
     clean_stickers = []
     for s in current_stickers:
         if isinstance(s, str):
@@ -1736,8 +1598,10 @@ async def remove_specific_sticker_cmd(client, message):
         else:
             clean_stickers.append(s)
     
+    # Filter out the sticker with matching 'uid'
     new_list = [s for s in clean_stickers if s['uid'] != uid]
 
+    # 4. Check & Remove Logic
     if len(new_list) < len(clean_stickers):
         await db.update_group_settings(message.chat.id, {'result_stickers': new_list})
         await message.reply(f"🗑️ **Sticker Removed!**\nAb ye sticker search results mein nahi aayega.\n(Bache hue stickers: {len(new_list)}/5)")
@@ -1761,12 +1625,7 @@ async def features_callback(client, query):
         "✓ Smart FSub & Verification"
     )
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="start_back")]]
-    
-    try:
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
-    except:
-        await query.message.delete()
-        await client.send_message(query.message.chat.id, text, reply_markup=InlineKeyboardMarkup(buttons))
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 @Client.on_callback_query(filters.regex(r"^earn$"))
 async def earn_callback(client, query):
@@ -1780,15 +1639,11 @@ async def earn_callback(client, query):
         "4️⃣ Apna URL Shortener API set karein aur earning shuru karein!"
     )
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="start_back")]]
-    
-    try:
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
-    except:
-        await query.message.delete()
-        await client.send_message(query.message.chat.id, text, reply_markup=InlineKeyboardMarkup(buttons))
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 @Client.on_callback_query(filters.regex(r"^refer$"))
 async def refer_callback(client, query):
+    await query.answer() 
     await free_premium_page(client, query)
 
 @Client.on_callback_query(filters.regex(r"^start_back$"))
@@ -1801,10 +1656,4 @@ async def start_back_callback(client, query):
          InlineKeyboardButton('💎 Free Premium', callback_data='open_prem_menu')],
         [InlineKeyboardButton('🚫 ᴇᴀʀɴ ᴍᴏɴᴇʏ ᴡɪᴛʜ ʙᴏᴛ 🚫', callback_data='earn'), InlineKeyboardButton('🤝 ʀᴇꜰᴇʀʀᴀʟ 🤝', callback_data='refer')]
     ]
-    
-    try:
-        await query.message.delete()
-        await client.send_photo(query.message.chat.id, photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
-    except:
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
-
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))

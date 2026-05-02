@@ -5,7 +5,7 @@ import datetime
 import asyncio 
 import urllib.parse
 from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from pyrogram.errors import UserNotParticipant, UsernameInvalid, UsernameNotOccupied, PeerIdInvalid
 from database.users_chats_db import db
 from database.ia_filterdb import Media
@@ -1101,7 +1101,7 @@ async def stats_handler(client, message):
         await message.reply(f"❌ Error: {e}")
 
 # ==============================================================================
-# 💎 PREMIUM MAIN MENU (OLD STYLE RETAINED)
+# 💎 PREMIUM MAIN MENU (SMOOTH TRANSITIONS)
 # ==============================================================================
 
 @Client.on_callback_query(filters.regex(r"^open_prem_menu$"))
@@ -1118,7 +1118,11 @@ async def premium_main_menu(client, query):
         [InlineKeyboardButton("🔙 Back", callback_data="start_back")] 
     ]
     try:
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+        if query.message.photo:
+            await query.message.edit_media(InputMediaPhoto(START_IMG, caption=text), reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            await query.message.delete()
+            await client.send_photo(query.message.chat.id, photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
     except Exception:
         pass
 
@@ -1138,10 +1142,10 @@ async def buy_premium_handler(client, query):
     ]
     try:
         if query.message.photo:
-            await query.message.delete()
-            await client.send_message(query.message.chat.id, text, reply_markup=InlineKeyboardMarkup(buttons))
+            await query.message.edit_media(InputMediaPhoto(START_IMG, caption=text), reply_markup=InlineKeyboardMarkup(buttons))
         else:
-            await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+            await query.message.delete()
+            await client.send_photo(query.message.chat.id, photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
     except Exception:
         pass
 
@@ -1161,8 +1165,11 @@ async def check_plans_handler(client, query):
          InlineKeyboardButton("❌ Close", callback_data="close_data")]
     ]
     try:
-        await query.message.delete() 
-        await client.send_photo(chat_id=query.message.chat.id, photo=qr_link, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
+        if query.message.photo:
+            await query.message.edit_media(InputMediaPhoto(qr_link, caption=text), reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            await query.message.delete()
+            await client.send_photo(chat_id=query.message.chat.id, photo=qr_link, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
     except Exception:
         await client.send_message(query.message.chat.id, text, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -1177,10 +1184,10 @@ async def custom_plan_handler(client, query):
     ]
     try:
         if query.message.photo:
-            await query.message.delete()
-            await client.send_message(query.message.chat.id, text, reply_markup=InlineKeyboardMarkup(buttons))
+            await query.message.edit_media(InputMediaPhoto(START_IMG, caption=text), reply_markup=InlineKeyboardMarkup(buttons))
         else:
-            await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+            await query.message.delete()
+            await client.send_photo(query.message.chat.id, photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
     except Exception:
         pass
 
@@ -1230,7 +1237,14 @@ async def free_premium_page(client, query):
         [InlineKeyboardButton("📊 Check Premium Status", callback_data="check_prem_status"),
          InlineKeyboardButton("🔙 Back", callback_data="open_prem_menu")]
     ]
-    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+    try:
+        if query.message.photo:
+            await query.message.edit_media(InputMediaPhoto(START_IMG, caption=text), reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            await query.message.delete()
+            await client.send_photo(query.message.chat.id, photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception:
+        pass
 
 @Client.on_callback_query(filters.regex(r"^claim_points"))
 async def claim_points_handler(client, query):
@@ -1256,14 +1270,20 @@ async def claim_points_handler(client, query):
         if success:
             exp_date = datetime.datetime.fromtimestamp(expiry).strftime('%Y-%m-%d')
             await query.answer("🎉 Premium Claimed Successfully!", show_alert=True)
-            await query.message.edit_text(
+            text = (
                 f"🎉 **Congratulations!**\n\n"
                 f"You have claimed **Premium Access**.\n"
                 f"✅ No Shorteners\n"
                 f"✅ Direct Files\n\n"
-                f"📅 **Expiry:** {exp_date}",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="free_prem_page")]])
+                f"📅 **Expiry:** {exp_date}"
             )
+            try:
+                if query.message.photo:
+                    await query.message.edit_media(InputMediaPhoto(START_IMG, caption=text), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="free_prem_page")]]))
+                else:
+                    await query.message.delete()
+                    await client.send_photo(query.message.chat.id, photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="free_prem_page")]]))
+            except: pass
         else:
             await query.answer("❌ Error claiming.", show_alert=True)
     else:
@@ -1274,7 +1294,13 @@ async def claim_points_handler(client, query):
             f"You need **{needed}** more points to claim premium."
         )
         await query.answer("Not enough points!", show_alert=False)
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="free_prem_page")]]))
+        try:
+            if query.message.photo:
+                await query.message.edit_media(InputMediaPhoto(START_IMG, caption=text), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="free_prem_page")]]))
+            else:
+                await query.message.delete()
+                await client.send_photo(query.message.chat.id, photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="free_prem_page")]]))
+        except: pass
 
 @Client.on_callback_query(filters.regex(r"^check_prem_status"))
 async def check_status_handler(client, query):
@@ -1290,7 +1316,13 @@ async def check_status_handler(client, query):
         f"**Status:** {status_icon}\n"
         f"**Validity:** {msg}"
     )
-    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="free_prem_page")]]))
+    try:
+        if query.message.photo:
+            await query.message.edit_media(InputMediaPhoto(START_IMG, caption=text), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="free_prem_page")]]))
+        else:
+            await query.message.delete()
+            await client.send_photo(query.message.chat.id, photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="free_prem_page")]]))
+    except: pass
 
 @Client.on_callback_query(filters.regex(r"^close_data"))
 async def close_data(client, query):
@@ -1313,7 +1345,7 @@ async def myplan_command(client, message):
             [InlineKeyboardButton("🔙 Back", callback_data="start_back"),
              InlineKeyboardButton("❌ Close", callback_data="close_data")]
         ]
-        await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
+        await message.reply_photo(photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
     else:
         text = script.NO_PREM_TXT
         buttons = [
@@ -1322,7 +1354,7 @@ async def myplan_command(client, message):
             [InlineKeyboardButton("🔙 Back", callback_data="start_back"),
              InlineKeyboardButton("❌ Close", callback_data="close_data")]
         ]
-        await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
+        await message.reply_photo(photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
 
 @Client.on_callback_query(filters.regex(r"^claim_5min_trial$"))
 async def claim_trial_handler(client, query):
@@ -1345,7 +1377,14 @@ async def claim_trial_handler(client, query):
         [InlineKeyboardButton("💎 Buy Premium (Direct Files)", callback_data="buy_premium")],
         [InlineKeyboardButton("🔙 Back", callback_data="start_back")]
     ]
-    await query.message.edit_text(script.TRIAL_ACTIVE_TXT, reply_markup=InlineKeyboardMarkup(buttons))
+    try:
+        if query.message.photo:
+            await query.message.edit_media(InputMediaPhoto(START_IMG, caption=script.TRIAL_ACTIVE_TXT), reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            await query.message.delete()
+            await client.send_photo(query.message.chat.id, photo=START_IMG, caption=script.TRIAL_ACTIVE_TXT, reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception:
+        pass
 
 # ==============================================================================
 # 🕵️ ADMIN COMMAND: ALL GROUPS LIST (/groups)
@@ -1776,7 +1815,14 @@ async def features_callback(client, query):
         "✓ Smart FSub & Verification"
     )
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="start_back")]]
-    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    try:
+        if query.message.photo:
+            await query.message.edit_media(InputMediaPhoto(START_IMG, caption=text), reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            await query.message.delete()
+            await client.send_photo(query.message.chat.id, photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception:
+        pass
 
 @Client.on_callback_query(filters.regex(r"^earn$"))
 async def earn_callback(client, query):
@@ -1790,7 +1836,14 @@ async def earn_callback(client, query):
         "4️⃣ Apna URL Shortener API set karein aur earning shuru karein!"
     )
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="start_back")]]
-    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    try:
+        if query.message.photo:
+            await query.message.edit_media(InputMediaPhoto(START_IMG, caption=text), reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            await query.message.delete()
+            await client.send_photo(query.message.chat.id, photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception:
+        pass
 
 @Client.on_callback_query(filters.regex(r"^refer$"))
 async def refer_callback(client, query):
@@ -1809,9 +1862,9 @@ async def start_back_callback(client, query):
     ]
     try:
         if query.message.photo:
+            await query.message.edit_media(InputMediaPhoto(START_IMG, caption=text), reply_markup=InlineKeyboardMarkup(buttons))
+        else:
             await query.message.delete()
             await client.send_photo(chat_id=query.message.chat.id, photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
-        else:
-            await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
     except Exception:
         pass

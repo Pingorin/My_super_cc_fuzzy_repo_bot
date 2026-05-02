@@ -17,6 +17,12 @@ from Script import script
 logger = logging.getLogger(__name__)
 START_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg"
 
+# Safely load Payment Variables from info.py (Fallback to default if missing)
+MERCHANT_UPI_ID = getattr(info, 'MERCHANT_UPI_ID', "aapka_id@upi")
+PAYMENT_SUPPORT_LINK = getattr(info, 'PAYMENT_SUPPORT_LINK', "https://t.me/AapkaSupportGroup")
+CONTACT_OWNER_LINK = getattr(info, 'CONTACT_OWNER_LINK', "https://t.me/AapkaPersonalUsername")
+CUSTOM_QR_URL = getattr(info, 'CUSTOM_QR_URL', "")
+
 # ==============================================================================
 # 💓 HEARTBEAT ENGINE (AUTO-FALLBACK SYSTEM)
 # ==============================================================================
@@ -448,6 +454,7 @@ async def start_handler(client, message):
             except Exception as e: 
                 pass
             
+        # --- FREE PREMIUM DEEP LINK LOGIC ---
         if len(message.command) > 1 and message.command[1] == "free_premium_info":
             bot_username = temp.U_NAME
             ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
@@ -469,20 +476,42 @@ async def start_handler(client, message):
                 target = group.get('referral_target', 5)
                 break
 
+            user_points = await db.get_referral_points(user_id)
+
             text = (
                 "💰 **Get Free Premium Access!**\n\n"
-                "Share the link below with a new user. If they start the bot through your link, you will get **10 referral points**.\n\n"
-                f"**Reward:** {target * 10} Points = {reward_desc} Premium Access\n\n"
+                "Share your unique link below. \n"
+                "• **New User:** You get +10 Points\n"
+                "• **Old User:** No Points\n\n"
+                f"📊 **Your Points:** {user_points}\n"
+                f"**Reward:** {target} Referrals = {reward_desc} Premium Access\n\n"
                 "You can claim your points for direct file access with no shorteners!\n\n"
-                f"`{ref_link}`"
+                f"**Your Link:**\n`{ref_link}`"
             )
             
             buttons = [
                 [InlineKeyboardButton("📤 Click to Share", url=share_url)],
                 [InlineKeyboardButton("🎁 Claim Points", callback_data="claim_points"),
+                 InlineKeyboardButton("❌ Close", callback_data="close_data")],
+                [InlineKeyboardButton("📊 Check Premium Status", callback_data="check_prem_status"),
+                 InlineKeyboardButton("🔙 Back", callback_data="open_prem_menu")]
+            ]
+            await message.reply_photo(photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
+            return
+
+        # --- BUY PREMIUM DEEP LINK LOGIC ---
+        if len(message.command) > 1 and message.command[1] == "buy_premium_info":
+            text = script.PREM_UPGRADE_TXT.format(mention=message.from_user.mention)
+            buttons = [
+                [InlineKeyboardButton("💳 Check Plans & Pricing 💰", callback_data="check_plans")],
+                [InlineKeyboardButton("🔙 Back", callback_data="open_prem_menu"),
                  InlineKeyboardButton("❌ Close", callback_data="close_data")]
             ]
-            await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+            await message.reply_photo(
+                photo=START_IMG, 
+                caption=text, 
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
             return
 
         if len(message.command) > 1 and not (message.command[1].startswith("verify_") or message.command[1].startswith("get_") or message.command[1].startswith("sendall_") or message.command[1] == "settings"):
@@ -659,6 +688,12 @@ async def start_handler(client, message):
                             InlineKeyboardButton("⚡ Fast Download", url=dl_url)
                         ])
                     
+                    # ADD 2 BUTTONS HERE ALSO FOR BATCH
+                    btn_rows.append([
+                        InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
+                        InlineKeyboardButton("💸 Buy Premium", url=f"https://t.me/{temp.U_NAME}?start=buy_premium_info")
+                    ])
+
                     reply_markup = InlineKeyboardMarkup(btn_rows) if btn_rows else None
 
                     # 2️⃣ USER FILE SENDING (With On-Demand Caching & Auto-Fallback)
@@ -866,9 +901,11 @@ async def start_handler(client, message):
             if grp_link:
                 btn_rows.append([InlineKeyboardButton("Back to Group 🔙", url=grp_link)])
 
-            btn_rows.append([InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info")])
-
-            # 🔥 SMART FALLBACK ENGINE (For Single File) 🔥
+            # 🔥 SMART 2-BUTTON MENU FOR FILE CAPTIONS
+            btn_rows.append([
+                InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
+                InlineKeyboardButton("💸 Buy Premium", url=f"https://t.me/{temp.U_NAME}?start=buy_premium_info")
+            ])
 
             # 1️⃣ BIN CHANNEL STREAMING LINK (With Fallback)
             try:
@@ -1064,13 +1101,12 @@ async def stats_handler(client, message):
         await message.reply(f"❌ Error: {e}")
 
 # ==============================================================================
-# 💎 PREMIUM & REFERRAL UI CALLBACKS
+# 💎 PREMIUM MAIN MENU (OLD STYLE RETAINED)
 # ==============================================================================
 
-@Client.on_callback_query(filters.regex(r"^open_prem_menu"))
+@Client.on_callback_query(filters.regex(r"^open_prem_menu$"))
 async def premium_main_menu(client, query):
-    await query.answer() 
-    
+    await query.answer()
     text = (
         "💎 **Premium Access**\n\n"
         "Get premium access to enjoy direct files with no shorteners or ads.\n\n"
@@ -1081,7 +1117,72 @@ async def premium_main_menu(client, query):
         [InlineKeyboardButton("💸 Buy Premium", callback_data="buy_premium")], 
         [InlineKeyboardButton("🔙 Back", callback_data="start_back")] 
     ]
-    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    try:
+        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception:
+        pass
+
+# ==============================================================================
+# 💳 BUY PREMIUM PITCH & PLANS
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^buy_premium$"))
+async def buy_premium_handler(client, query):
+    await query.answer()
+    text = script.PREM_UPGRADE_TXT.format(mention=query.from_user.mention)
+    
+    buttons = [
+        [InlineKeyboardButton("💳 Check Plans & Pricing 💰", callback_data="check_plans")],
+        [InlineKeyboardButton("🔙 Back", callback_data="open_prem_menu"),
+         InlineKeyboardButton("❌ Close", callback_data="close_data")]
+    ]
+    try:
+        if query.message.photo:
+            await query.message.delete()
+            await client.send_message(query.message.chat.id, text, reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception:
+        pass
+
+@Client.on_callback_query(filters.regex(r"^check_plans$"))
+async def check_plans_handler(client, query):
+    await query.answer("Fetching Plans...", show_alert=False)
+    
+    if CUSTOM_QR_URL: qr_link = CUSTOM_QR_URL
+    else: qr_link = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=upi://pay?pa={MERCHANT_UPI_ID}&pn=Premium"
+
+    text = script.PREM_PLANS_TXT.format(upi_id=MERCHANT_UPI_ID)
+    
+    buttons = [
+        [InlineKeyboardButton("👉 📸 Send Payment Screenshot", url=PAYMENT_SUPPORT_LINK)],
+        [InlineKeyboardButton("💎 Custom Plan 💎", callback_data="custom_plan_ui")],
+        [InlineKeyboardButton("🔙 Back", callback_data="buy_premium"),
+         InlineKeyboardButton("❌ Close", callback_data="close_data")]
+    ]
+    try:
+        await query.message.delete() 
+        await client.send_photo(chat_id=query.message.chat.id, photo=qr_link, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception:
+        await client.send_message(query.message.chat.id, text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^custom_plan_ui$"))
+async def custom_plan_handler(client, query):
+    await query.answer()
+    text = script.PREM_CUSTOM_TXT.format(mention=query.from_user.mention)
+    
+    buttons = [
+        [InlineKeyboardButton("☎️ Contact Owner To Know More", url=CONTACT_OWNER_LINK)],
+        [InlineKeyboardButton("🔙 Back", callback_data="check_plans")]
+    ]
+    try:
+        if query.message.photo:
+            await query.message.delete()
+            await client.send_message(query.message.chat.id, text, reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception:
+        pass
 
 @Client.on_callback_query(filters.regex(r"^free_prem_page"))
 async def free_premium_page(client, query):
@@ -1195,6 +1296,56 @@ async def check_status_handler(client, query):
 async def close_data(client, query):
     await query.answer()
     await query.message.delete()
+
+# ==============================================================================
+# 🎁 MYPLAN & 5-MIN FREE TRIAL LOGIC
+# ==============================================================================
+
+@Client.on_message(filters.command(["myplan", "plan"]) & filters.private)
+async def myplan_command(client, message):
+    user_id = message.from_user.id
+    is_prem, expiry_msg = await db.get_premium_status(user_id)
+    
+    if is_prem:
+        text = script.MYPLAN_ACTIVE_TXT.format(mention=message.from_user.mention, expiry_date=expiry_msg)
+        buttons = [
+            [InlineKeyboardButton("💳 Check Plans & Purchase", callback_data="buy_premium")],
+            [InlineKeyboardButton("🔙 Back", callback_data="start_back"),
+             InlineKeyboardButton("❌ Close", callback_data="close_data")]
+        ]
+        await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
+    else:
+        text = script.NO_PREM_TXT
+        buttons = [
+            [InlineKeyboardButton("🎁 Claim 5-Min Free Trial 🎁", callback_data="claim_5min_trial")],
+            [InlineKeyboardButton("💳 Check Plan & Purchase", callback_data="buy_premium")],
+            [InlineKeyboardButton("🔙 Back", callback_data="start_back"),
+             InlineKeyboardButton("❌ Close", callback_data="close_data")]
+        ]
+        await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^claim_5min_trial$"))
+async def claim_trial_handler(client, query):
+    user_id = query.from_user.id
+    
+    user_data = await db.users.find_one({'id': user_id})
+    if user_data and user_data.get('trial_claimed', False):
+        await query.answer("❌ Aap ye Free Trial pehle hi use kar chuke hain!", show_alert=True)
+        return
+        
+    await query.answer("🚀 Premium Features Unlocked!", show_alert=False)
+    
+    duration_seconds = 300
+    current_time = time.time()
+    new_expiry = current_time + duration_seconds
+    
+    await db.users.update_one({'id': user_id}, {'$set': {'premium_expiry': new_expiry, 'trial_claimed': True}}, upsert=True)
+    
+    buttons = [
+        [InlineKeyboardButton("💎 Buy Premium (Direct Files)", callback_data="buy_premium")],
+        [InlineKeyboardButton("🔙 Back", callback_data="start_back")]
+    ]
+    await query.message.edit_text(script.TRIAL_ACTIVE_TXT, reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
 # 🕵️ ADMIN COMMAND: ALL GROUPS LIST (/groups)
@@ -1656,4 +1807,11 @@ async def start_back_callback(client, query):
          InlineKeyboardButton('💎 Free Premium', callback_data='open_prem_menu')],
         [InlineKeyboardButton('🚫 ᴇᴀʀɴ ᴍᴏɴᴇʏ ᴡɪᴛʜ ʙᴏᴛ 🚫', callback_data='earn'), InlineKeyboardButton('🤝 ʀᴇꜰᴇʀʀᴀʟ 🤝', callback_data='refer')]
     ]
-    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    try:
+        if query.message.photo:
+            await query.message.delete()
+            await client.send_photo(chat_id=query.message.chat.id, photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception:
+        pass

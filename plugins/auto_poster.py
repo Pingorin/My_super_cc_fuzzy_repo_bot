@@ -4,7 +4,7 @@ import logging
 import json
 import info
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReactionTypeEmoji
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
 from utils import temp
 
@@ -63,12 +63,17 @@ async def get_fresh_or_mega_trending(posted_ids):
     return None, False
 
 # ==============================================================================
-# ⚡ HELPER: ADD REACTIONS TO MESSAGE
+# ⚡ HELPER: ADD REACTIONS TO MESSAGE (PYROFORK COMPATIBLE)
 # ==============================================================================
 async def add_poster_reactions(client, chat_id, message_id):
     try:
-        react_list = [ReactionTypeEmoji(emoji=react) for react in POSTER_REACTIONS]
-        await client.set_message_reaction(chat_id, message_id, react_list)
+        # Pyrofork uses direct string emojis with send_reaction
+        for emoji in POSTER_REACTIONS:
+            try:
+                await client.send_reaction(chat_id, message_id, emoji)
+                break # Ek reaction add hote hi break, baki users khud add kar lenge
+            except Exception:
+                continue
     except Exception as e:
         print(f"Failed to add reactions to {chat_id}: {e}")
 

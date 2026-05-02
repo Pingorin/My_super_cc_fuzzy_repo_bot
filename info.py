@@ -98,3 +98,13 @@ MONGODB_TIMEOUT = 300 # 5 Minutes
 
 # --- SEARCH SETTINGS ---
 PM_SEARCH = os.environ.get("PM_SEARCH", "False").lower() in ["true", "yes", "1"]
+
+# ==============================================================================
+# 💳 PAYMENT & PREMIUM SETTINGS
+# ==============================================================================
+# Yahan default me aap apni UPI ID aur Support Group ka link daal sakte hain (Environment Var se bhi control ho jayega)
+MERCHANT_UPI_ID = os.environ.get("MERCHANT_UPI_ID", "aapka_id@ybl")
+PAYMENT_SUPPORT_LINK = os.environ.get("PAYMENT_SUPPORT_LINK", "https://t.me/AapkaSupportGroup")
+
+# Custom QR Code Image URL (Agar aap automatic QR ki jagah apni design ki hui payment photo lagana chahte hain)
+CUSTOM_QR_URL = os.environ.get("CUSTOM_QR_URL", "")

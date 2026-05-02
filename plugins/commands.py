@@ -401,13 +401,30 @@ async def check_fsub(client, user_id, message_obj):
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start_handler(client, message):
     if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-        await db.add_group(message.chat.id, message.chat.title)
+        asyncio.create_task(db.add_group(message.chat.id, message.chat.title))
         if len(message.command) == 1: return await message.reply("✅ Bot is Alive!")
         return 
 
     if message.chat.type == enums.ChatType.PRIVATE:
         user_id = message.from_user.id
         
+        # 🚀 SUPER FAST START (No DB delay for base command)
+        if len(message.command) == 1:
+            text = f"Hello {message.from_user.mention} 👋,\nI am a Powerul Auto Filter Bot."
+            buttons = [
+                [InlineKeyboardButton('⇆ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜps ⇆', url=f'http://t.me/{temp.U_NAME}?startgroup=start')],
+                [InlineKeyboardButton('⚙ ꜰᴇᴀᴛᴜʀᴇs', callback_data='features'), 
+                 InlineKeyboardButton('💎 Free Premium', callback_data='open_prem_menu')],
+                [InlineKeyboardButton('🚫 ᴇᴀʀɴ ᴍᴏɴᴇʏ ᴡɪᴛʜ ʙᴏᴛ 🚫', callback_data='earn'), InlineKeyboardButton('🤝 ʀᴇꜰᴇʀʀᴀʟ 🤝', callback_data='refer')]
+            ]
+            await message.reply_photo(photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
+            asyncio.create_task(db.add_user(user_id))
+            return
+            
+        if len(message.command) > 1 and message.command[1] == "settings":
+            from plugins.settings_ui import settings_command
+            return await settings_command(client, message)
+
         old_user = await db.get_user_data(user_id)
         await db.add_user(user_id)
 
@@ -816,7 +833,7 @@ async def start_handler(client, message):
                 caption = f"{file_name}"
             else:
                 caption = str(raw_caption)
-                caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", "", caption, flags=re.IGNORECASE)
+                caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", caption, flags=re.IGNORECASE)
                 caption = re.sub(r"https?://[^\s]+", "", caption, flags=re.IGNORECASE)
                 remove_patterns = [r"Join\s?(Now|Channel|Us|Here)", r"Aa\s?Jao", r"🤞", r"➜", r"\)⁠➜", r"👉", r"\[@\w+\]", r"@\w+"]
                 for pattern in remove_patterns:
@@ -930,21 +947,6 @@ async def start_handler(client, message):
                 
         except Exception as e: await message.reply(f"❌ Error: {e}")
         return
-
-    # --- PRIVATE START MESSAGE UI (SETTINGS REDIRECT HANDLER ADDED) ---
-    if message.chat.type == enums.ChatType.PRIVATE:
-        if len(message.command) > 1 and message.command[1] == "settings":
-            from plugins.settings_ui import settings_command
-            return await settings_command(client, message)
-            
-        text = f"Hello {message.from_user.mention} 👋,\nI am a Powerul Auto Filter Bot."
-        buttons = [
-            [InlineKeyboardButton('⇆ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜps ⇆', url=f'http://t.me/{temp.U_NAME}?startgroup=start')],
-            [InlineKeyboardButton('⚙ ꜰᴇᴀᴛᴜʀᴇs', callback_data='features'), 
-             InlineKeyboardButton('💎 Free Premium', callback_data='open_prem_menu')],
-            [InlineKeyboardButton('🚫 ᴇᴀʀɴ ᴍᴏɴᴇʏ ᴡɪᴛʜ ʙᴏᴛ 🚫', callback_data='earn'), InlineKeyboardButton('🤝 ʀᴇꜰᴇʀʀᴀʟ 🤝', callback_data='refer')]
-        ]
-        await message.reply_photo(photo=START_IMG, caption=text, reply_markup=InlineKeyboardMarkup(buttons))
 
 @Client.on_message(filters.command("connect") & filters.group)
 async def connect_handler(client, message):
@@ -1067,6 +1069,8 @@ async def stats_handler(client, message):
 
 @Client.on_callback_query(filters.regex(r"^open_prem_menu"))
 async def premium_main_menu(client, query):
+    await query.answer() 
+    
     text = (
         "💎 **Premium Access**\n\n"
         "Get premium access to enjoy direct files with no shorteners or ads.\n\n"
@@ -1081,6 +1085,8 @@ async def premium_main_menu(client, query):
 
 @Client.on_callback_query(filters.regex(r"^free_prem_page"))
 async def free_premium_page(client, query):
+    await query.answer() 
+    
     user_id = query.from_user.id
     bot_username = temp.U_NAME
     
@@ -1171,6 +1177,8 @@ async def claim_points_handler(client, query):
 
 @Client.on_callback_query(filters.regex(r"^check_prem_status"))
 async def check_status_handler(client, query):
+    await query.answer() 
+    
     user_id = query.from_user.id
     is_prem, msg = await db.get_premium_status(user_id)
     
@@ -1185,6 +1193,7 @@ async def check_status_handler(client, query):
 
 @Client.on_callback_query(filters.regex(r"^close_data"))
 async def close_data(client, query):
+    await query.answer()
     await query.message.delete()
 
 # ==============================================================================
@@ -1598,3 +1607,53 @@ async def remove_specific_sticker_cmd(client, message):
         await message.reply(f"🗑️ **Sticker Removed!**\nAb ye sticker search results mein nahi aayega.\n(Bache hue stickers: {len(new_list)}/5)")
     else:
         await message.reply("⚠️ Ye sticker aapki bot ki list mein add hi nahi hai.")
+
+# ==============================================================================
+# 🚀 SUPER FAST START MENU BUTTONS (Features, Earn, Referral, Back)
+# ==============================================================================
+
+@Client.on_callback_query(filters.regex(r"^features$"))
+async def features_callback(client, query):
+    await query.answer() 
+    text = (
+        "⚙️ **Bot Features:**\n\n"
+        "✓ Auto Filter in Groups\n"
+        "✓ Super Fast Search Engine\n"
+        "✓ Multi-Database Architecture\n"
+        "✓ Watch Online & Fast Download\n"
+        "✓ Auto Post & Auto Mentions\n"
+        "✓ Smart FSub & Verification"
+    )
+    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="start_back")]]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^earn$"))
+async def earn_callback(client, query):
+    await query.answer() 
+    text = (
+        "🚫 **Earn Money with Bot** 🚫\n\n"
+        "Aap is bot ka use karke apne group ke traffic se paise kama sakte hain!\n\n"
+        "1️⃣ Bot ko apne group me add karein.\n"
+        "2️⃣ Bot ko Admin banayein.\n"
+        "3️⃣ Mere PM me `/settings` type karein.\n"
+        "4️⃣ Apna URL Shortener API set karein aur earning shuru karein!"
+    )
+    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="start_back")]]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^refer$"))
+async def refer_callback(client, query):
+    await query.answer() 
+    await free_premium_page(client, query)
+
+@Client.on_callback_query(filters.regex(r"^start_back$"))
+async def start_back_callback(client, query):
+    await query.answer() 
+    text = f"Hello {query.from_user.mention} 👋,\nI am a Powerul Auto Filter Bot."
+    buttons = [
+        [InlineKeyboardButton('⇆ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜps ⇆', url=f'http://t.me/{temp.U_NAME}?startgroup=start')],
+        [InlineKeyboardButton('⚙ ꜰᴇᴀᴛᴜʀᴇs', callback_data='features'), 
+         InlineKeyboardButton('💎 Free Premium', callback_data='open_prem_menu')],
+        [InlineKeyboardButton('🚫 ᴇᴀʀɴ ᴍᴏɴᴇʏ ᴡɪᴛʜ ʙᴏᴛ 🚫', callback_data='earn'), InlineKeyboardButton('🤝 ʀᴇꜰᴇʀʀᴀʟ 🤝', callback_data='refer')]
+    ]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))

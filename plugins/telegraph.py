@@ -1,16 +1,14 @@
 import os
 import aiohttp
-import mimetypes
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ==============================================================================
-# 🖼️ TELEGRAPH IMAGE UPLOADER (SUPER STABLE)
+# 🖼️ TELEGRAPH IMAGE UPLOADER (400 ERROR 100% FIXED)
 # ==============================================================================
 
 @Client.on_message(filters.command(["tg", "telegraph"]) & filters.private)
 async def telegraph_upload(client, message):
-    # Check karega ki kya command kisi photo/video ke reply me diya gaya hai
     reply = message.reply_to_message
     if not reply or not (reply.photo or reply.video or reply.animation or reply.document):
         return await message.reply_text("⚠️ **Sahi Tarika:** Kripya kisi Photo ya Video par reply karke `/tg` type karein.")
@@ -22,56 +20,71 @@ async def telegraph_upload(client, message):
 
     msg = await message.reply_text("⏳ **Processing...** File download ho rahi hai...")
     
+    # Extension aur Mime-Type check
+    if reply.photo:
+        ext = ".jpg"
+        mime = "image/jpeg"
+    elif reply.video or reply.animation:
+        ext = ".mp4"
+        mime = "video/mp4"
+    elif reply.document:
+        mime = reply.document.mime_type
+        if mime and mime.startswith("image/"):
+            ext = ".png" if "png" in mime else ".jpg"
+        elif mime and mime.startswith("video/"):
+            ext = ".mp4"
+        else:
+            return await msg.edit_text("❌ Kripya sirf Image ya Video file bhejein.")
+    else:
+        ext = ".jpg"
+        mime = "image/jpeg"
+        
+    temp_file = f"tg_file_{message.from_user.id}{ext}"
+    
     try:
-        # 1. Download file to local storage
-        download_path = await reply.download()
+        # File Download
+        download_path = await client.download_media(message=reply, file_name=temp_file)
         
-        await msg.edit_text("📤 **Uploading to Telegraph...**")
+        await msg.edit_text("📤 **Uploading to Telegraph (graph.org)...**")
         
-        # 2. File ka extension detect karna (Very Important for Telegraph API)
-        content_type = mimetypes.guess_type(download_path)[0] or 'image/jpeg'
-        
-        # 3. Fake User-Agent set karna taaki server block na kare
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36'
-        }
-        
-        # 4. Upload to API via aiohttp
-        async with aiohttp.ClientSession(headers=headers) as session:
+        async with aiohttp.ClientSession() as session:
+            # 🛑 REAL FIX: File ko stream karne ke bajaye bytes read kar rahe hain
             with open(download_path, 'rb') as f:
-                form = aiohttp.FormData()
-                # File proper format aur content type ke sath bhej rahe hain
-                form.add_field('file', f, filename=os.path.basename(download_path), content_type=content_type)
+                file_bytes = f.read() 
                 
-                # telegra.ph API use kar rahe hain (It is the official and more stable endpoint)
-                async with session.post("https://telegra.ph/upload", data=form) as response:
-                    
-                    if response.status == 200:
-                        json_data = await response.json()
-                        if type(json_data) is list and len(json_data) > 0 and 'src' in json_data[0]:
-                            # Generate Link
-                            telegraph_link = "https://graph.org" + json_data[0]['src']
-                            
-                            buttons = [
-                                [InlineKeyboardButton("🌐 Open Link", url=telegraph_link)],
-                                [InlineKeyboardButton("🔗 Share Link", url=f"https://t.me/share/url?url={telegraph_link}")]
-                            ]
-                            await msg.edit_text(
-                                f"✅ **Telegraph Link Generated Successfully!**\n\n"
-                                f"📥 **Link:**\n`{telegraph_link}`\n\n"
-                                f"_Aap is link ko copy karke apne info.py mein `CUSTOM_QR_URL` me daal sakte hain._",
-                                reply_markup=InlineKeyboardMarkup(buttons),
-                                disable_web_page_preview=False
-                            )
-                        else:
-                            await msg.edit_text("❌ **Upload Failed!** Telegraph se valid data nahi mila.")
+            form = aiohttp.FormData()
+            # Ab hum directly bytes bhejenge taaki server 400 error na de
+            form.add_field('file', file_bytes, filename=temp_file, content_type=mime)
+            
+            # Request to graph.org
+            async with session.post("https://graph.org/upload", data=form) as response:
+                if response.status == 200:
+                    json_data = await response.json()
+                    if type(json_data) is list and len(json_data) > 0 and 'src' in json_data[0]:
+                        # Link Generation
+                        telegraph_link = "https://graph.org" + json_data[0]['src']
+                        
+                        buttons = [
+                            [InlineKeyboardButton("🌐 Open Link", url=telegraph_link)],
+                            [InlineKeyboardButton("🔗 Share Link", url=f"https://t.me/share/url?url={telegraph_link}")]
+                        ]
+                        await msg.edit_text(
+                            f"✅ **Telegraph Link Generated Successfully!**\n\n"
+                            f"📥 **Link:**\n`{telegraph_link}`\n\n"
+                            f"_Aap is link ko copy karke apne info.py mein `CUSTOM_QR_URL` me daal sakte hain._",
+                            reply_markup=InlineKeyboardMarkup(buttons),
+                            disable_web_page_preview=False
+                        )
                     else:
-                        await msg.edit_text(f"❌ **Upload Failed:** Server ne {response.status} error diya.")
+                        await msg.edit_text("❌ **Upload Failed!** Telegraph se valid data nahi mila.")
+                else:
+                    err_text = await response.text()
+                    await msg.edit_text(f"❌ **Upload Failed:** Server ne {response.status} error diya.\n\n`{err_text}`")
                         
     except Exception as e:
         await msg.edit_text(f"❌ **Error Occurred:** `{e}`")
         
     finally:
-        # 5. Clean up local storage
+        # Temporary file delete kar dena
         if 'download_path' in locals() and os.path.exists(download_path):
             os.remove(download_path)

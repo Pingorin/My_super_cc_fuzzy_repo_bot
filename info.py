@@ -100,14 +100,10 @@ MONGODB_TIMEOUT = 300 # 5 Minutes
 PM_SEARCH = os.environ.get("PM_SEARCH", "False").lower() in ["true", "yes", "1"]
 
 # ==============================================================================
-# 💳 PAYMENT & PREMIUM SETTINGS
+# 💳 PAYMENT & CONTACT SETTINGS (NEW)
 # ==============================================================================
-# Yahan default me aap apni UPI ID aur Support Group ka link daal sakte hain (Environment Var se bhi control ho jayega)
-MERCHANT_UPI_ID = os.environ.get("MERCHANT_UPI_ID", "aapka_id@ybl")
-PAYMENT_SUPPORT_LINK = os.environ.get("PAYMENT_SUPPORT_LINK", "https://t.me/AapkaSupportGroup")
-
-# Custom QR Code Image URL (Agar aap automatic QR ki jagah apni design ki hui payment photo lagana chahte hain)
-CUSTOM_QR_URL = os.environ.get("CUSTOM_QR_URL", "")
+# Apna UPI ID yahan dalein
+MERCHANT_UPI_ID = os.environ.get("MERCHANT_UPI_ID", "") 
 
 # Group/Channel link jahan user screenshot bhejega
 PAYMENT_SUPPORT_LINK = os.environ.get("PAYMENT_SUPPORT_LINK", "") 
@@ -116,5 +112,4 @@ PAYMENT_SUPPORT_LINK = os.environ.get("PAYMENT_SUPPORT_LINK", "")
 CONTACT_OWNER_LINK = os.environ.get("CONTACT_OWNER_LINK", "") 
 
 # Agar aapko custom QR code photo lagani hai (URL), warna bot auto generate karega
-CUSTOM_QR_URL = os.environ.get("CUSTOM_QR_URL", "")
 CUSTOM_QR_URL = os.environ.get("CUSTOM_QR_URL", "")

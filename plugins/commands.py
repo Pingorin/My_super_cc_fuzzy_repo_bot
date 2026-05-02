@@ -833,7 +833,7 @@ async def start_handler(client, message):
                 caption = f"{file_name}"
             else:
                 caption = str(raw_caption)
-                caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", caption, flags=re.IGNORECASE)
+                caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", "", caption, flags=re.IGNORECASE)
                 caption = re.sub(r"https?://[^\s]+", "", caption, flags=re.IGNORECASE)
                 remove_patterns = [r"Join\s?(Now|Channel|Us|Here)", r"Aa\s?Jao", r"🤞", r"➜", r"\)⁠➜", r"👉", r"\[@\w+\]", r"@\w+"]
                 for pattern in remove_patterns:
@@ -1197,6 +1197,67 @@ async def close_data(client, query):
     await query.message.delete()
 
 # ==============================================================================
+# 💳 MANUAL PAYMENT SYSTEM (QR CODE & SCREENSHOT LINK)
+# ==============================================================================
+
+# 🛑 YAHAN APNI UPI ID AUR SUPPORT GROUP/ADMIN KA LINK DALEIN
+MERCHANT_UPI_ID = "aapka_id@upi"
+PAYMENT_SUPPORT_LINK = "https://t.me/AapkaSupportGroup" # Ya fir apna username link
+
+@Client.on_callback_query(filters.regex(r"^buy_premium$"))
+async def buy_premium_handler(client, query):
+    await query.answer()
+    
+    prices = (
+        "💎 **Premium Pricing Plans:**\n\n"
+        "🔸 1 Day (Trial) : `₹1`\n"
+        "🔸 1 Week        : `₹10`\n"
+        "🔸 1 Month       : `₹25`\n"
+        "🔸 1 Year        : `₹200`\n\n"
+        "✨ **Benefits:**\n"
+        "✅ No Shorteners (Direct Files)\n"
+        "✅ High Speed Streaming\n"
+        "✅ Priority Support"
+    )
+    
+    buttons = [
+        [InlineKeyboardButton("💳 Pay via UPI / QR Code", callback_data="pay_manual_method")],
+        [InlineKeyboardButton("🔙 Back", callback_data="open_prem_menu")]
+    ]
+    await query.message.edit_text(prices, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^pay_manual_method$"))
+async def pay_manual_handler(client, query):
+    await query.answer()
+    
+    qr_link = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=upi://pay?pa={MERCHANT_UPI_ID}&pn=Premium"
+
+    text = (
+        "🚀 **Premium Purchase Process**\n\n"
+        f"1️⃣ Niche diye gaye **QR Code** ko scan karein ya UPI ID copy karein.\n"
+        f"2️⃣ Payment complete hone ke baad **'📸 Send Screenshot'** button par click karein.\n"
+        f"3️⃣ Hamare admin/support group me apni payment ka screenshot bhejein.\n\n"
+        f"⏳ **Note:** Screenshot verify hone ke baad **24 hours** ke andar aapka premium activate kar diya jayega.\n\n"
+        f"🆔 **UPI ID:** `{MERCHANT_UPI_ID}`"
+    )
+    
+    buttons = [
+        [InlineKeyboardButton("📸 Send Screenshot Here", url=PAYMENT_SUPPORT_LINK)],
+        [InlineKeyboardButton("🔙 Back", callback_data="buy_premium")]
+    ]
+    
+    try:
+        await query.message.delete() 
+        await client.send_photo(
+            chat_id=query.message.chat.id,
+            photo=qr_link,
+            caption=text,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+    except Exception as e:
+        await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+# ==============================================================================
 # 🕵️ ADMIN COMMAND: ALL GROUPS LIST (/groups)
 # ==============================================================================
 
@@ -1493,7 +1554,6 @@ async def check_premium_cmd(client, message):
             f"👤 **User ID:** `{target_id}`\n"
             f"ℹ️ Is user ke paas koi active premium nahi hai."
         )
-
 
 # ==============================================================================
 # 🌟 MULTI-STICKER SYSTEM (WITH UID & FID)

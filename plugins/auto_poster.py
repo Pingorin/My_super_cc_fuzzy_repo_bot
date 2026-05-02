@@ -4,11 +4,16 @@ import logging
 import json
 import info
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReactionTypeEmoji
 from database.users_chats_db import db
 from utils import temp
 
 logger = logging.getLogger(__name__)
+
+# ==============================================================================
+# 🎭 REACTION CONFIGURATION (Screenshot Emojis)
+# ==============================================================================
+POSTER_REACTIONS = ["👍", "🔥", "❤️", "😍"]
 
 # ==============================================================================
 # 🕵️ SMART ENGINE (Web Series + Movies + Mega-Hit Repeat + Kachra Filter)
@@ -58,6 +63,16 @@ async def get_fresh_or_mega_trending(posted_ids):
     return None, False
 
 # ==============================================================================
+# ⚡ HELPER: ADD REACTIONS TO MESSAGE
+# ==============================================================================
+async def add_poster_reactions(client, chat_id, message_id):
+    try:
+        react_list = [ReactionTypeEmoji(emoji=react) for react in POSTER_REACTIONS]
+        await client.set_message_reaction(chat_id, message_id, react_list)
+    except Exception as e:
+        print(f"Failed to add reactions to {chat_id}: {e}")
+
+# ==============================================================================
 # 🧪 MANUAL POSTER (Used for /testpost & UI Test Button)
 # ==============================================================================
 
@@ -87,18 +102,19 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
     poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "https://graph.org/file/4d61886e61dfa37a25945.jpg"
 
     type_tag = "#WEB_SERIES" if media_type == 'tv' else "#MOVIE"
-    header_tag = "🔥 <b>STILL TRENDING</b>" if is_mega_hit else "🚨 <b>New Added</b>"
+    header_tag = "🔥 STILL TRENDING" if is_mega_hit else "📥 New"
 
+    # ✅ NAYA SCREENSHOT DESIGN + MONO-SPACED TITLE
     caption_html = (
-        f"{header_tag} {type_tag}\n\n"
-        f"✨ <b>TITLE :</b> {title} ({year})\n"
-        f"━─────━✨━─────━\n\n"
+        f"{header_tag} {type_tag} Added\n\n"
+        f"✨ <b>TITLE :</b> <code>{title} {year}</code>\n"
+        f"───•✧•───\n\n"
         f"🎭 <b>GENRES :</b> {genres if genres else 'Drama, Action'}\n"
         f"📺 <b>OTT :</b> N/A\n"
-        f"🎞️ <b>QUALITY :</b> HD 1080p\n"
+        f"🎞 <b>QUALITY :</b> HD\n"
         f"🎧 <b>AUDIO :</b> Hindi\n"
-        f"🔥 <b>RATING :</b> {rating}/10\n\n"
-        f"━─────━✨━─────━"
+        f"🔥 <b>RATING :</b> {rating}\n\n"
+        f"───•✧•───"
     )
 
     # 🔥 SMART REDIRECT LOGIC FOR BUTTONS
@@ -136,7 +152,10 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
                 await session.post(api_url, json=payload)
         else:
             caption_md = caption_html.replace("<b>", "**").replace("</b>", "**")
-            await client.send_photo(chat_id=TARGET_CHANNEL, photo=poster_url, caption=caption_md, reply_markup=InlineKeyboardMarkup(buttons))
+            sent_msg = await client.send_photo(chat_id=TARGET_CHANNEL, photo=poster_url, caption=caption_md, reply_markup=InlineKeyboardMarkup(buttons))
+            # ✅ REACTION ADD LOGIC
+            if sent_msg:
+                asyncio.create_task(add_poster_reactions(client, TARGET_CHANNEL, sent_msg.id))
         return True
     except Exception as e:
         print(f"❌ Test Post Error: {e}")
@@ -189,19 +208,19 @@ async def manual_post_movie(client, message):
     poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "https://graph.org/file/4d61886e61dfa37a25945.jpg"
     type_tag = "#WEB_SERIES" if media_type == 'tv' else "#MOVIE"
 
+    # ✅ NAYA SCREENSHOT DESIGN + MONO-SPACED TITLE
     caption_html = (
-        f"🚨 <b>New Added</b> {type_tag}\n\n"
-        f"✨ <b>TITLE :</b> {title} ({year})\n"
-        f"━─────━✨━─────━\n\n"
+        f"📥 New {type_tag} Added\n\n"
+        f"✨ <b>TITLE :</b> <code>{title} {year}</code>\n"
+        f"───•✧•───\n\n"
         f"🎭 <b>GENRES :</b> {genres if genres else 'Drama, Action'}\n"
         f"📺 <b>OTT :</b> N/A\n"
-        f"🎞️ <b>QUALITY :</b> HD 1080p\n"
+        f"🎞 <b>QUALITY :</b> HD\n"
         f"🎧 <b>AUDIO :</b> Hindi\n"
-        f"🔥 <b>RATING :</b> {rating}/10\n\n"
-        f"━─────━✨━─────━"
+        f"🔥 <b>RATING :</b> {rating}\n\n"
+        f"───•✧•───"
     )
 
-    # 🔥 SMART REDIRECT LOGIC FOR BUTTONS
     second_bot = getattr(info, 'FILE_STORE_BOT', None)
     if second_bot:
         target_bot_username = second_bot.replace("@", "")
@@ -224,7 +243,10 @@ async def manual_post_movie(client, message):
         else:
             caption_md = caption_html.replace("<b>", "**").replace("</b>", "**")
             buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{target_bot_username}?start=")]]
-            await client.send_photo(chat_id=TARGET_CHANNEL, photo=poster_url, caption=caption_md, reply_markup=InlineKeyboardMarkup(buttons))
+            sent_msg = await client.send_photo(chat_id=TARGET_CHANNEL, photo=poster_url, caption=caption_md, reply_markup=InlineKeyboardMarkup(buttons))
+            # ✅ REACTION ADD LOGIC
+            if sent_msg:
+                asyncio.create_task(add_poster_reactions(client, TARGET_CHANNEL, sent_msg.id))
             
         await wait_msg.edit(f"✅ **SUCCESS:** '{title}' manual post done!")
     except Exception as e:
@@ -238,17 +260,13 @@ async def start_auto_poster(client):
     await asyncio.sleep(60) 
     
     # 🛑 THE MAGIC SWITCH 🛑
-    # Agar is bot ke Environment Variable me POSTER_BOT_TOKEN set hai aur wo is bot ke token se alag hai,
-    # Iska matlab ye MAIN BOT hai. Main bot TMDB ka kaam nahi karega, wo yahan se so jayega.
     poster_token = getattr(info, 'POSTER_BOT_TOKEN', "")
     my_token = getattr(info, 'BOT_TOKEN', "")
     
     if poster_token and poster_token.strip() != my_token.strip():
         print("🛑 [Auto-Poster] Main Bot will skip TMDB loop. Second Bot will handle it independently.")
-        return # Loop yahi khatam ho jayega Main bot ke liye!
+        return 
 
-    # Agar code yahan tak pahuncha, iska matlab ya toh ye SECOND BOT hai, 
-    # ya fir Main bot hai (kyunki second bot configure hi nahi kiya gaya).
     print("🎬 [Auto-Poster] Poster Engine Activated on this Bot!")
     bot_settings_col = db.db["bot_settings"]
 
@@ -277,69 +295,66 @@ async def start_auto_poster(client):
                 poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "https://graph.org/file/4d61886e61dfa37a25945.jpg"
 
                 type_tag = "#WEB_SERIES" if media_type == 'tv' else "#MOVIE"
-                header_tag = "🔥 <b>STILL TRENDING</b>" if is_mega_hit else "🚨 <b>New Added</b>"
+                header_tag = "🔥 STILL TRENDING" if is_mega_hit else "📥 New"
                 
+                # ✅ NAYA SCREENSHOT DESIGN + MONO-SPACED TITLE
                 caption_html = (
-                    f"{header_tag} {type_tag}\n\n"
-                    f"✨ <b>TITLE :</b> {title} ({year})\n"
-                    f"━─────━✨━─────━\n\n"
+                    f"{header_tag} {type_tag} Added\n\n"
+                    f"✨ <b>TITLE :</b> <code>{title} {year}</code>\n"
+                    f"───•✧•───\n\n"
                     f"🎭 <b>GENRES :</b> {genres if genres else 'Drama, Action'}\n"
                     f"📺 <b>OTT :</b> N/A\n"
-                    f"🎞️ <b>QUALITY :</b> HD 1080p\n"
+                    f"🎞 <b>QUALITY :</b> HD\n"
                     f"🎧 <b>AUDIO :</b> Hindi\n"
-                    f"🔥 <b>RATING :</b> {rating}/10\n\n"
-                    f"━─────━✨━─────━"
+                    f"🔥 <b>RATING :</b> {rating}\n\n"
+                    f"───•✧•───"
                 )
 
-                # Download Button hamesha File Store (Verify/Get) bot par jayega
                 second_bot_username = getattr(info, 'FILE_STORE_BOT', None)
                 target_bot = second_bot_username.replace("@", "") if second_bot_username else (temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot")
                 
                 buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{target_bot}?start=")]]
 
-                # Direct Broadcast using client (Kyunki jo bot ye chala raha hai, wahi poster bot hai)
                 async def broadcast_msg(channel_id, custom_btns):
                     try:
-                        await client.send_photo(
+                        sent_msg = await client.send_photo(
                             chat_id=channel_id, 
                             photo=poster_url, 
                             caption=caption_html.replace("<b>", "**").replace("</b>", "**"), 
                             reply_markup=InlineKeyboardMarkup(custom_btns)
                         )
                         print(f"🚀 Broadcasted to {channel_id}")
+                        # ✅ REACTION ADD LOGIC
+                        if sent_msg:
+                            asyncio.create_task(add_poster_reactions(client, channel_id, sent_msg.id))
+                            
                     except Exception as e:
                         print(f"❌ Post Failed for {channel_id}: {e}")
 
-                # 1. Main Updates Channel
                 if getattr(info, 'UPDATES_CHANNEL', None):
                     await broadcast_msg(info.UPDATES_CHANNEL, buttons)
 
-                # 2. Group Custom Slots
                 async for group in db.groups.find({}):
                     mu = group.get('movie_update', {})
                     if mu.get('is_active'):
                         slots = mu.get('slots', {})
                         active_chs = [ch for ch in slots.values() if ch]
                         
-                        grp_buttons = list(buttons) # Copy main button
+                        grp_buttons = list(buttons) 
                         if mu.get('group_link'):
                             grp_buttons.append([InlineKeyboardButton("👥 Group", url=mu['group_link'])])
                         if mu.get('footer'):
                             grp_buttons.append([InlineKeyboardButton(btn['text'], url=btn['url']) for btn in mu['footer']])
 
                         for ch in active_chs:
-                            await asyncio.sleep(2) # Safe FloodWait Delay
+                            await asyncio.sleep(2) 
                             await broadcast_msg(ch, grp_buttons)
 
-                # DB Update safely
                 if media_id not in posted_ids: posted_ids.append(media_id)
                 if len(posted_ids) > 50: posted_ids.pop(0)
                 await bot_settings_col.update_one({"_id": "posted_movies"}, {"$set": {"ids": posted_ids}}, upsert=True)
 
-            else:
-                print("⚠️ [Auto-Poster] No fresh movie found for this cycle.")
-
         except Exception as e:
             print(f"Poster Loop Error: {e}")
         
-        await asyncio.sleep(3600) # 1 Hour Delay
+        await asyncio.sleep(3600) 

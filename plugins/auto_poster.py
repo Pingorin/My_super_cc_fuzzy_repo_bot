@@ -101,13 +101,19 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
         f"━─────━✨━─────━"
     )
 
-    bot_username = temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot"
+    # 🔥 SMART REDIRECT LOGIC FOR BUTTONS
+    second_bot = getattr(info, 'FILE_STORE_BOT', None)
+    if second_bot:
+        target_bot_username = second_bot.replace("@", "")
+    else:
+        target_bot_username = temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot"
+
     poster_token = getattr(info, 'POSTER_BOT_TOKEN', None)
     TARGET_CHANNEL = custom_channel_id if custom_channel_id else info.UPDATES_CHANNEL
     
     if not TARGET_CHANNEL: return False
 
-    buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{bot_username}?start=")]]
+    buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{target_bot_username}?start=")]]
 
     if group_chat_id:
         settings = await db.get_group_settings(group_chat_id)
@@ -195,7 +201,13 @@ async def manual_post_movie(client, message):
         f"━─────━✨━─────━"
     )
 
-    bot_username = temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot"
+    # 🔥 SMART REDIRECT LOGIC FOR BUTTONS
+    second_bot = getattr(info, 'FILE_STORE_BOT', None)
+    if second_bot:
+        target_bot_username = second_bot.replace("@", "")
+    else:
+        target_bot_username = temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot"
+
     poster_token = getattr(info, 'POSTER_BOT_TOKEN', None)
     TARGET_CHANNEL = getattr(info, 'UPDATES_CHANNEL', None)
 
@@ -206,12 +218,12 @@ async def manual_post_movie(client, message):
             api_url = f"https://api.telegram.org/bot{poster_token}/sendPhoto"
             payload = {
                 "chat_id": TARGET_CHANNEL, "photo": poster_url, "caption": caption_html, "parse_mode": "HTML",
-                "reply_markup": json.dumps({"inline_keyboard": [[{"text": "📥 Download Now", "url": f"https://t.me/{bot_username}?start="}]]})
+                "reply_markup": json.dumps({"inline_keyboard": [[{"text": "📥 Download Now", "url": f"https://t.me/{target_bot_username}?start="}]]})
             }
             async with aiohttp.ClientSession() as session: await session.post(api_url, json=payload)
         else:
             caption_md = caption_html.replace("<b>", "**").replace("</b>", "**")
-            buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{bot_username}?start=")]]
+            buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{target_bot_username}?start=")]]
             await client.send_photo(chat_id=TARGET_CHANNEL, photo=poster_url, caption=caption_md, reply_markup=InlineKeyboardMarkup(buttons))
             
         await wait_msg.edit(f"✅ **SUCCESS:** '{title}' manual post done!")
@@ -219,28 +231,39 @@ async def manual_post_movie(client, message):
         await wait_msg.edit(f"❌ **ERROR:** `{e}`")
 
 # ==============================================================================
-# ⏱️ THE MASTER BROADCAST LOOP (ULTIMATE FIX)
+# ⏱️ THE MASTER BROADCAST LOOP (Independent Server Logic)
 # ==============================================================================
 
 async def start_auto_poster(client):
     await asyncio.sleep(60) 
+    
+    # 🛑 THE MAGIC SWITCH 🛑
+    # Agar is bot ke Environment Variable me POSTER_BOT_TOKEN set hai aur wo is bot ke token se alag hai,
+    # Iska matlab ye MAIN BOT hai. Main bot TMDB ka kaam nahi karega, wo yahan se so jayega.
+    poster_token = getattr(info, 'POSTER_BOT_TOKEN', "")
+    my_token = getattr(info, 'BOT_TOKEN', "")
+    
+    if poster_token and poster_token.strip() != my_token.strip():
+        print("🛑 [Auto-Poster] Main Bot will skip TMDB loop. Second Bot will handle it independently.")
+        return # Loop yahi khatam ho jayega Main bot ke liye!
+
+    # Agar code yahan tak pahuncha, iska matlab ya toh ye SECOND BOT hai, 
+    # ya fir Main bot hai (kyunki second bot configure hi nahi kiya gaya).
+    print("🎬 [Auto-Poster] Poster Engine Activated on this Bot!")
     bot_settings_col = db.db["bot_settings"]
 
     while True:
-        print("⏳ [Auto-Poster] Starting global broadcast cycle...")
-        
         try:
-            # 1. DB se List ONCE fetch karo
             posted_data = await bot_settings_col.find_one({"_id": "posted_movies"})
             posted_ids = posted_data.get("ids", []) if posted_data else []
 
-            # 2. Sirf EK movie fetch karo iss ghante ke liye
             media, is_mega_hit = await get_fresh_or_mega_trending(posted_ids)
             
             if media:
                 media_id = str(media['id'])
                 media_type = media.get('media_type', 'movie')
                 
+                # Fetch Details
                 detail_url = f"https://api.themoviedb.org/3/tv/{media_id}?api_key={info.TMDB_API_KEY}" if media_type == 'tv' else f"https://api.themoviedb.org/3/movie/{media_id}?api_key={info.TMDB_API_KEY}"
                 async with aiohttp.ClientSession() as session:
                     async with session.get(detail_url) as resp:
@@ -255,7 +278,7 @@ async def start_auto_poster(client):
 
                 type_tag = "#WEB_SERIES" if media_type == 'tv' else "#MOVIE"
                 header_tag = "🔥 <b>STILL TRENDING</b>" if is_mega_hit else "🚨 <b>New Added</b>"
-
+                
                 caption_html = (
                     f"{header_tag} {type_tag}\n\n"
                     f"✨ <b>TITLE :</b> {title} ({year})\n"
@@ -268,70 +291,55 @@ async def start_auto_poster(client):
                     f"━─────━✨━─────━"
                 )
 
-                bot_username = temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot"
-                poster_token = getattr(info, 'POSTER_BOT_TOKEN', None)
-                caption_md = caption_html.replace("<b>", "**").replace("</b>", "**")
-
-                # HELPER: Send Engine
-                async def send_to_target(target_channel, buttons):
-                    try:
-                        if poster_token:
-                            api_url = f"https://api.telegram.org/bot{poster_token}/sendPhoto"
-                            raw_inline_keyboard = [[{"text": btn.text, "url": btn.url} for btn in row] for row in buttons]
-                            payload = {
-                                "chat_id": target_channel, "photo": poster_url, "caption": caption_html,
-                                "parse_mode": "HTML", "reply_markup": json.dumps({"inline_keyboard": raw_inline_keyboard})
-                            }
-                            async with aiohttp.ClientSession() as session:
-                                await session.post(api_url, json=payload)
-                        else:
-                            await client.send_photo(chat_id=target_channel, photo=poster_url, caption=caption_md, reply_markup=InlineKeyboardMarkup(buttons))
-                        print(f"🚀 Broadcasted to {target_channel}")
-                    except Exception as e:
-                        print(f"❌ Broadcast Failed for {target_channel}: {e}")
-
-                # --- PHASE 3: THE MASTER BROADCAST ---
-                print(f"🎬 Broadcasting '{title}' to ALL channels...")
+                # Download Button hamesha File Store (Verify/Get) bot par jayega
+                second_bot_username = getattr(info, 'FILE_STORE_BOT', None)
+                target_bot = second_bot_username.replace("@", "") if second_bot_username else (temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot")
                 
-                # A. Send to info.py Channel
-                if info.UPDATES_CHANNEL:
-                    main_buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{bot_username}?start=")]]
-                    await send_to_target(info.UPDATES_CHANNEL, main_buttons)
+                buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{target_bot}?start=")]]
 
-                # B. Send to All Group Slots
+                # Direct Broadcast using client (Kyunki jo bot ye chala raha hai, wahi poster bot hai)
+                async def broadcast_msg(channel_id, custom_btns):
+                    try:
+                        await client.send_photo(
+                            chat_id=channel_id, 
+                            photo=poster_url, 
+                            caption=caption_html.replace("<b>", "**").replace("</b>", "**"), 
+                            reply_markup=InlineKeyboardMarkup(custom_btns)
+                        )
+                        print(f"🚀 Broadcasted to {channel_id}")
+                    except Exception as e:
+                        print(f"❌ Post Failed for {channel_id}: {e}")
+
+                # 1. Main Updates Channel
+                if getattr(info, 'UPDATES_CHANNEL', None):
+                    await broadcast_msg(info.UPDATES_CHANNEL, buttons)
+
+                # 2. Group Custom Slots
                 async for group in db.groups.find({}):
                     mu = group.get('movie_update', {})
                     if mu.get('is_active'):
                         slots = mu.get('slots', {})
-                        active_channels = [ch for ch in slots.values() if ch is not None]
+                        active_chs = [ch for ch in slots.values() if ch]
                         
-                        if active_channels:
-                            grp_buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{bot_username}?start=")]]
-                            if mu.get('group_link'):
-                                grp_buttons.append([InlineKeyboardButton("👥 Group", url=mu['group_link'])])
-                            footer_btns = mu.get('footer', [])
-                            if footer_btns:
-                                grp_buttons.append([InlineKeyboardButton(btn['text'], url=btn['url']) for btn in footer_btns])
+                        grp_buttons = list(buttons) # Copy main button
+                        if mu.get('group_link'):
+                            grp_buttons.append([InlineKeyboardButton("👥 Group", url=mu['group_link'])])
+                        if mu.get('footer'):
+                            grp_buttons.append([InlineKeyboardButton(btn['text'], url=btn['url']) for btn in mu['footer']])
 
-                            for channel in active_channels:
-                                await asyncio.sleep(2) # Safe FloodWait Delay
-                                await send_to_target(channel, grp_buttons)
+                        for ch in active_chs:
+                            await asyncio.sleep(2) # Safe FloodWait Delay
+                            await broadcast_msg(ch, grp_buttons)
 
-                # --- PHASE 4: DB UPDATE (Sirf 1 Baar) ---
+                # DB Update safely
                 if media_id not in posted_ids: posted_ids.append(media_id)
-                else:
-                    posted_ids.remove(media_id)
-                    posted_ids.append(media_id)
-                
                 if len(posted_ids) > 50: posted_ids.pop(0)
                 await bot_settings_col.update_one({"_id": "posted_movies"}, {"$set": {"ids": posted_ids}}, upsert=True)
-                print("✅ Global Poster cycle complete and DB safely updated!")
 
             else:
                 print("⚠️ [Auto-Poster] No fresh movie found for this cycle.")
 
         except Exception as e:
-            print(f"❌ Global Cycle Error: {e}")
-
-        # Wait 1 Hour for the next broadcast
-        await asyncio.sleep(3600) 
+            print(f"Poster Loop Error: {e}")
+        
+        await asyncio.sleep(3600) # 1 Hour Delay

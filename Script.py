@@ -82,3 +82,26 @@ Or use UPI ID: `{upi_id}` 👈
 Bina ads, bina verification — direct movies access chahiye? Aaj hi Premium lein aur apna time bachayein.
 
 💡 Niche diye gaye button par click karke **5 Minute ka FREE Trial** try karein ya direct plan check karein!"""
+
+    # 5. MYPLAN ACTIVE (PLAN PURCHASED)
+    MYPLAN_ACTIVE_TXT = """🌟 **Aapka Premium Plan Active Hai!**
+
+Aapne hamara premium membership liya hua hai aur aap ek VIP user hain.
+
+👤 **User:** {mention}
+📅 **Expiry Date:** `{expiry_date}`
+🚀 **Status:** Active (No Ads/Direct Access)
+
+Abhi bina kisi rukawat ke unlimited movies aur series ka maza lein!"""
+
+    # 6. TRIAL ACTIVATION MESSAGE
+    TRIAL_ACTIVE_TXT = """🎊 **Mubarak Ho! 5-Min Premium Trial Activate Ho Gaya Hai!** 🎊
+
+Ab agle **5 Minute** tak aap hamare **VIP Member** hain! 🚀
+
+🔥 **Ab aapko kya karna hai?**
+1️⃣ Turant kisi bhi movie group mein jaaiye.
+2️⃣ Apni manpasand movie ya series ka naam likhkar search karein.
+3️⃣ Jaise hi bot link dega, uspar click karein—Aapko koi Ads ya Shortener nahi dikhega!
+
+⏳ **Jaldi Karein:** Aapke paas sirf 5 minute hain, check karein hamari super-fast speed!"""

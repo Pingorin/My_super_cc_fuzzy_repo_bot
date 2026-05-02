@@ -1,10 +1,11 @@
 import os
 import aiohttp
+import mimetypes
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ==============================================================================
-# 🖼️ TELEGRAPH IMAGE UPLOADER (graph.org)
+# 🖼️ TELEGRAPH IMAGE UPLOADER (SUPER STABLE)
 # ==============================================================================
 
 @Client.on_message(filters.command(["tg", "telegraph"]) & filters.private)
@@ -12,7 +13,7 @@ async def telegraph_upload(client, message):
     # Check karega ki kya command kisi photo/video ke reply me diya gaya hai
     reply = message.reply_to_message
     if not reply or not (reply.photo or reply.video or reply.animation or reply.document):
-        return await message.reply_text("⚠️ **Sahi Tarika:** Kripya kisi Photo ya Video (under 5MB) par reply karke `/tg` ya `/telegraph` type karein.")
+        return await message.reply_text("⚠️ **Sahi Tarika:** Kripya kisi Photo ya Video par reply karke `/tg` type karein.")
 
     # File size limit check (Telegraph allows max 5MB)
     file_size = getattr(reply.photo, "file_size", 0) or getattr(reply.video, "file_size", 0) or getattr(reply.animation, "file_size", 0) or getattr(reply.document, "file_size", 0)
@@ -25,18 +26,30 @@ async def telegraph_upload(client, message):
         # 1. Download file to local storage
         download_path = await reply.download()
         
-        await msg.edit_text("📤 **Uploading to Telegraph (graph.org)...**")
+        await msg.edit_text("📤 **Uploading to Telegraph...**")
         
-        # 2. Upload to graph.org API (Simple Method)
-        async with aiohttp.ClientSession() as session:
+        # 2. File ka extension detect karna (Very Important for Telegraph API)
+        content_type = mimetypes.guess_type(download_path)[0] or 'image/jpeg'
+        
+        # 3. Fake User-Agent set karna taaki server block na kare
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36'
+        }
+        
+        # 4. Upload to API via aiohttp
+        async with aiohttp.ClientSession(headers=headers) as session:
             with open(download_path, 'rb') as f:
-                # Direct file pass karne se aiohttp automatically sahi format set kar leta hai
-                async with session.post("https://graph.org/upload", data={'file': f}) as response:
+                form = aiohttp.FormData()
+                # File proper format aur content type ke sath bhej rahe hain
+                form.add_field('file', f, filename=os.path.basename(download_path), content_type=content_type)
+                
+                # telegra.ph API use kar rahe hain (It is the official and more stable endpoint)
+                async with session.post("https://telegra.ph/upload", data=form) as response:
                     
                     if response.status == 200:
                         json_data = await response.json()
                         if type(json_data) is list and len(json_data) > 0 and 'src' in json_data[0]:
-                            # 3. Generate Link
+                            # Generate Link
                             telegraph_link = "https://graph.org" + json_data[0]['src']
                             
                             buttons = [
@@ -59,6 +72,6 @@ async def telegraph_upload(client, message):
         await msg.edit_text(f"❌ **Error Occurred:** `{e}`")
         
     finally:
-        # 4. Clean up
+        # 5. Clean up local storage
         if 'download_path' in locals() and os.path.exists(download_path):
             os.remove(download_path)

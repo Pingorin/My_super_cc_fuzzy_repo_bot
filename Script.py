@@ -37,7 +37,7 @@ class script(object):
 🛡️ Safe & trusted service
 
 🎁 **FREE TRIAL AVAILABLE**
-Trial ke liye `/myplan` use karein
+Trial ke liye /myplan use karein
 
 🔥 **Limited-Time Offer** 🔥
 Kabhi bhi khatam ho sakta hai!
@@ -72,8 +72,8 @@ Or use UPI ID: `{upi_id}` 👈
 🏆 Agar aapko diye gaye plans ke alawa koi naya plan chahiye, toh aap direct owner se baat kar sakte hain.
 
 👨‍💻 Niche diye gaye button par click karke owner ko message karein:
-➛ Use `/plan` to see all our plans.
-➛ Check your active plan by using: `/myplan`"""
+➛ Use /plan to see all our plans.
+➛ Check your active plan by using: /myplan"""
 
     # 4. NO ACTIVE PLAN (MYPLAN)
     NO_PREM_TXT = """⚠️ **Aapka Koi Active Premium Plan Nahi Hai!**

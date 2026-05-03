@@ -2,6 +2,7 @@ import asyncio
 import aiohttp
 import logging
 import json
+import socket
 import info
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -24,8 +25,8 @@ async def get_fresh_or_mega_trending(posted_ids):
     BANNED_TV_GENRES = [10766, 10764, 10767]
     
     timeout = aiohttp.ClientTimeout(total=30)
-    # 🔥 FIX: TMDB ke liye bhi SSL False kar diya taaki wahan bhi block na ho
-    connector = aiohttp.TCPConnector(ssl=False)
+    # 🔥 IPv4 Force Fix
+    connector = aiohttp.TCPConnector(ssl=False, family=socket.AF_INET)
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         try:
             async with session.get(url) as resp:
@@ -90,7 +91,7 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
     
     if not media: 
         url = f"https://api.themoviedb.org/3/trending/all/day?api_key={info.TMDB_API_KEY}"
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector(ssl=False, family=socket.AF_INET)
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30), connector=connector) as session:
             async with session.get(url) as resp:
                 if resp.status == 200:
@@ -109,7 +110,7 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
     
     detail_url = f"https://api.themoviedb.org/3/tv/{media_id}?api_key={info.TMDB_API_KEY}" if media_type == 'tv' else f"https://api.themoviedb.org/3/movie/{media_id}?api_key={info.TMDB_API_KEY}"
 
-    connector = aiohttp.TCPConnector(ssl=False)
+    connector = aiohttp.TCPConnector(ssl=False, family=socket.AF_INET)
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30), connector=connector) as session:
         async with session.get(detail_url) as resp:
             details = await resp.json()
@@ -142,7 +143,10 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
     else:
         target_bot_username = temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot"
 
-    poster_token = getattr(info, 'POSTER_BOT_TOKEN', None)
+    poster_token = getattr(info, 'POSTER_BOT_TOKEN', "")
+    if poster_token:
+        poster_token = poster_token.strip() # 🔥 Clean Token Spaces
+        
     TARGET_CHANNEL = custom_channel_id if custom_channel_id else info.UPDATES_CHANNEL
     
     if not TARGET_CHANNEL: 
@@ -170,9 +174,9 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
                 "parse_mode": "HTML", 
                 "reply_markup": json.dumps({"inline_keyboard": raw_inline_keyboard})
             }
-            # 🔥 SSL BYPASS FIX: Server SSL certificate ignore karega
             timeout = aiohttp.ClientTimeout(total=60)
-            connector = aiohttp.TCPConnector(ssl=False)
+            # 🔥 API CONNECTION FIX (IPv4 Force)
+            connector = aiohttp.TCPConnector(ssl=False, family=socket.AF_INET)
             async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
                 resp = await session.post(api_url, json=payload)
                 if resp.status != 200:
@@ -212,7 +216,7 @@ async def manual_post_movie(client, message):
     search_url = f"https://api.themoviedb.org/3/search/multi?api_key={info.TMDB_API_KEY}&query={query}"
     
     timeout = aiohttp.ClientTimeout(total=30)
-    connector = aiohttp.TCPConnector(ssl=False)
+    connector = aiohttp.TCPConnector(ssl=False, family=socket.AF_INET)
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         async with session.get(search_url) as resp:
             data = await resp.json()
@@ -255,7 +259,10 @@ async def manual_post_movie(client, message):
     else:
         target_bot_username = temp.U_NAME if hasattr(temp, 'U_NAME') and temp.U_NAME else "Search_Bot"
 
-    poster_token = getattr(info, 'POSTER_BOT_TOKEN', None)
+    poster_token = getattr(info, 'POSTER_BOT_TOKEN', "")
+    if poster_token:
+        poster_token = poster_token.strip()
+        
     TARGET_CHANNEL = getattr(info, 'UPDATES_CHANNEL', None)
 
     if not TARGET_CHANNEL: return await wait_msg.edit("❌ **Error:** info.py me UPDATES_CHANNEL nahi hai.")
@@ -267,9 +274,8 @@ async def manual_post_movie(client, message):
                 "chat_id": TARGET_CHANNEL, "photo": poster_url, "caption": caption_html, "parse_mode": "HTML",
                 "reply_markup": json.dumps({"inline_keyboard": [[{"text": "📥 Download Now", "url": f"https://t.me/{target_bot_username}?start="}]]})
             }
-            # 🔥 SSL BYPASS FIX: Error khatam!
             timeout_api = aiohttp.ClientTimeout(total=60)
-            connector_api = aiohttp.TCPConnector(ssl=False)
+            connector_api = aiohttp.TCPConnector(ssl=False, family=socket.AF_INET)
             async with aiohttp.ClientSession(timeout=timeout_api, connector=connector_api) as session: 
                 resp = await session.post(api_url, json=payload)
                 if resp.status != 200:
@@ -317,7 +323,7 @@ async def start_auto_poster(client):
                 detail_url = f"https://api.themoviedb.org/3/tv/{media_id}?api_key={info.TMDB_API_KEY}" if media_type == 'tv' else f"https://api.themoviedb.org/3/movie/{media_id}?api_key={info.TMDB_API_KEY}"
                 
                 timeout = aiohttp.ClientTimeout(total=30)
-                connector = aiohttp.TCPConnector(ssl=False)
+                connector = aiohttp.TCPConnector(ssl=False, family=socket.AF_INET)
                 async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
                     async with session.get(detail_url) as resp:
                         details = await resp.json()

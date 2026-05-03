@@ -3,7 +3,7 @@ class script(object):
     CUSTOM_FOOTER = """
 -----------------------------------------
 <b>⚡ Powered by @ramsitaam</b>
-<b>✨ Join for More: @YourChannel</b>
+<b>✨ Join for More: https://t.me/+ZjEf1V_4Q083MjM1</b>
     """
     
     NEW_GROUP_TXT = """<b>🆕 New Group Added</b>

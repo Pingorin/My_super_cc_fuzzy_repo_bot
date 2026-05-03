@@ -5,7 +5,7 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ==============================================================================
-# 🖼️ IMAGE UPLOADER (TELEGRAPH BLOCKED -> USING CATBOX SERVER)
+# 🖼️ UNIVERSAL IMAGE UPLOADER (BYPASS TELEGRAPH BLOCKS)
 # ==============================================================================
 
 @Client.on_message(filters.command(["tg", "telegraph", "upload"]) & filters.private)
@@ -21,27 +21,37 @@ async def telegraph_upload(client, message):
     msg = await message.reply_text("⏳ **Processing...** File download ho rahi hai...")
     
     try:
-        # 1. Download file
+        # 1. File Download
         download_path = await reply.download()
         
-        await msg.edit_text("📤 **Uploading to Image Server...**\n_(Bypassing Telegraph Block)_")
+        await msg.edit_text("📤 **Uploading to Premium Servers...**\n_(Bypassing Telegraph Block)_")
         
-        # 2. Catbox.moe Server Upload (Best for Bots, No IP Block)
-        def upload_to_server():
-            url = "https://catbox.moe/user/api.php"
-            data = {"reqtype": "fileupload"}
-            with open(download_path, 'rb') as f:
-                files = {"fileToUpload": f}
-                response = requests.post(url, data=data, files=files)
-                return response.status_code, response.text
-
-        # 3. Async run
-        status_code, response_text = await client.loop.run_in_executor(None, upload_to_server)
-        
-        if status_code == 200 and response_text.startswith("http"):
-            # Direct link mil gaya!
-            image_link = response_text.strip()
+        # 2. Multi-Server Upload Logic
+        def upload_multi_server():
+            # 🔥 TRY 1: Envs.sh (Fastest & Unblocked)
+            try:
+                with open(download_path, 'rb') as f:
+                    response = requests.post("https://envs.sh", files={"file": f}, timeout=15)
+                    if response.status_code == 200 and response.text.startswith("http"):
+                        return response.text.strip()
+            except Exception:
+                pass
             
+            # 🔥 TRY 2: Catbox.moe (Reliable Fallback)
+            try:
+                with open(download_path, 'rb') as f:
+                    response = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": f}, timeout=15)
+                    if response.status_code == 200 and response.text.startswith("http"):
+                        return response.text.strip()
+            except Exception:
+                pass
+
+            return None
+
+        # 3. Async run taaki bot atke nahi
+        image_link = await client.loop.run_in_executor(None, upload_multi_server)
+        
+        if image_link:
             buttons = [
                 [InlineKeyboardButton("🌐 Open Link", url=image_link)],
                 [InlineKeyboardButton("🔗 Share Link", url=f"https://t.me/share/url?url={image_link}")]
@@ -54,12 +64,13 @@ async def telegraph_upload(client, message):
                 disable_web_page_preview=False
             )
         else:
-            await msg.edit_text(f"❌ **Upload Failed!**\n\nServer Response: `{response_text}`")
+            await msg.edit_text("❌ **Upload Failed!**\n\nDono servers (Envs aur Catbox) par network error aaya. Kripya thodi der baad try karein.")
             
     except Exception as e:
         await msg.edit_text(f"❌ **Error Occurred:** `{e}`")
         
     finally:
-        # Storage clear
+        # Storage clear kar do
         if 'download_path' in locals() and download_path and os.path.exists(download_path):
             os.remove(download_path)
+

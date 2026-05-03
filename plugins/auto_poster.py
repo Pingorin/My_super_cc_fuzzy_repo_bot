@@ -24,7 +24,9 @@ async def get_fresh_or_mega_trending(posted_ids):
     BANNED_TV_GENRES = [10766, 10764, 10767]
     
     timeout = aiohttp.ClientTimeout(total=30)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    # 🔥 FIX: TMDB ke liye bhi SSL False kar diya taaki wahan bhi block na ho
+    connector = aiohttp.TCPConnector(ssl=False)
+    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         try:
             async with session.get(url) as resp:
                 if resp.status == 200:
@@ -48,11 +50,9 @@ async def get_fresh_or_mega_trending(posted_ids):
                         top_media = valid_media[0] 
                         top_id = str(top_media["id"])
                         
-                        # Mega-Hit Logic
                         if top_media.get("popularity", 0) > 800 and top_id not in posted_ids[-3:]:
                             return top_media, True 
                         
-                        # Fresh Logic
                         fresh_media = [m for m in valid_media if str(m["id"]) not in posted_ids]
                         if fresh_media:
                             import random
@@ -64,11 +64,10 @@ async def get_fresh_or_mega_trending(posted_ids):
     return None, False
 
 # ==============================================================================
-# ⚡ HELPER: ADD REACTIONS TO MESSAGE (PYROFORK COMPATIBLE)
+# ⚡ HELPER: ADD REACTIONS TO MESSAGE
 # ==============================================================================
 async def add_poster_reactions(client, chat_id, message_id):
     try:
-        # Pyrofork uses direct string emojis with send_reaction
         for emoji in POSTER_REACTIONS:
             try:
                 await client.send_reaction(chat_id, message_id, emoji)
@@ -89,16 +88,16 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
 
     media, is_mega_hit = await get_fresh_or_mega_trending(posted_ids)
     
-    # 🔥 FORCE FETCH BYPASS: Agar sab post ho chuka hai, toh jabardasti top movie nikalega (Taki Test fail na ho)
     if not media: 
         url = f"https://api.themoviedb.org/3/trending/all/day?api_key={info.TMDB_API_KEY}"
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30), connector=connector) as session:
             async with session.get(url) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     results = data.get("results", [])
                     if results:
-                        media = results[0]  # Forcefully picking the top trending movie
+                        media = results[0]  
                         is_mega_hit = False
                     else:
                         raise Exception("TMDB ne khali data bheja hai!")
@@ -110,7 +109,8 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
     
     detail_url = f"https://api.themoviedb.org/3/tv/{media_id}?api_key={info.TMDB_API_KEY}" if media_type == 'tv' else f"https://api.themoviedb.org/3/movie/{media_id}?api_key={info.TMDB_API_KEY}"
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+    connector = aiohttp.TCPConnector(ssl=False)
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30), connector=connector) as session:
         async with session.get(detail_url) as resp:
             details = await resp.json()
 
@@ -170,9 +170,10 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
                 "parse_mode": "HTML", 
                 "reply_markup": json.dumps({"inline_keyboard": raw_inline_keyboard})
             }
-            # 🔥 API Timeout badha diya hai
+            # 🔥 SSL BYPASS FIX: Server SSL certificate ignore karega
             timeout = aiohttp.ClientTimeout(total=60)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            connector = aiohttp.TCPConnector(ssl=False)
+            async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
                 resp = await session.post(api_url, json=payload)
                 if resp.status != 200:
                     err_msg = await resp.text()
@@ -211,7 +212,8 @@ async def manual_post_movie(client, message):
     search_url = f"https://api.themoviedb.org/3/search/multi?api_key={info.TMDB_API_KEY}&query={query}"
     
     timeout = aiohttp.ClientTimeout(total=30)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    connector = aiohttp.TCPConnector(ssl=False)
+    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         async with session.get(search_url) as resp:
             data = await resp.json()
             results = data.get("results", [])
@@ -265,9 +267,10 @@ async def manual_post_movie(client, message):
                 "chat_id": TARGET_CHANNEL, "photo": poster_url, "caption": caption_html, "parse_mode": "HTML",
                 "reply_markup": json.dumps({"inline_keyboard": [[{"text": "📥 Download Now", "url": f"https://t.me/{target_bot_username}?start="}]]})
             }
-            # 🔥 API Timeout badha diya gaya hai
+            # 🔥 SSL BYPASS FIX: Error khatam!
             timeout_api = aiohttp.ClientTimeout(total=60)
-            async with aiohttp.ClientSession(timeout=timeout_api) as session: 
+            connector_api = aiohttp.TCPConnector(ssl=False)
+            async with aiohttp.ClientSession(timeout=timeout_api, connector=connector_api) as session: 
                 resp = await session.post(api_url, json=payload)
                 if resp.status != 200:
                     err_msg = await resp.text()
@@ -314,7 +317,8 @@ async def start_auto_poster(client):
                 detail_url = f"https://api.themoviedb.org/3/tv/{media_id}?api_key={info.TMDB_API_KEY}" if media_type == 'tv' else f"https://api.themoviedb.org/3/movie/{media_id}?api_key={info.TMDB_API_KEY}"
                 
                 timeout = aiohttp.ClientTimeout(total=30)
-                async with aiohttp.ClientSession(timeout=timeout) as session:
+                connector = aiohttp.TCPConnector(ssl=False)
+                async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
                     async with session.get(detail_url) as resp:
                         details = await resp.json()
 

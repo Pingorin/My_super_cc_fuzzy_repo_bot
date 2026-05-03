@@ -103,13 +103,13 @@ PM_SEARCH = os.environ.get("PM_SEARCH", "False").lower() in ["true", "yes", "1"]
 # 💳 PAYMENT & CONTACT SETTINGS (NEW)
 # ==============================================================================
 # Apna UPI ID yahan dalein
-MERCHANT_UPI_ID = os.environ.get("MERCHANT_UPI_ID", "") 
+MERCHANT_UPI_ID = os.environ.get("MERCHANT_UPI_ID", "anujain5678@axl") 
 
 # Group/Channel link jahan user screenshot bhejega
-PAYMENT_SUPPORT_LINK = os.environ.get("PAYMENT_SUPPORT_LINK", "") 
+PAYMENT_SUPPORT_LINK = os.environ.get("PAYMENT_SUPPORT_LINK", "https://t.me/ramSitaam") 
 
 # Owner se custom plan baat karne ka link
-CONTACT_OWNER_LINK = os.environ.get("CONTACT_OWNER_LINK", "") 
+CONTACT_OWNER_LINK = os.environ.get("CONTACT_OWNER_LINK", "https://t.me/ramSitaam") 
 
 # Agar aapko custom QR code photo lagani hai (URL), warna bot auto generate karega
-CUSTOM_QR_URL = os.environ.get("CUSTOM_QR_URL", "https://ibb.co/FqLvrqxL")
+CUSTOM_QR_URL = os.environ.get("CUSTOM_QR_URL", "AgACAgUAAxkBAAIBsWn3WAXRQW2cQP_c7vQXoKdp1XNyAAIfEmsb563AV4n-hIXiAAFnQAAIAQADAgADeQAHHgQ")

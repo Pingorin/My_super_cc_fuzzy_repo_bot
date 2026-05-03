@@ -6,7 +6,7 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ==============================================================================
-# 🖼️ TELEGRAPH IMAGE UPLOADER (WITH ADVANCED DEBUGGING)
+# 🖼️ TELEGRAPH IMAGE UPLOADER (FINAL 400 ERROR FIX - SHORT FILENAME TRICK)
 # ==============================================================================
 
 @Client.on_message(filters.command(["tg", "telegraph"]) & filters.private)
@@ -25,37 +25,25 @@ async def telegraph_upload(client, message):
         # 1. Download file
         download_path = await reply.download()
         
-        # 2. File ki details nikalna (Debugging & Fixing ke liye)
-        file_name = os.path.basename(download_path)
-        mime_type = mimetypes.guess_type(download_path)[0]
+        # 2. Extract Type
+        mime_type = mimetypes.guess_type(download_path)[0] or "image/jpeg"
         
-        # Agar mimetype detect na ho ya file me extension na ho
-        if not mime_type:
-            mime_type = "image/jpeg"
-        if "." not in file_name:
-            file_name += ".jpg"
+        # 🛑 SABSE BADA FIX: Server ko lamba naam pasand nahi hai, isliye hum ek chota "Fake Name" banayenge
+        if mime_type.startswith("video/"):
+            fake_filename = "video.mp4"
+        else:
+            fake_filename = "image.jpg"
             
-        file_bytes_size = os.path.getsize(download_path)
+        await msg.edit_text("📤 **Uploading to graph.org...**")
         
-        await msg.edit_text(
-            f"📤 **Uploading to Telegraph...**\n\n"
-            f"🔍 **Debug Info:**\n"
-            f"File: `{file_name}`\n"
-            f"Type: `{mime_type}`\n"
-            f"Size: `{file_bytes_size} bytes`\n\n"
-            f"Server se response ka wait kar rahe hain..."
-        )
-        
-        # 3. Synchronous upload function (Proper multipart form formatting)
+        # 3. Synchronous upload function
         def upload_to_telegraph():
             with open(download_path, 'rb') as f:
-                # 🛑 SABSE BADA FIX: Explicitly (filename, file_object, content_type) define karna zaroori hai!
-                files = {'file': (file_name, f, mime_type)}
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-                }
-                # Telegra.ph official API
-                resp = requests.post("https://telegra.ph/upload", files=files, headers=headers)
+                # Yahan humne server ko strictly chota naam (fake_filename) diya hai
+                files = {'file': (fake_filename, f, mime_type)}
+                
+                # India me ban/block hone se bachne ke liye direct graph.org use kar rahe hain
+                resp = requests.post("https://graph.org/upload", files=files)
                 return resp.status_code, resp.text
 
         # 4. Async run_in_executor
@@ -80,28 +68,18 @@ async def telegraph_upload(client, message):
                         disable_web_page_preview=False
                     )
                 elif type(json_data) is dict and "error" in json_data:
-                    await msg.edit_text(f"❌ **API Error:** `{json_data['error']}`\n\n🔍 **Raw Response:**\n`{response_text}`")
+                    await msg.edit_text(f"❌ **API Error:** `{json_data['error']}`")
                 else:
-                    await msg.edit_text(f"❌ **Upload Failed!** Unknown Response format.\n\n🔍 **Raw Response:**\n`{response_text}`")
+                    await msg.edit_text("❌ **Upload Failed!** Unknown Response format.")
             except Exception as json_err:
-                await msg.edit_text(f"❌ **JSON Parsing Error:** `{json_err}`\n\n🔍 **Raw Text from Server:**\n`{response_text}`")
+                await msg.edit_text("❌ **Upload Failed!** Server response format incorrect tha.")
         else:
-            await msg.edit_text(
-                f"❌ **Upload Failed: 400 Bad Request**\n\n"
-                f"🚨 **Server ka Jawab:**\n`{response_text}`\n\n"
-                f"🔍 **Hamne Kya Bheja Tha:**\n"
-                f"Name: `{file_name}`\n"
-                f"Type: `{mime_type}`\n"
-                f"Size: `{file_bytes_size} bytes`"
-            )
+            await msg.edit_text(f"❌ **Upload Failed: {status_code}**\n\n`{response_text}`")
             
     except Exception as e:
-        import traceback
-        err_trace = traceback.format_exc()
-        await msg.edit_text(f"❌ **Code Crash Occurred:**\n\n`{e}`\n\n🔍 **Traceback:**\n`{err_trace[-500:]}`")
+        await msg.edit_text(f"❌ **Error Occurred:** `{e}`")
         
     finally:
         # Storage clear
         if 'download_path' in locals() and download_path and os.path.exists(download_path):
             os.remove(download_path)
-

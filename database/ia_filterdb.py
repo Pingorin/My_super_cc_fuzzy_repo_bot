@@ -598,7 +598,8 @@ class MediaDB:
             if safe_first_word:
                 match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"^[\W_]*{safe_first_word}\b", "options": "i"}}, 500, 0]})
 
-            for w in words: 
+            # 🔥 OPTIMIZED LOOP: Sirf start ke 5 words pe scoring dega
+            for w in words[:5]: 
                 is_lang = w in ["hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "english", "dual", "multi", "punjabi", "marathi"]
                 is_meta = re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords
                 
@@ -633,18 +634,22 @@ class MediaDB:
 
             pipeline.append({"$limit": 100}) 
             
-            cursor1 = self.search_col1.aggregate(pipeline)
-            files = await cursor1.to_list(length=100)
+            # 🚀 PARALLEL DB FETCHING
+            async def fetch_db(collection, pipe):
+                try:
+                    return await collection.aggregate(pipe).to_list(length=100)
+                except Exception:
+                    return []
+                    
+            tasks = [fetch_db(self.search_col1, pipeline)]
+            if self.has_db2: tasks.append(fetch_db(self.search_col2, pipeline))
+            if self.has_db3: tasks.append(fetch_db(self.search_col3, pipeline))
             
-            if self.has_db2:
-                cursor2 = self.search_col2.aggregate(pipeline)
-                files2 = await cursor2.to_list(length=100)
-                files.extend(files2) 
-                
-            if self.has_db3:
-                cursor3 = self.search_col3.aggregate(pipeline)
-                files3 = await cursor3.to_list(length=100)
-                files.extend(files3) 
+            results = await asyncio.gather(*tasks)
+            
+            files = []
+            for res in results:
+                files.extend(res)
             
             if not files: raise Exception("Fallback Search Triggered")
 
@@ -652,6 +657,8 @@ class MediaDB:
             try:
                 fallback_match = {}
                 fallback_or_clauses = []
+                alias_map = {"hindi": r"(hindi|hin)", "english": r"(english|eng)", "tamil": r"(tamil|tam)", "telugu": r"(telugu|tel)", "malayalam": r"(malayalam|mal)", "kannada": r"(kannada|kan)", "dual": r"(dual|multi)", "multi": r"(dual|multi)"}
+                
                 for tw in words:
                     if tw in alias_map: safe_tw = rf"\b{alias_map[tw]}\b"
                     else:
@@ -674,7 +681,7 @@ class MediaDB:
                         "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1,
                         "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}
                     }},
-                    {"$addFields": {"custom_score": {"$add": match_conditions}}}
+                    {"$addFields": {"custom_score": {"$add": match_conditions if 'match_conditions' in locals() else [0]}}}
                 ]
                 
                 if sort == "new": fallback_pipeline.append({"$sort": {"_id": -1}})
@@ -685,25 +692,29 @@ class MediaDB:
 
                 fallback_pipeline.append({"$limit": 30})
                 
-                cursor1 = self.search_col1.aggregate(fallback_pipeline)
-                files = await cursor1.to_list(length=30)
+                # 🚀 PARALLEL DB FETCHING FOR FALLBACK
+                async def fetch_fallback(collection, pipe):
+                    try:
+                        return await collection.aggregate(pipe).to_list(length=30)
+                    except Exception:
+                        return []
+                        
+                fb_tasks = [fetch_fallback(self.search_col1, fallback_pipeline)]
+                if self.has_db2: fb_tasks.append(fetch_fallback(self.search_col2, fallback_pipeline))
+                if self.has_db3: fb_tasks.append(fetch_fallback(self.search_col3, fallback_pipeline))
                 
-                if self.has_db2:
-                    cursor2 = self.search_col2.aggregate(fallback_pipeline)
-                    files2 = await cursor2.to_list(length=30)
-                    files.extend(files2)
-                    
-                if self.has_db3:
-                    cursor3 = self.search_col3.aggregate(fallback_pipeline)
-                    files3 = await cursor3.to_list(length=30)
-                    files.extend(files3)
+                fb_results = await asyncio.gather(*fb_tasks)
+                
+                files = []
+                for res in fb_results:
+                    files.extend(res)
                     
             except Exception as inner_e:
                 files = []
 
         # 🔥 UNIFIED PYTHON RE-RANKING (With Native TextScore) 🔥
         if files:
-            query_title = " ".join(title_words).lower()
+            query_title = " ".join(title_words).lower() if 'title_words' in locals() else clean_query
             for file in files:
                 fname = file.get('file_name', '').lower()
                 if query_title in fname:

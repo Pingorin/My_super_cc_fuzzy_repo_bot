@@ -1,11 +1,12 @@
 import os
 import requests
+import mimetypes
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ==============================================================================
-# 🖼️ TELEGRAPH IMAGE UPLOADER (100% FIXED WITH REQUESTS)
+# 🖼️ TELEGRAPH IMAGE UPLOADER (WITH ADVANCED DEBUGGING)
 # ==============================================================================
 
 @Client.on_message(filters.command(["tg", "telegraph"]) & filters.private)
@@ -21,49 +22,86 @@ async def telegraph_upload(client, message):
     msg = await message.reply_text("⏳ **Processing...** File download ho rahi hai...")
     
     try:
-        # File Download
+        # 1. Download file
         download_path = await reply.download()
         
-        await msg.edit_text("📤 **Uploading to Telegraph...**")
+        # 2. File ki details nikalna (Debugging & Fixing ke liye)
+        file_name = os.path.basename(download_path)
+        mime_type = mimetypes.guess_type(download_path)[0]
         
-        # 🛑 BRAHMASTRA: aiohttp ki jagah 'requests' use kar rahe hain
+        # Agar mimetype detect na ho ya file me extension na ho
+        if not mime_type:
+            mime_type = "image/jpeg"
+        if "." not in file_name:
+            file_name += ".jpg"
+            
+        file_bytes_size = os.path.getsize(download_path)
+        
+        await msg.edit_text(
+            f"📤 **Uploading to Telegraph...**\n\n"
+            f"🔍 **Debug Info:**\n"
+            f"File: `{file_name}`\n"
+            f"Type: `{mime_type}`\n"
+            f"Size: `{file_bytes_size} bytes`\n\n"
+            f"Server se response ka wait kar rahe hain..."
+        )
+        
+        # 3. Synchronous upload function (Proper multipart form formatting)
         def upload_to_telegraph():
             with open(download_path, 'rb') as f:
-                # requests file headers natively manage kar leta hai
-                return requests.post("https://telegra.ph/upload", files={'file': f})
+                # 🛑 SABSE BADA FIX: Explicitly (filename, file_object, content_type) define karna zaroori hai!
+                files = {'file': (file_name, f, mime_type)}
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+                }
+                # Telegra.ph official API
+                resp = requests.post("https://telegra.ph/upload", files=files, headers=headers)
+                return resp.status_code, resp.text
 
-        # Async bot ko block hone se bachane ke liye executor me run kiya
-        response = await client.loop.run_in_executor(None, upload_to_telegraph)
+        # 4. Async run_in_executor
+        status_code, response_text = await client.loop.run_in_executor(None, upload_to_telegraph)
         
-        if response.status_code == 200:
-            json_data = response.json()
-            
-            if type(json_data) is list and len(json_data) > 0 and 'src' in json_data[0]:
-                # 🌐 Link Generation (Telegra.ph ki jagah graph.org de rahe hain taaki India me ban na ho)
-                telegraph_link = "https://graph.org" + json_data[0]['src']
-                
-                buttons = [
-                    [InlineKeyboardButton("🌐 Open Link", url=telegraph_link)],
-                    [InlineKeyboardButton("🔗 Share Link", url=f"https://t.me/share/url?url={telegraph_link}")]
-                ]
-                await msg.edit_text(
-                    f"✅ **Telegraph Link Generated Successfully!**\n\n"
-                    f"📥 **Link:**\n`{telegraph_link}`\n\n"
-                    f"_Aap is link ko copy karke apne info.py mein `CUSTOM_QR_URL` me daal sakte hain._",
-                    reply_markup=InlineKeyboardMarkup(buttons),
-                    disable_web_page_preview=False
-                )
-            elif "error" in json_data:
-                await msg.edit_text(f"❌ **Error:** {json_data['error']}")
-            else:
-                await msg.edit_text("❌ **Upload Failed!** Unknown Response.")
+        if status_code == 200:
+            import json
+            try:
+                json_data = json.loads(response_text)
+                if type(json_data) is list and len(json_data) > 0 and 'src' in json_data[0]:
+                    telegraph_link = "https://graph.org" + json_data[0]['src']
+                    
+                    buttons = [
+                        [InlineKeyboardButton("🌐 Open Link", url=telegraph_link)],
+                        [InlineKeyboardButton("🔗 Share Link", url=f"https://t.me/share/url?url={telegraph_link}")]
+                    ]
+                    await msg.edit_text(
+                        f"✅ **Telegraph Link Generated Successfully!**\n\n"
+                        f"📥 **Link:**\n`{telegraph_link}`\n\n"
+                        f"_Aap is link ko copy karke apne info.py mein `CUSTOM_QR_URL` me daal sakte hain._",
+                        reply_markup=InlineKeyboardMarkup(buttons),
+                        disable_web_page_preview=False
+                    )
+                elif type(json_data) is dict and "error" in json_data:
+                    await msg.edit_text(f"❌ **API Error:** `{json_data['error']}`\n\n🔍 **Raw Response:**\n`{response_text}`")
+                else:
+                    await msg.edit_text(f"❌ **Upload Failed!** Unknown Response format.\n\n🔍 **Raw Response:**\n`{response_text}`")
+            except Exception as json_err:
+                await msg.edit_text(f"❌ **JSON Parsing Error:** `{json_err}`\n\n🔍 **Raw Text from Server:**\n`{response_text}`")
         else:
-            await msg.edit_text(f"❌ **Upload Failed:** Server ne {response.status_code} error diya.\n\n`{response.text}`")
+            await msg.edit_text(
+                f"❌ **Upload Failed: 400 Bad Request**\n\n"
+                f"🚨 **Server ka Jawab:**\n`{response_text}`\n\n"
+                f"🔍 **Hamne Kya Bheja Tha:**\n"
+                f"Name: `{file_name}`\n"
+                f"Type: `{mime_type}`\n"
+                f"Size: `{file_bytes_size} bytes`"
+            )
             
     except Exception as e:
-        await msg.edit_text(f"❌ **Error Occurred:** `{e}`")
+        import traceback
+        err_trace = traceback.format_exc()
+        await msg.edit_text(f"❌ **Code Crash Occurred:**\n\n`{e}`\n\n🔍 **Traceback:**\n`{err_trace[-500:]}`")
         
     finally:
         # Storage clear
-        if 'download_path' in locals() and os.path.exists(download_path):
+        if 'download_path' in locals() and download_path and os.path.exists(download_path):
             os.remove(download_path)
+

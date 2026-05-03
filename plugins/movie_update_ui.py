@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import info
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import ChatAdminRequired, UserNotParticipant
@@ -103,7 +104,6 @@ async def mu_ask_slot(client, query):
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
     
     try:
-        # 🔥 FIX: Pyromod ka listen() use kar rahe hain taaki ID direct pakde
         msg = await client.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=60)
         if msg.text:
             channel_id_str = msg.text.strip()
@@ -116,17 +116,21 @@ async def mu_ask_slot(client, query):
                 
             wait_msg = await msg.reply("⏳ Checking Admin Permissions...")
             
-            try:
-                member = await client.get_chat_member(target_channel, client.me.id)
-                if not member.privileges or not member.privileges.can_post_messages:
-                    await wait_msg.edit("❌ Bot is admin but lacks 'Post Messages' permission.")
+            # 🔥 FIX: Agar Poster Bot Token set hai, toh Main Bot ka Admin Check Bypass kar do!
+            poster_token = getattr(info, 'POSTER_BOT_TOKEN', None)
+            
+            if not poster_token:
+                try:
+                    member = await client.get_chat_member(target_channel, client.me.id)
+                    if not member.privileges or not member.privileges.can_post_messages:
+                        await wait_msg.edit("❌ Bot is admin but lacks 'Post Messages' permission.")
+                        return await mu_slots_menu(client, query)
+                except ChatAdminRequired: 
+                    await wait_msg.edit("❌ Error: Mujhe us channel me Admin banao pehle!")
                     return await mu_slots_menu(client, query)
-            except ChatAdminRequired: 
-                await wait_msg.edit("❌ Error: Mujhe us channel me Admin banao pehle!")
-                return await mu_slots_menu(client, query)
-            except Exception as e: 
-                await wait_msg.edit(f"❌ Error: Channel nahi mila.\n`{e}`")
-                return await mu_slots_menu(client, query)
+                except Exception as e: 
+                    await wait_msg.edit(f"❌ Error: Channel nahi mila.\n`{e}`")
+                    return await mu_slots_menu(client, query)
 
             settings = await db.get_group_settings(chat_id)
             mu = get_mu_settings(settings)
@@ -270,7 +274,7 @@ async def mu_clearfooter(client, query):
     await mu_footer_menu(client, query)
 
 # ==============================================================================
-# TEST & TOGGLES
+# TEST & TOGGLES (WITH LIVE ERROR DISPLAY)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^mu_test#"))
 async def mu_test_post(client, query):
@@ -282,21 +286,31 @@ async def mu_test_post(client, query):
     if not active_channels:
         return await query.answer("❌ No slots set! Pehle koi channel add karein.", show_alert=True)
         
-    await query.answer("⏳ Running Test Post...", show_alert=False)
+    await query.message.edit_text("⏳ Running Test Post...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"mu_main#{chat_id}")]]))
     
     success_count = 0
+    error_logs = ""
     for channel in active_channels:
         try:
+            # Ye call karega aapke updated auto_poster wale function ko
             await post_trending_poster(client, custom_channel_id=channel, group_chat_id=chat_id) 
             success_count += 1
         except Exception as e:
             logger.error(f"Test post failed for {channel}: {e}")
+            error_logs += f"\n• `{channel}`: {str(e)}"
             
     btn = [[InlineKeyboardButton("🔙 Back", callback_data=f"mu_main#{chat_id}")]]
     if success_count > 0:
-        await query.message.edit_text(f"✅ **Test successful!**\nPosted to {success_count}/{len(active_channels)} channel(s).\n\nCheck your post channel!", reply_markup=InlineKeyboardMarkup(btn))
+        await query.message.edit_text(
+            f"✅ **Test successful!**\nPosted to {success_count}/{len(active_channels)} channel(s).\n\nCheck your post channel!", 
+            reply_markup=InlineKeyboardMarkup(btn)
+        )
     else:
-        await query.message.edit_text("❌ **Test Failed!**\nCould not post to any channel. Check terminal logs.", reply_markup=InlineKeyboardMarkup(btn))
+        # 🔥 FIX: Agar fail hua toh ab chup nahi baithega, direct error screen par dega!
+        await query.message.edit_text(
+            f"❌ **Test Failed!**\nKahin na kahin error aagaya hai:\n{error_logs}", 
+            reply_markup=InlineKeyboardMarkup(btn)
+        )
 
 @Client.on_callback_query(filters.regex(r"^mu_toggle#"))
 async def mu_toggle_status(client, query):

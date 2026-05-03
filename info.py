@@ -112,4 +112,4 @@ PAYMENT_SUPPORT_LINK = os.environ.get("PAYMENT_SUPPORT_LINK", "")
 CONTACT_OWNER_LINK = os.environ.get("CONTACT_OWNER_LINK", "") 
 
 # Agar aapko custom QR code photo lagani hai (URL), warna bot auto generate karega
-CUSTOM_QR_URL = os.environ.get("CUSTOM_QR_URL", "")
+CUSTOM_QR_URL = os.environ.get("CUSTOM_QR_URL", "https://ibb.co/FqLvrqxL")

@@ -88,7 +88,8 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
     posted_ids = posted_data.get("ids", []) if posted_data else []
 
     media, is_mega_hit = await get_fresh_or_mega_trending(posted_ids)
-    if not media: return False
+    if not media: 
+        raise Exception("TMDB se koi nayi movie nahi mili!")
 
     media_id = str(media['id'])
     media_type = media.get('media_type', 'movie')
@@ -132,7 +133,8 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
     poster_token = getattr(info, 'POSTER_BOT_TOKEN', None)
     TARGET_CHANNEL = custom_channel_id if custom_channel_id else info.UPDATES_CHANNEL
     
-    if not TARGET_CHANNEL: return False
+    if not TARGET_CHANNEL: 
+        raise Exception("Info.py ya Group settings me koi Target Channel set nahi hai!")
 
     buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{target_bot_username}?start=")]]
 
@@ -150,11 +152,18 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
             api_url = f"https://api.telegram.org/bot{poster_token}/sendPhoto"
             raw_inline_keyboard = [[{"text": btn.text, "url": btn.url} for btn in row] for row in buttons]
             payload = {
-                "chat_id": TARGET_CHANNEL, "photo": poster_url, "caption": caption_html,
-                "parse_mode": "HTML", "reply_markup": json.dumps({"inline_keyboard": raw_inline_keyboard})
+                "chat_id": TARGET_CHANNEL, 
+                "photo": poster_url, 
+                "caption": caption_html,
+                "parse_mode": "HTML", 
+                "reply_markup": json.dumps({"inline_keyboard": raw_inline_keyboard})
             }
             async with aiohttp.ClientSession() as session:
-                await session.post(api_url, json=payload)
+                resp = await session.post(api_url, json=payload)
+                # 🔥 YAHAN HAI ASLI JADOO: Agar Telegram reject karega toh error print hoga
+                if resp.status != 200:
+                    err_msg = await resp.text()
+                    raise Exception(f"TELEGRAM ERROR: {err_msg}")
         else:
             caption_md = caption_html.replace("<b>", "**").replace("</b>", "**")
             sent_msg = await client.send_photo(chat_id=TARGET_CHANNEL, photo=poster_url, caption=caption_md, reply_markup=InlineKeyboardMarkup(buttons))
@@ -244,7 +253,11 @@ async def manual_post_movie(client, message):
                 "chat_id": TARGET_CHANNEL, "photo": poster_url, "caption": caption_html, "parse_mode": "HTML",
                 "reply_markup": json.dumps({"inline_keyboard": [[{"text": "📥 Download Now", "url": f"https://t.me/{target_bot_username}?start="}]]})
             }
-            async with aiohttp.ClientSession() as session: await session.post(api_url, json=payload)
+            async with aiohttp.ClientSession() as session: 
+                resp = await session.post(api_url, json=payload)
+                if resp.status != 200:
+                    err_msg = await resp.text()
+                    raise Exception(f"TELEGRAM ERROR: {err_msg}")
         else:
             caption_md = caption_html.replace("<b>", "**").replace("</b>", "**")
             buttons = [[InlineKeyboardButton("📥 Download Now", url=f"https://t.me/{target_bot_username}?start=")]]

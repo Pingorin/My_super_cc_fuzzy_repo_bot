@@ -24,17 +24,16 @@ class script(object):
     # 1. UPSELL / BUY PREMIUM PITCH
     PREM_UPGRADE_TXT = """👋 Hello {mention},
 
-🚨 Aap abhi **LIMITED** access use kar rahe hain (Ads + Slow Speed + Verification). 😒
-
 👑 **Premium activate karke sab unlock karein:**
-🚫 **NO ADS** – Zero interruption
-⚡ **FAST DOWNLOAD** – No waiting
-📂 **DIRECT FILES** – No links
+🚫 **NO ADS**
+⚡ **FAST DOWNLOAD**
+🎥 **ONLINE WATCHING** 
+📂 **DIRECT FILES**
 🎬 **UNLIMITED MOVIES & SERIES**
-💬 **PRIORITY SUPPORT** – Fast response
+💬 **PRIORITY SUPPORT**
 
 ━━━━━━━━━━━━━━━━━━━━
-🔥 1000+ users already upgraded
+🔥 1k++ users already upgraded
 🛡️ Safe & trusted service
 
 🎁 **FREE TRIAL AVAILABLE**

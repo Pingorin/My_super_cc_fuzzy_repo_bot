@@ -65,10 +65,19 @@ async def mu_slots_menu(client, query):
     settings = await db.get_group_settings(chat_id)
     mu = get_mu_settings(settings)
     
-    bot_username = client.me.username
+    # 🔥 SMART USERNAME DETECTOR
+    poster_token = getattr(info, 'POSTER_BOT_TOKEN', "")
+    my_token = getattr(info, 'BOT_TOKEN', "")
+    
+    if poster_token and poster_token.strip() != my_token.strip():
+        bot_username = getattr(info, 'FILE_STORE_BOT', "Poster_Bot").replace("@", "")
+        bot_username = f"@{bot_username}"
+    else:
+        bot_username = f"@{client.me.username}"
+        
     text = (
         "**📝 Set Post Chats (Maximum 3)**\n\n"
-        f"**Posting Bot:** @{bot_username}\n\n"
+        f"🤖 **Posting Bot:** {bot_username}\n\n"
         "**Current Slots:**\n"
         f"**Slot 1 :** `{mu['slots']['1'] or 'Not Set'}`\n"
         f"**Slot 2 :** `{mu['slots']['2'] or 'Not Set'}`\n"
@@ -91,15 +100,29 @@ async def mu_slots_menu(client, query):
 async def mu_ask_slot(client, query):
     _, slot, chat_id = query.data.split("#")
     chat_id = int(chat_id)
+    
+    # 🔥 SMART USERNAME DETECTOR FOR MESSAGE
+    poster_token = getattr(info, 'POSTER_BOT_TOKEN', "")
+    my_token = getattr(info, 'BOT_TOKEN', "")
+    
+    if poster_token and poster_token.strip() != my_token.strip():
+        bot_username = getattr(info, 'FILE_STORE_BOT', "Poster_Bot").replace("@", "")
+        bot_username = f"@{bot_username}"
+    else:
+        bot_username = f"@{client.me.username}"
+
+    # ✅ DYNAMIC TEXT UPDATED HERE
     text = (
         f"**Set Post Chat Slot {slot}**\n\n"
         "Please send the Chat ID where you want to post movie updates.\n\n"
         "**⚠️ Requirements:**\n"
-        f"• Bot must be **admin** in that channel.\n"
+        f"• 🤖 **This is Posting Bot:** {bot_username}\n"
+        f"• Make sure to make **{bot_username}** an Admin in that channel/group.\n"
         "• It needs **'Post Messages'** permission.\n"
         "• Send the numeric chat ID (e.g., `-1001234567890`)\n\n"
         "_Send the ID now in this chat..._"
     )
+    
     btn = [[InlineKeyboardButton("❌ Cancel", callback_data=f"mu_slots#{chat_id}")]]
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
     
@@ -112,24 +135,27 @@ async def mu_ask_slot(client, query):
                 target_channel = int(channel_id_str)
             except ValueError: 
                 await msg.reply("❌ Invalid ID! Numeric ID bhejein (e.g., `-100123...`).")
+                # Fix recursive redirect
+                query.data = f"mu_slots#{chat_id}"
                 return await mu_slots_menu(client, query)
                 
             wait_msg = await msg.reply("⏳ Checking Admin Permissions...")
             
-            # 🔥 FIX: Agar Poster Bot Token set hai, toh Main Bot ka Admin Check Bypass kar do!
-            poster_token = getattr(info, 'POSTER_BOT_TOKEN', None)
-            
-            if not poster_token:
+            # 🔥 BYPASS CHECK IF POSTER BOT IS USED
+            if not poster_token or poster_token.strip() == my_token.strip():
                 try:
                     member = await client.get_chat_member(target_channel, client.me.id)
                     if not member.privileges or not member.privileges.can_post_messages:
-                        await wait_msg.edit("❌ Bot is admin but lacks 'Post Messages' permission.")
+                        await wait_msg.edit(f"❌ **{bot_username}** is admin but lacks 'Post Messages' permission.")
+                        query.data = f"mu_slots#{chat_id}"
                         return await mu_slots_menu(client, query)
                 except ChatAdminRequired: 
-                    await wait_msg.edit("❌ Error: Mujhe us channel me Admin banao pehle!")
+                    await wait_msg.edit(f"❌ Error: Please make **{bot_username}** admin first!")
+                    query.data = f"mu_slots#{chat_id}"
                     return await mu_slots_menu(client, query)
                 except Exception as e: 
                     await wait_msg.edit(f"❌ Error: Channel nahi mila.\n`{e}`")
+                    query.data = f"mu_slots#{chat_id}"
                     return await mu_slots_menu(client, query)
 
             settings = await db.get_group_settings(chat_id)
@@ -153,6 +179,11 @@ async def mu_clear_slot(client, query):
     settings['movie_update'] = mu
     await db.update_group_settings(int(chat_id), settings)
     await query.answer(f"✅ Slot {slot} Cleared!", show_alert=True)
+    
+    # 🔥 UI REFRESH BUG FIXED HERE 🔥
+    # Pehle ye purane data ("mu_clearslot#..") ke sath wapas ja raha tha, 
+    # ab hum isko explicitly "mu_slots#chat_id" de rahe hain!
+    query.data = f"mu_slots#{chat_id}"
     await mu_slots_menu(client, query)
 
 # ==============================================================================
@@ -183,6 +214,7 @@ async def mu_group_ask(client, query):
             else:
                 if not link.startswith("http"):
                     await msg.reply("❌ Invalid Link! Link must start with http:// or https://")
+                    query.data = f"mu_main#{chat_id}"
                     return await mu_main_menu(client, query)
                 mu['group_link'] = link
                 msg_txt = f"✅ Group Link saved!\nLink: {link}"
@@ -240,6 +272,7 @@ async def mu_addfooter_ask(client, query):
             
             if "|" not in btn_data:
                 await msg.reply("❌ Invalid Format!\nPlease use `Name | Link` format.")
+                query.data = f"mu_footer#{chat_id}"
                 return await mu_footer_menu(client, query)
                 
             text_part, url_part = btn_data.split("|", 1)
@@ -248,6 +281,7 @@ async def mu_addfooter_ask(client, query):
             
             if not url_part.startswith("http"):
                 await msg.reply("❌ Invalid URL! Must start with http:// or https://")
+                query.data = f"mu_footer#{chat_id}"
                 return await mu_footer_menu(client, query)
                 
             settings = await db.get_group_settings(chat_id)
@@ -271,6 +305,7 @@ async def mu_clearfooter(client, query):
     settings['movie_update'] = mu
     await db.update_group_settings(chat_id, settings)
     await query.answer("✅ All Footer Buttons Cleared!", show_alert=True)
+    query.data = f"mu_footer#{chat_id}"
     await mu_footer_menu(client, query)
 
 # ==============================================================================
@@ -282,11 +317,9 @@ async def mu_test_post(client, query):
     settings = await db.get_group_settings(chat_id)
     mu = get_mu_settings(settings)
     
-    # 🔥 DEEP LINK REDIRECT LOGIC FOR MAIN BOT
     poster_token = getattr(info, 'POSTER_BOT_TOKEN', "")
     my_token = getattr(info, 'BOT_TOKEN', "")
     
-    # Check if Bot B is set (Token is present and different from Main Bot)
     if poster_token and poster_token.strip() != my_token.strip():
         second_bot_username = getattr(info, 'FILE_STORE_BOT', "Poster_Bot").replace("@", "")
         url = f"https://t.me/{second_bot_username}?start=testpost_{chat_id}"
@@ -302,7 +335,6 @@ async def mu_test_post(client, query):
         ]
         return await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
 
-    # 👇 NORMAL TEST POST (Jab Token khali ho ya Bot B me ho) 👇
     active_channels = [ch for ch in mu['slots'].values() if ch is not None]
     if not active_channels:
         return await query.answer("❌ No slots set! Pehle koi channel add karein.", show_alert=True)
@@ -322,7 +354,6 @@ async def mu_test_post(client, query):
     bot_username = client.me.username if client.me else "Bot"
     btn = [[InlineKeyboardButton("🔙 Back", callback_data=f"mu_main#{chat_id}")]]
     
-    # 🔥 NEW: Message me Bot ka username aur Admin warning
     if success_count > 0:
         success_msg = (
             f"✅ **Test successful!**\n"

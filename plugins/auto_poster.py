@@ -198,11 +198,7 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
 @Client.on_message(filters.command("start") & filters.private, group=-1)
 async def deep_link_test_post(client, message):
     if len(message.command) > 1 and message.command[1].startswith("testpost_"):
-        # Security: Sirf Admins ye test chala sakte hain
-        if message.from_user.id not in info.ADMINS:
-            await message.reply("❌ You are not an admin.")
-            raise StopPropagation
-            
+        # 🔥 FIX: Yahan se ADMIN check hata diya gaya hai taaki redirect directly kaam kare!
         chat_id = int(message.command[1].split("_")[1])
         m = await message.reply("⏳ Command received from Main Bot! Running Test Post...")
         

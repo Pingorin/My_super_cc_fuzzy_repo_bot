@@ -274,7 +274,7 @@ async def mu_clearfooter(client, query):
     await mu_footer_menu(client, query)
 
 # ==============================================================================
-# TEST & TOGGLES (WITH LIVE ERROR DISPLAY)
+# TEST & TOGGLES (WITH DEEP-LINK REDIRECT)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^mu_test#"))
 async def mu_test_post(client, query):
@@ -282,6 +282,27 @@ async def mu_test_post(client, query):
     settings = await db.get_group_settings(chat_id)
     mu = get_mu_settings(settings)
     
+    # 🔥 DEEP LINK REDIRECT LOGIC FOR MAIN BOT
+    poster_token = getattr(info, 'POSTER_BOT_TOKEN', "")
+    my_token = getattr(info, 'BOT_TOKEN', "")
+    
+    if poster_token and poster_token.strip() != my_token.strip():
+        second_bot_username = getattr(info, 'FILE_STORE_BOT', "Poster_Bot").replace("@", "")
+        # Magic URL jo sidha Bot B me command bhej dega
+        url = f"https://t.me/{second_bot_username}?start=testpost_{chat_id}"
+        
+        text = (
+            f"🤖 **Bot Redirect System**\n\n"
+            f"Kyunki poster posting ka kaam **@{second_bot_username}** handle kar raha hai, isliye Test Post wahi karega.\n\n"
+            f"👉 Niche diye button par click karein. Ye aapko dusre bot par le jayega aur wahan automatic test run ho jayega!"
+        )
+        btn = [
+            [InlineKeyboardButton("🚀 Run Test on Poster Bot", url=url)],
+            [InlineKeyboardButton("🔙 Back", callback_data=f"mu_main#{chat_id}")]
+        ]
+        return await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
+
+    # 👇 NORMAL TEST POST FOR BOT B (Jiske paas token khali hai) 👇
     active_channels = [ch for ch in mu['slots'].values() if ch is not None]
     if not active_channels:
         return await query.answer("❌ No slots set! Pehle koi channel add karein.", show_alert=True)
@@ -306,7 +327,6 @@ async def mu_test_post(client, query):
             reply_markup=InlineKeyboardMarkup(btn)
         )
     else:
-        # 🔥 FIX: Agar fail hua toh ab chup nahi baithega, direct error screen par dega!
         await query.message.edit_text(
             f"❌ **Test Failed!**\nKahin na kahin error aagaya hai:\n{error_logs}", 
             reply_markup=InlineKeyboardMarkup(btn)

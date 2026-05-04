@@ -19,6 +19,22 @@ def get_mu_settings(group_settings):
     return group_settings.get('movie_update', default)
 
 # ==============================================================================
+# 🔗 TUTORIAL LINK COMMAND (/tutorial link)
+# ==============================================================================
+@Client.on_message(filters.command("tutorial") & filters.user(info.ADMINS))
+async def set_tutorial_link(client, message):
+    if len(message.command) < 2:
+        return await message.reply("⚠️ **Sahi syntax:** `/tutorial https://t.me/your_channel`")
+    
+    new_link = message.text.split(" ", 1)[1].strip()
+    if not new_link.startswith("http"):
+        return await message.reply("❌ Link `http://` ya `https://` se start hona chahiye.")
+        
+    bot_settings_col = db.db["bot_settings"]
+    await bot_settings_col.update_one({"_id": "global_settings"}, {"$set": {"mu_tutorial": new_link}}, upsert=True)
+    await message.reply(f"✅ **Tutorial link updated successfully!**\n\nNaya link: {new_link}")
+
+# ==============================================================================
 # MAIN MENU
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^mu_main#"))
@@ -45,14 +61,21 @@ async def mu_main_menu(client, query):
         f"**Footer Button:** {footer_txt}"
     )
 
+    # 🔥 FETCH TUTORIAL LINK FROM DB
+    bot_settings_col = db.db["bot_settings"]
+    global_data = await bot_settings_col.find_one({"_id": "global_settings"})
+    # Default link agar DB me set nahi hai
+    tutorial_link = global_data.get("mu_tutorial", "https://t.me/how_to_download_watch_88") if global_data else "https://t.me/how_to_download_watch_88"
+
     btn = [
         [InlineKeyboardButton("📝 Set Post Chat", callback_data=f"mu_slots#{chat_id}")],
         [InlineKeyboardButton("🔗 Set Group Link", callback_data=f"mu_group#{chat_id}"),
          InlineKeyboardButton("🔘 Set Footer Button", callback_data=f"mu_footer#{chat_id}")],
         [InlineKeyboardButton("🔴 Deactivate" if mu['is_active'] else "🟢 Activate", callback_data=f"mu_toggle#{chat_id}"),
          InlineKeyboardButton("🧪 Test", callback_data=f"mu_test#{chat_id}")],
-        [InlineKeyboardButton("📖 Tutorial", callback_data=f"mu_tutorial#{chat_id}")],
-        # 🔥 FIX: "group_settings#" ko "set_main#" kar diya gaya hai
+        # ✅ FIX: Tutorial button ab URL wala ho gaya hai!
+        [InlineKeyboardButton("📖 Tutorial", url=tutorial_link)],
+        # ⚠️ NOTE: Agar Back button abhi bhi kaam nahi kar raha, toh "group_settings#" ko apni main file ke code se change karein.
         [InlineKeyboardButton("🔙 Back to Group Settings", callback_data=f"set_main#{chat_id}")]
     ]
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
@@ -66,7 +89,6 @@ async def mu_slots_menu(client, query):
     settings = await db.get_group_settings(chat_id)
     mu = get_mu_settings(settings)
     
-    # 🔥 SMART USERNAME DETECTOR
     poster_token = getattr(info, 'POSTER_BOT_TOKEN', "")
     my_token = getattr(info, 'BOT_TOKEN', "")
     
@@ -102,7 +124,6 @@ async def mu_ask_slot(client, query):
     _, slot, chat_id = query.data.split("#")
     chat_id = int(chat_id)
     
-    # 🔥 SMART USERNAME DETECTOR FOR MESSAGE
     poster_token = getattr(info, 'POSTER_BOT_TOKEN', "")
     my_token = getattr(info, 'BOT_TOKEN', "")
     
@@ -112,7 +133,6 @@ async def mu_ask_slot(client, query):
     else:
         bot_username = f"@{client.me.username}"
 
-    # ✅ DYNAMIC TEXT UPDATED HERE
     text = (
         f"**Set Post Chat Slot {slot}**\n\n"
         "Please send the Chat ID where you want to post movie updates.\n\n"
@@ -141,7 +161,6 @@ async def mu_ask_slot(client, query):
                 
             wait_msg = await msg.reply("⏳ Checking Admin Permissions...")
             
-            # 🔥 BYPASS CHECK IF POSTER BOT IS USED
             if not poster_token or poster_token.strip() == my_token.strip():
                 try:
                     member = await client.get_chat_member(target_channel, client.me.id)
@@ -180,7 +199,6 @@ async def mu_clear_slot(client, query):
     await db.update_group_settings(int(chat_id), settings)
     await query.answer(f"✅ Slot {slot} Cleared!", show_alert=True)
     
-    # 🔥 UI REFRESH BUG FIXED HERE 🔥
     query.data = f"mu_slots#{chat_id}"
     await mu_slots_menu(client, query)
 
@@ -307,7 +325,7 @@ async def mu_clearfooter(client, query):
     await mu_footer_menu(client, query)
 
 # ==============================================================================
-# TEST & TOGGLES (WITH DEEP-LINK REDIRECT AND DIRECT POST LOGIC)
+# TEST & TOGGLES 
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^mu_test#"))
 async def mu_test_post(client, query):
@@ -315,11 +333,9 @@ async def mu_test_post(client, query):
     settings = await db.get_group_settings(chat_id)
     mu = get_mu_settings(settings)
     
-    # 🔥 DEEP LINK REDIRECT LOGIC FOR MAIN BOT
     poster_token = getattr(info, 'POSTER_BOT_TOKEN', "")
     my_token = getattr(info, 'BOT_TOKEN', "")
     
-    # Check if Bot B is set (Token is present and different from Main Bot)
     if poster_token and poster_token.strip() != my_token.strip():
         second_bot_username = getattr(info, 'FILE_STORE_BOT', "Poster_Bot").replace("@", "")
         url = f"https://t.me/{second_bot_username}?start=testpost_{chat_id}"
@@ -335,7 +351,6 @@ async def mu_test_post(client, query):
         ]
         return await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
 
-    # 👇 NORMAL TEST POST (Jab Token khali ho ya Bot B me ho) 👇
     active_channels = [ch for ch in mu['slots'].values() if ch is not None]
     if not active_channels:
         return await query.answer("❌ No slots set! Pehle koi channel add karein.", show_alert=True)
@@ -355,7 +370,6 @@ async def mu_test_post(client, query):
     bot_username = client.me.username if client.me else "Bot"
     btn = [[InlineKeyboardButton("🔙 Back", callback_data=f"mu_main#{chat_id}")]]
     
-    # 🔥 NEW: Message me Bot ka username aur Admin warning
     if success_count > 0:
         success_msg = (
             f"✅ **Test successful!**\n"

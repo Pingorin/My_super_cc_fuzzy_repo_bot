@@ -4,7 +4,8 @@ import logging
 import json
 import socket
 import info
-from pyrogram import Client, filters
+# 🔥 FIX: StopPropagation import kiya gaya hai Deep-Link ke liye
+from pyrogram import Client, filters, StopPropagation
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.users_chats_db import db
 from utils import temp
@@ -175,7 +176,6 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
                 "reply_markup": json.dumps({"inline_keyboard": raw_inline_keyboard})
             }
             timeout = aiohttp.ClientTimeout(total=60)
-            # 🔥 API CONNECTION FIX (IPv4 Force)
             connector = aiohttp.TCPConnector(ssl=False, family=socket.AF_INET)
             async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
                 resp = await session.post(api_url, json=payload)
@@ -191,6 +191,48 @@ async def post_trending_poster(client, custom_channel_id=None, group_chat_id=Non
     except Exception as e:
         print(f"❌ Test Post Error: {e}")
         raise e
+
+# ==============================================================================
+# 🔗 DEEP-LINK CATCHER (Main Bot se aane wala Test Post)
+# ==============================================================================
+@Client.on_message(filters.command("start") & filters.private, group=-1)
+async def deep_link_test_post(client, message):
+    if len(message.command) > 1 and message.command[1].startswith("testpost_"):
+        # Security: Sirf Admins ye test chala sakte hain
+        if message.from_user.id not in info.ADMINS:
+            await message.reply("❌ You are not an admin.")
+            raise StopPropagation
+            
+        chat_id = int(message.command[1].split("_")[1])
+        m = await message.reply("⏳ Command received from Main Bot! Running Test Post...")
+        
+        try:
+            settings = await db.get_group_settings(chat_id)
+            mu = settings.get('movie_update', {})
+            active_channels = [ch for ch in mu.get('slots', {}).values() if ch is not None]
+            
+            if not active_channels:
+                await m.edit("❌ No slots set! Pehle Group Settings me channel add karein.")
+                raise StopPropagation
+                
+            success_count = 0
+            error_logs = ""
+            for channel in active_channels:
+                try:
+                    await post_trending_poster(client, custom_channel_id=channel, group_chat_id=chat_id)
+                    success_count += 1
+                except Exception as e:
+                    error_logs += f"\n• `{channel}`: {str(e)}"
+                    
+            if success_count > 0:
+                await m.edit(f"✅ **Test successful!**\nPosted to {success_count}/{len(active_channels)} channel(s) from Database.")
+            else:
+                await m.edit(f"❌ **Test Failed!**\n{error_logs}")
+                
+        except Exception as e:
+            await m.edit(f"❌ **Error:** {e}")
+            
+        raise StopPropagation # Ye code ko dusre normal /start trigger hone se rok dega
 
 # ==============================================================================
 # 🎮 MANUAL COMMANDS (/post Pushpa)

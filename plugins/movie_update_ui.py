@@ -52,7 +52,8 @@ async def mu_main_menu(client, query):
         [InlineKeyboardButton("🔴 Deactivate" if mu['is_active'] else "🟢 Activate", callback_data=f"mu_toggle#{chat_id}"),
          InlineKeyboardButton("🧪 Test", callback_data=f"mu_test#{chat_id}")],
         [InlineKeyboardButton("📖 Tutorial", callback_data=f"mu_tutorial#{chat_id}")],
-        [InlineKeyboardButton("🔙 Back to Group Settings", callback_data=f"group_settings#{chat_id}")]
+        # 🔥 FIX: "group_settings#" ko "set_main#" kar diya gaya hai
+        [InlineKeyboardButton("🔙 Back to Group Settings", callback_data=f"set_main#{chat_id}")]
     ]
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
 
@@ -135,7 +136,6 @@ async def mu_ask_slot(client, query):
                 target_channel = int(channel_id_str)
             except ValueError: 
                 await msg.reply("❌ Invalid ID! Numeric ID bhejein (e.g., `-100123...`).")
-                # Fix recursive redirect
                 query.data = f"mu_slots#{chat_id}"
                 return await mu_slots_menu(client, query)
                 
@@ -181,8 +181,6 @@ async def mu_clear_slot(client, query):
     await query.answer(f"✅ Slot {slot} Cleared!", show_alert=True)
     
     # 🔥 UI REFRESH BUG FIXED HERE 🔥
-    # Pehle ye purane data ("mu_clearslot#..") ke sath wapas ja raha tha, 
-    # ab hum isko explicitly "mu_slots#chat_id" de rahe hain!
     query.data = f"mu_slots#{chat_id}"
     await mu_slots_menu(client, query)
 
@@ -317,9 +315,11 @@ async def mu_test_post(client, query):
     settings = await db.get_group_settings(chat_id)
     mu = get_mu_settings(settings)
     
+    # 🔥 DEEP LINK REDIRECT LOGIC FOR MAIN BOT
     poster_token = getattr(info, 'POSTER_BOT_TOKEN', "")
     my_token = getattr(info, 'BOT_TOKEN', "")
     
+    # Check if Bot B is set (Token is present and different from Main Bot)
     if poster_token and poster_token.strip() != my_token.strip():
         second_bot_username = getattr(info, 'FILE_STORE_BOT', "Poster_Bot").replace("@", "")
         url = f"https://t.me/{second_bot_username}?start=testpost_{chat_id}"
@@ -335,6 +335,7 @@ async def mu_test_post(client, query):
         ]
         return await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
 
+    # 👇 NORMAL TEST POST (Jab Token khali ho ya Bot B me ho) 👇
     active_channels = [ch for ch in mu['slots'].values() if ch is not None]
     if not active_channels:
         return await query.answer("❌ No slots set! Pehle koi channel add karein.", show_alert=True)
@@ -354,6 +355,7 @@ async def mu_test_post(client, query):
     bot_username = client.me.username if client.me else "Bot"
     btn = [[InlineKeyboardButton("🔙 Back", callback_data=f"mu_main#{chat_id}")]]
     
+    # 🔥 NEW: Message me Bot ka username aur Admin warning
     if success_count > 0:
         success_msg = (
             f"✅ **Test successful!**\n"

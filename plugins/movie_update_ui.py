@@ -274,7 +274,7 @@ async def mu_clearfooter(client, query):
     await mu_footer_menu(client, query)
 
 # ==============================================================================
-# TEST & TOGGLES (WITH DEEP-LINK REDIRECT)
+# TEST & TOGGLES (WITH DEEP-LINK REDIRECT AND DIRECT POST LOGIC)
 # ==============================================================================
 @Client.on_callback_query(filters.regex(r"^mu_test#"))
 async def mu_test_post(client, query):
@@ -286,9 +286,9 @@ async def mu_test_post(client, query):
     poster_token = getattr(info, 'POSTER_BOT_TOKEN', "")
     my_token = getattr(info, 'BOT_TOKEN', "")
     
+    # Check if Bot B is set (Token is present and different from Main Bot)
     if poster_token and poster_token.strip() != my_token.strip():
         second_bot_username = getattr(info, 'FILE_STORE_BOT', "Poster_Bot").replace("@", "")
-        # Magic URL jo sidha Bot B me command bhej dega
         url = f"https://t.me/{second_bot_username}?start=testpost_{chat_id}"
         
         text = (
@@ -302,7 +302,7 @@ async def mu_test_post(client, query):
         ]
         return await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(btn))
 
-    # 👇 NORMAL TEST POST FOR BOT B (Jiske paas token khali hai) 👇
+    # 👇 NORMAL TEST POST (Jab Token khali ho ya Bot B me ho) 👇
     active_channels = [ch for ch in mu['slots'].values() if ch is not None]
     if not active_channels:
         return await query.answer("❌ No slots set! Pehle koi channel add karein.", show_alert=True)
@@ -313,24 +313,32 @@ async def mu_test_post(client, query):
     error_logs = ""
     for channel in active_channels:
         try:
-            # Ye call karega aapke updated auto_poster wale function ko
             await post_trending_poster(client, custom_channel_id=channel, group_chat_id=chat_id) 
             success_count += 1
         except Exception as e:
             logger.error(f"Test post failed for {channel}: {e}")
             error_logs += f"\n• `{channel}`: {str(e)}"
             
+    bot_username = client.me.username if client.me else "Bot"
     btn = [[InlineKeyboardButton("🔙 Back", callback_data=f"mu_main#{chat_id}")]]
+    
+    # 🔥 NEW: Message me Bot ka username aur Admin warning
     if success_count > 0:
-        await query.message.edit_text(
-            f"✅ **Test successful!**\nPosted to {success_count}/{len(active_channels)} channel(s).\n\nCheck your post channel!", 
-            reply_markup=InlineKeyboardMarkup(btn)
+        success_msg = (
+            f"✅ **Test successful!**\n"
+            f"Posted to {success_count}/{len(active_channels)} channel(s).\n\n"
+            f"🤖 **Posting Bot:** `@{bot_username}`\n"
+            f"⚠️ **Note:** Make sure I am Admin in the channel to post successfully in the future!"
         )
+        await query.message.edit_text(success_msg, reply_markup=InlineKeyboardMarkup(btn))
     else:
-        await query.message.edit_text(
-            f"❌ **Test Failed!**\nKahin na kahin error aagaya hai:\n{error_logs}", 
-            reply_markup=InlineKeyboardMarkup(btn)
+        fail_msg = (
+            f"❌ **Test Failed!**\n\n"
+            f"🤖 **Posting Bot:** `@{bot_username}`\n"
+            f"⚠️ **Note:** Make sure I am Admin with 'Post Messages' rights in the channel!\n\n"
+            f"**Error Logs:**\n{error_logs}"
         )
+        await query.message.edit_text(fail_msg, reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex(r"^mu_toggle#"))
 async def mu_toggle_status(client, query):

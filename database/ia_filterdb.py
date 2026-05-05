@@ -82,6 +82,8 @@ class MediaDB:
             await self.search_col1.create_index("year") 
             await self.search_col1.create_index("link_id")
             await self.data_col1.create_index("file_unique_id", unique=True)
+            # ✅ YAHAN FIX KIYA HAI: file_id ka index add kar diya taaki scan fast ho!
+            await self.data_col1.create_index("file_id")
             
             await self.search_col1.create_index(
                 [("file_name", TEXT), ("search_text", TEXT), ("languages", TEXT)],
@@ -99,6 +101,8 @@ class MediaDB:
                 await self.search_col2.create_index("year") 
                 await self.search_col2.create_index("link_id")
                 await self.data_col2.create_index("file_unique_id", unique=True)
+                # ✅ DB 2 ke liye file_id index
+                await self.data_col2.create_index("file_id")
                 await self.search_col2.create_index(
                     [("file_name", TEXT), ("search_text", TEXT), ("languages", TEXT)],
                     name="weighted_movie_search"
@@ -111,6 +115,8 @@ class MediaDB:
                 await self.search_col3.create_index("year") 
                 await self.search_col3.create_index("link_id")
                 await self.data_col3.create_index("file_unique_id", unique=True)
+                # ✅ DB 3 ke liye file_id index
+                await self.data_col3.create_index("file_id")
                 await self.search_col3.create_index(
                     [("file_name", TEXT), ("search_text", TEXT), ("languages", TEXT)],
                     name="weighted_movie_search"

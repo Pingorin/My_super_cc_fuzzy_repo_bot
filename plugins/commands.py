@@ -1509,53 +1509,129 @@ async def get_grp_link_handler(client, query):
         )
 
 # ==============================================================================
-# 🚀 SMART ID REFRESH COMMAND (For Multi-Bot Setup)
+# 🚀 SMART ID REFRESH COMMAND & UI (Multi-Bot Setup)
 # ==============================================================================
-@Client.on_message(filters.command("refresh_ids") & filters.user(ADMINS))
-async def refresh_ids_command(client, message):
-    if len(message.command) < 2:
-        return await message.reply("⚠️ **Syntax:** `/refresh_ids [Channel ID]`\n\nYe command sirf purani files ki ID ko naye bot ke liye update karegi.")
-    
-    try:
-        channel_id = int(message.command[1])
-    except ValueError:
-        return await message.reply("❌ Invalid Channel ID! Kripya sahi ID daalein.")
+
+async def get_refresh_ui_components(client):
+    """DB se indexed channels fetch karta hai aur buttons banata hai"""
+    channels = await Media.data_col1.distinct("chat_id")
+    if Media.has_db2:
+        ch2 = await Media.data_col2.distinct("chat_id")
+        channels.extend(ch2)
+    if Media.has_db3:
+        ch3 = await Media.data_col3.distinct("chat_id")
+        channels.extend(ch3)
         
-    status_msg = await message.reply("🔄 **Strict ID Refresh Started...**\n_Sirf 'Best Files' ki ID update hogi._")
+    channels = list(set(channels))
+    # Sirf channels ko filter karna (Telegram channels start with -100)
+    channels = [c for c in channels if str(c).startswith("-100")]
     
+    buttons = []
+    for ch in channels:
+        try:
+            chat = await client.get_chat(ch)
+            name = chat.title[:20] + "..." if len(chat.title) > 20 else chat.title
+        except:
+            name = str(ch)
+        buttons.append([InlineKeyboardButton(f"📢 {name}", callback_data=f"ref_ch_do#{ch}")])
+        
+    if channels:
+        buttons.append([InlineKeyboardButton("♻️ Refresh All Channels", callback_data="ref_all_ch")])
+        
+    buttons.append([InlineKeyboardButton("❌ Close", callback_data="close_data")])
+    return channels, InlineKeyboardMarkup(buttons)
+
+async def run_refresh_for_channel(client, channel_id):
+    """Helper function jo ek channel ki ID refresh karta hai"""
     updated_count = 0
     try:
-        # Channel ke messages ek-ek karke padhna
         async for ch_msg in client.get_chat_history(channel_id):
             media = ch_msg.video or ch_msg.document
             if media:
                 file_unique_id = media.file_unique_id
                 file_id = media.file_id
                 
-                # Nayi file_id aur msg_id ka data
                 update_data = {'$set': {'file_id': file_id, 'msg_id': ch_msg.id}}
-                
-                # 🔥 STRICT FILTER: Sirf tab update karo jab Aadhar Card AUR Channel dono match hon!
                 strict_filter = {'file_unique_id': file_unique_id, 'chat_id': ch_msg.chat.id}
                 
-                # DB 1 Update
                 res1 = await Media.data_col1.update_one(strict_filter, update_data)
                 if res1.modified_count > 0: updated_count += 1
                 
-                # DB 2 Update
                 if Media.has_db2:
                     res2 = await Media.data_col2.update_one(strict_filter, update_data)
                     if res2.modified_count > 0: updated_count += 1
                     
-                # DB 3 Update
                 if Media.has_db3:
                     res3 = await Media.data_col3.update_one(strict_filter, update_data)
                     if res3.modified_count > 0: updated_count += 1
-                    
-        await status_msg.edit(f"✅ **Strict ID Refresh Complete!**\n\n📂 Total Best IDs Updated for this Bot: `{updated_count}`")
-        
     except Exception as e:
-        await status_msg.edit(f"❌ Error aagaya bhai: `{e}`\n\nKripya check karein ki bot channel me Admin hai ya nahi.")
+        logger.error(f"Error refreshing channel {channel_id}: {e}")
+    return updated_count
+
+@Client.on_message(filters.command("refresh_ids") & filters.user(ADMINS))
+async def refresh_ids_command(client, message):
+    msg = await message.reply("🔄 **Fetching indexed channels from Database...**\n_Please wait..._")
+    try:
+        channels, reply_markup = await get_refresh_ui_components(client)
+        if not channels:
+            return await msg.edit("❌ **Koi Indexed Channel Nahi Mila!**\nPehle files save karein.")
+            
+        await msg.edit(
+            "👇 **Select a channel to refresh its File IDs:**\n\n"
+            "_Ye command sirf aapke bot ke naye File IDs ko Database me update karegi taki files theek se download ho sakein._",
+            reply_markup=reply_markup
+        )
+    except Exception as e:
+        await msg.edit(f"❌ Error: {e}")
+
+@Client.on_callback_query(filters.regex(r"^ref_ch_do#(-?\d+)$") & filters.user(ADMINS))
+async def ref_ch_single(client, query):
+    channel_id = int(query.matches[0].group(1))
+    await query.message.edit(f"🔄 **Strict ID Refresh Started...**\n🆔 Channel: `{channel_id}`\n_Please wait, do not press anything..._")
+    
+    updated_count = await run_refresh_for_channel(client, channel_id)
+    
+    btn = [[InlineKeyboardButton("🔙 Back to Channels", callback_data="ref_ids_back")]]
+    await query.message.edit(
+        f"✅ **Refresh Complete!**\n\n"
+        f"📢 **Channel:** `{channel_id}`\n"
+        f"📂 **Total Best IDs Updated:** `{updated_count}`",
+        reply_markup=InlineKeyboardMarkup(btn)
+    )
+
+@Client.on_callback_query(filters.regex(r"^ref_all_ch$") & filters.user(ADMINS))
+async def ref_ch_all(client, query):
+    await query.message.edit("🔄 **Refreshing ALL Channels...**\n_This may take some time depending on your database size. Please wait..._")
+    
+    channels = await Media.data_col1.distinct("chat_id")
+    if Media.has_db2: channels.extend(await Media.data_col2.distinct("chat_id"))
+    if Media.has_db3: channels.extend(await Media.data_col3.distinct("chat_id"))
+    
+    channels = list(set([c for c in channels if str(c).startswith("-100")]))
+    
+    total_updated = 0
+    for ch in channels:
+        count = await run_refresh_for_channel(client, ch)
+        total_updated += count
+        await asyncio.sleep(1) # Chota gap to avoid Telegram Floodwaits
+        
+    btn = [[InlineKeyboardButton("🔙 Back", callback_data="ref_ids_back")]]
+    await query.message.edit(
+        f"✅ **ALL Channels Refresh Complete!**\n\n"
+        f"📢 **Channels Scanned:** `{len(channels)}`\n"
+        f"📂 **Total Best IDs Updated:** `{total_updated}`",
+        reply_markup=InlineKeyboardMarkup(btn)
+    )
+
+@Client.on_callback_query(filters.regex(r"^ref_ids_back$") & filters.user(ADMINS))
+async def ref_ids_back(client, query):
+    await query.answer("Fetching Channels...", show_alert=False)
+    channels, reply_markup = await get_refresh_ui_components(client)
+    await query.message.edit(
+        "👇 **Select a channel to refresh its File IDs:**\n\n"
+        "_Ye command sirf aapke bot ke naye File IDs ko Database me update karegi taki files theek se download ho sakein._",
+        reply_markup=reply_markup
+    )
 
 # ==============================================================================
 # 👑 ADMIN PREMIUM COMMANDS

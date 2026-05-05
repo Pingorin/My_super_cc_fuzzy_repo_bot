@@ -217,11 +217,11 @@ class MediaDB:
 
     @staticmethod
     def parse_metadata(text):
-        if not text: return {"cleaned_title": "", "quality": [], "languages": [], "source": [], "year": []}
+        if not text: return {"quality": [], "languages": [], "year": []}
         
         text = html.unescape(text)
         cleaned_title = text
-        metadata = {"quality": set(), "languages": set(), "source": set(), "year": set()}
+        metadata = {"quality": set(), "languages": set(), "year": set()}
 
         res_pattern = r"(?i)\b(480p|720p|1080p|2160p|4k|uhd)\b"
         for m in re.finditer(res_pattern, cleaned_title):
@@ -229,10 +229,6 @@ class MediaDB:
             if val in ['4k', 'uhd']: val = '2160p'
             metadata['quality'].add(val)
         cleaned_title = re.sub(res_pattern, "", cleaned_title)
-
-        src_pattern = r"(?i)\b(web-dl|webrip|bluray|brrip|hdrip|hdcam|predvdrip)\b"
-        for m in re.finditer(src_pattern, cleaned_title): metadata['source'].add(m.group(1).upper()) 
-        cleaned_title = re.sub(src_pattern, "", cleaned_title)
 
         lang_map = {
             'hin': 'Hindi', 'hindi': 'Hindi', 'tam': 'Tamil', 'tamil': 'Tamil', 'tel': 'Telugu', 'telugu': 'Telugu',
@@ -248,12 +244,8 @@ class MediaDB:
 
         year_pattern = r"\b(19\d{2}|20\d{2})\b"
         for m in re.finditer(year_pattern, cleaned_title): metadata['year'].add(m.group(1))
-        cleaned_title = re.sub(year_pattern, "", cleaned_title)
-
-        cleaned_title = re.sub(r"<[^>]+>|@\w+|t\.me/\S+|https?://\S+|www\.\S+", "", cleaned_title, flags=re.IGNORECASE)
-        cleaned_title = re.sub(r"\[[\s\+\-\|]*\]|\([\s\+\-\|]*\)", "", cleaned_title)
-        cleaned_title = re.sub(r"[^\w\s:()\[\]{}\-]|_", " ", cleaned_title)
-        return {"cleaned_title": re.sub(r"\s+", " ", cleaned_title).strip(), "quality": list(metadata["quality"]), "languages": list(metadata["languages"]), "source": list(metadata["source"]), "year": list(metadata["year"])}
+        
+        return {"quality": list(metadata["quality"]), "languages": list(metadata["languages"]), "year": list(metadata["year"])}
 
     async def save_batch(self, items):
         if not items: return 0, 0 
@@ -333,8 +325,7 @@ class MediaDB:
             parsed_meta = {
                 "quality": list(set(meta_name['quality'] + meta_cap['quality'])),
                 "languages": list(set(meta_name['languages'] + meta_cap['languages'])),
-                "year": list(set(meta_name['year'] + meta_cap['year'])),
-                "source": list(set(meta_name['source'] + meta_cap['source']))
+                "year": list(set(meta_name['year'] + meta_cap['year']))
             }
             
             clean_fname = self.clean_text(raw_fname)
@@ -619,7 +610,7 @@ class MediaDB:
                 {"$match": match_filters},
                 {"$project": {
                     "file_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
-                    "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1, "score": {"$meta": "textScore"},
+                    "year": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1, "score": {"$meta": "textScore"},
                     "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}
                 }},
                 {"$addFields": {"custom_score": {"$add": match_conditions}}}
@@ -678,7 +669,7 @@ class MediaDB:
                     {"$match": fallback_match},
                     {"$project": {
                         "file_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
-                        "year": 1, "source": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1,
+                        "year": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1,
                         "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}
                     }},
                     {"$addFields": {"custom_score": {"$add": match_conditions if 'match_conditions' in locals() else [0]}}}

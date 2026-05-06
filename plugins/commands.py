@@ -1527,7 +1527,7 @@ async def get_refresh_ui_components(client):
     buttons = []
     for ch in channels:
         try:
-            chat = await client.get_chat(ch)
+            chat = await client.get_chat(int(ch))
             if chat.type == enums.ChatType.CHANNEL:
                 name = chat.title[:20] + "..." if len(chat.title) > 20 else chat.title
                 buttons.append([InlineKeyboardButton(f"📢 {name}", callback_data=f"ref_ch_do#{ch}")])
@@ -1548,125 +1548,113 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
     updated_count = 0
     msg_count = 0
     
-    # 1. MongoDB se purani progress check karein (Agar pehle kabhi roka tha)
-    progress_data = await db.bot_settings.find_one({"_id": f"progress_{channel_id}"})
-    last_index = progress_data.get("last_index", 0) if progress_data else 0
-    
+    # 1. ADMIN CHECK (With Anti-Spam Retry)
     try:
         chat = await client.get_chat(channel_id)
         ch_name = chat.title[:20] + "..." if chat.title else str(channel_id)
-
-        # 🚀 IMMEDIATE UI UPDATE (Taaki pata chale bot zinda hai)
-        if status_msg:
-            try:
-                if context and context.get("is_all"):
-                    await status_msg.edit(f"🔄 **Step 1: Reading Database ({context['current_ch']}/{context['total_chs']})**\n📢 `{ch_name}`\n_Loading files from MongoDB... please wait..._")
-                else:
-                    await status_msg.edit(f"🔄 **Step 1: Reading Database...**\n📢 `{ch_name}`\n_Loading files from MongoDB..._")
-            except Exception: pass
-
-        # 2. MongoDB se Message IDs ki list
-        docs = []
-        async for doc in Media.data_col1.find({"chat_id": channel_id}): docs.append(doc)
-        if Media.has_db2:
-            async for doc in Media.data_col2.find({"chat_id": channel_id}): docs.append(doc)
-        if Media.has_db3:
-            async for doc in Media.data_col3.find({"chat_id": channel_id}): docs.append(doc)
+    except FloodWait as e:
+        await asyncio.sleep(e.value + 2)
+        try:
+            chat = await client.get_chat(channel_id)
+            ch_name = chat.title[:20] + "..." if chat.title else str(channel_id)
+        except Exception:
+            return -1 # Pakka Admin nahi hai
+    except Exception:
+        return -1 # Kicked ya Not Admin
         
-        total_msgs = len(docs)
-        if total_msgs == 0: return 0
+    # 2. Checkpoint nikalo
+    progress_data = await db.bot_settings.find_one({"_id": f"progress_{channel_id}"})
+    last_index = progress_data.get("last_index", 0) if progress_data else 0
 
-        # 🚀 UI UPDATE (DB Reading Complete)
-        if status_msg:
-            try:
-                await status_msg.edit(f"✅ **Step 2: Database Loaded!**\n📂 Found `{total_msgs}` files for `{ch_name}`.\n_Starting Telegram API Sync..._")
-            except Exception: pass
+    if status_msg:
+        try:
+            if context and context.get("is_all"):
+                await status_msg.edit(f"🔄 **Step 1: Reading DB ({context['current_ch']}/{context['total_chs']})**\n📢 `{ch_name}`\n_Loading files..._")
+            else:
+                await status_msg.edit(f"🔄 **Step 1: Reading DB...**\n📢 `{ch_name}`\n_Loading files..._")
+        except Exception: pass
 
-        # 🚀 STARTING FROM LAST CHECKPOINT
-        msg_count = last_index
-        chunk_size = 100 
+    # 3. DB Se saari IDs nikalna
+    docs = []
+    async for doc in Media.data_col1.find({"chat_id": channel_id}): docs.append(doc)
+    if Media.has_db2:
+        async for doc in Media.data_col2.find({"chat_id": channel_id}): docs.append(doc)
+    if Media.has_db3:
+        async for doc in Media.data_col3.find({"chat_id": channel_id}): docs.append(doc)
+    
+    total_msgs = len(docs)
+    if total_msgs == 0: return 0
 
-        # Button row for UI
-        stop_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Stop & Save Progress", callback_data=f"stop_refresh#{channel_id}")]])
+    msg_count = last_index
+    chunk_size = 100 
+    stop_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Stop & Save Progress", callback_data=f"stop_refresh#{channel_id}")]])
 
-        for i in range(last_index, total_msgs, chunk_size):
-            # 🔥 PAUSE/STOP CHECK: Har chunk ke baad check karega ki aapne Stop toh nahi kiya
-            if getattr(temp, "STOP_REFRESH", False):
-                await db.bot_settings.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": i}}, upsert=True)
-                if status_msg: 
-                    try: await status_msg.edit(f"⏸ **Refresh Paused!**\n\n📢 Channel: `{ch_name}`\n📍 Saved at: `{i}/{total_msgs}`\n\nJab aap dubara chalayenge, ye yahin se shuru hoga.")
-                    except: pass
-                return updated_count
-
-            chunk = docs[i : i + chunk_size]
-            msg_ids = [doc['msg_id'] for doc in chunk]
-            
-            try:
-                messages = await client.get_messages(channel_id, message_ids=msg_ids)
-                for msg in messages:
-                    msg_count += 1
-                    if not msg or getattr(msg, "empty", False): continue
-                    media = msg.video or msg.document
-                    if media:
-                        strict_filter = {'file_unique_id': media.file_unique_id, 'chat_id': channel_id}
-                        update_data = {'$set': {'file_id': media.file_id}}
-                        
-                        res1 = await Media.data_col1.update_one(strict_filter, update_data)
-                        if res1.modified_count > 0: updated_count += 1
-                        else:
-                            if Media.has_db2:
-                                res2 = await Media.data_col2.update_one(strict_filter, update_data)
-                                if res2.modified_count > 0: updated_count += 1
-                            elif Media.has_db3:
-                                res3 = await Media.data_col3.update_one(strict_filter, update_data)
-                                if res3.modified_count > 0: updated_count += 1
-            except FloodWait as e:
-                if status_msg:
-                    try: await status_msg.edit(f"⏳ **Telegram Rate Limit Hit!**\n_Sleeping safely for {e.value} seconds... DO NOT CLOSE_")
-                    except: pass
-                await asyncio.sleep(e.value + 2)
-            except Exception: pass
-
-            # ⏱ API Safety Sleep
-            await asyncio.sleep(2)
-
-            # 🚀 CHECKPOINT SAVE: Har 1000 files ke baad DB me progress save karo
-            if msg_count % 1000 == 0:
-                await db.bot_settings.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": i}}, upsert=True)
-
-            # 🚀 LIVE DASHBOARD UPDATE
-            if status_msg and (msg_count % 200 == 0 or msg_count == total_msgs):
-                pct = (msg_count / total_msgs) * 100 if total_msgs > 0 else 0
-                if context and context.get("is_all"):
-                    cur_ch = context['current_ch']
-                    tot_chs = context['total_chs']
-                    glb_upd = context['global_updated'] + updated_count
-                    text = (
-                        f"🔄 **Step 3: Refreshing Channels ({cur_ch}/{tot_chs}) {'[Resumed]' if last_index > 0 else ''}**\n\n"
-                        f"📢 **Channel:** `{ch_name}`\n"
-                        f"📁 **Files in Queue:** `{total_msgs}`\n"
-                        f"📊 **Processing:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
-                        f"✅ **Global Synced:** `{glb_upd}`\n\n"
-                        f"⚠️ _Dhyan dein: Stop button dabane par progress save ho jayegi._"
-                    )
-                else:
-                    text = (
-                        f"🔄 **Step 3: Refreshing Index {'[Resumed]' if last_index > 0 else ''}**\n\n"
-                        f"📢 **Channel:** `{ch_name}`\n"
-                        f"📁 **Files in Queue:** `{total_msgs}`\n"
-                        f"📊 **Processing:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
-                        f"✅ **IDs Synced:** `{updated_count}`\n\n"
-                        f"⚠️ _Dhyan dein: Stop button dabane par progress save ho jayegi._"
-                    )
-                try: await status_msg.edit(text, reply_markup=stop_btn)
+    # 4. Telegram Sync Loop
+    for i in range(last_index, total_msgs, chunk_size):
+        if getattr(temp, "STOP_REFRESH", False):
+            await db.bot_settings.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": i}}, upsert=True)
+            if status_msg: 
+                try: await status_msg.edit(f"⏸ **Refresh Paused!**\n\n📢 Channel: `{ch_name}`\n📍 Saved at: `{msg_count}/{total_msgs}`\n\n_Jab aap dubara chalayenge, ye yahin se shuru hoga._")
                 except: pass
+            return updated_count
 
-        # ✅ TASK COMPLETE: Finish hone par progress mita do
-        await db.bot_settings.delete_one({"_id": f"progress_{channel_id}"})
-                
-    except Exception as e:
-        logger.error(f"Error: {e}")
-            
+        chunk = docs[i : i + chunk_size]
+        msg_ids = [doc['msg_id'] for doc in chunk]
+        
+        try:
+            messages = await client.get_messages(channel_id, message_ids=msg_ids)
+            for msg in messages:
+                msg_count += 1
+                if not msg or getattr(msg, "empty", False): continue
+                media = msg.video or msg.document
+                if media:
+                    strict_filter = {'file_unique_id': media.file_unique_id, 'chat_id': channel_id}
+                    update_data = {'$set': {'file_id': media.file_id}}
+                    
+                    res1 = await Media.data_col1.update_one(strict_filter, update_data)
+                    if res1.modified_count > 0: updated_count += 1
+                    else:
+                        if Media.has_db2:
+                            res2 = await Media.data_col2.update_one(strict_filter, update_data)
+                            if res2.modified_count > 0: updated_count += 1
+                        elif Media.has_db3:
+                            res3 = await Media.data_col3.update_one(strict_filter, update_data)
+                            if res3.modified_count > 0: updated_count += 1
+        except FloodWait as e:
+            if status_msg:
+                try: await status_msg.edit(f"⏳ **Rate Limit Hit!**\n_Sleeping for {e.value} seconds..._")
+                except: pass
+            await asyncio.sleep(e.value + 2)
+        except Exception: pass
+
+        await asyncio.sleep(2)
+
+        # Progress Save & UI Update
+        if msg_count % 1000 == 0:
+            await db.bot_settings.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": msg_count}}, upsert=True)
+
+        if status_msg and (msg_count % 200 == 0 or msg_count == total_msgs):
+            pct = (msg_count / total_msgs) * 100
+            if context and context.get("is_all"):
+                text = (
+                    f"🔄 **Step 2: Refreshing Channels ({context['current_ch']}/{context['total_chs']})**\n\n"
+                    f"📢 **Channel:** `{ch_name}`\n"
+                    f"📊 **Progress:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
+                    f"✅ **Global Synced:** `{context['global_updated'] + updated_count}`\n\n"
+                    f"⚠️ _Stop button dabane par progress save ho jayegi._"
+                )
+            else:
+                text = (
+                    f"🔄 **Refresh Index {'[Resumed]' if last_index > 0 else 'Running...'}**\n\n"
+                    f"📢 **Channel:** `{ch_name}`\n"
+                    f"📊 **Progress:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
+                    f"✅ **Synced:** `{updated_count}`\n\n"
+                    f"⚠️ _Stop button dabane par progress save ho jayegi._"
+                )
+            try: await status_msg.edit(text, reply_markup=stop_btn)
+            except: pass
+
+    await db.bot_settings.delete_one({"_id": f"progress_{channel_id}"})
     return updated_count
 
 @Client.on_message(filters.command("refresh_index") & filters.user(ADMINS))
@@ -1692,39 +1680,33 @@ async def ref_ch_single(client, query):
     status_msg = query.message
     temp.STOP_REFRESH = False
     
-    # Simplified Admin Check
-    try:
-        chat = await client.get_chat(channel_id)
-        ch_name = chat.title[:20] + "..." if chat.title else str(channel_id)
-    except Exception:
-        # Agar bot admin nahi hai ya usko nikal diya gaya hai
-        ch_name = "Unknown Private Channel"
+    await status_msg.edit(f"🔄 **Strict ID Refresh Started...**\n🆔 Channel: `{channel_id}`\n_Calculating total files, please wait..._")
+    
+    # Engine chalana (Yahi batayega admin hai ya nahi)
+    count = await run_refresh_for_channel(client, channel_id, status_msg=status_msg, context=None)
+    
+    if count == -1:
+        # Kicked UI Generator
         short_id = str(channel_id).replace("-100", "")
         ch_link = f"https://t.me/c/{short_id}/1" 
-
         text = (
             f"❌ **Admin Permission Missing!**\n\n"
-            f"Bot channel me admin nahi hai ya isko nikal diya gaya hai.\n"
+            f"Bot is channel me admin nahi hai ya isko nikal diya gaya hai.\n"
             f"🆔 ID: `{channel_id}`\n\n"
             f"⚠️ **Action:** Niche 'Open Channel' par click karein aur bot ko add karke 'Post Messages' ki permission dein."
         )
-        
         btn = [[InlineKeyboardButton("📢 Open Channel", url=ch_link)]]
         btn.append([InlineKeyboardButton("🔙 Back to List", callback_data="ref_ids_back")])
         return await status_msg.edit(text, reply_markup=InlineKeyboardMarkup(btn))
 
-    await status_msg.edit(f"🔄 **Strict ID Refresh Started...**\n🆔 Channel: `{channel_id}`\n_Calculating total files, please wait..._")
-    
-    updated_count = await run_refresh_for_channel(client, channel_id, status_msg=status_msg, context=None)
-    
     if getattr(temp, "STOP_REFRESH", False):
         return # Paused message already sent by run_refresh_for_channel
         
     btn = [[InlineKeyboardButton("🔙 Back to Channels", callback_data="ref_ids_back")]]
     await status_msg.edit(
         f"✅ **Refresh Complete!**\n\n"
-        f"📢 **Channel:** `{ch_name}`\n"
-        f"📂 **Total IDs Updated:** `{updated_count}`",
+        f"📢 **Channel:** `{channel_id}`\n"
+        f"📂 **Total IDs Updated:** `{count}`",
         reply_markup=InlineKeyboardMarkup(btn)
     )
 
@@ -1738,45 +1720,38 @@ async def ref_ch_all(client, query):
     if Media.has_db2: channels.extend(await Media.data_col2.distinct("chat_id"))
     if Media.has_db3: channels.extend(await Media.data_col3.distinct("chat_id"))
     
-    valid_channels = list(set([c for c in channels if str(c).startswith("-100")]))
+    valid_channels = list(set([int(c) for c in channels if str(c).startswith("-100")]))
     total_channels = len(valid_channels)
     
     total_updated = 0
     failed_channels = []
+    success_scanned = 0
     
-    for i, ch in enumerate(valid_channels, 1):
+    for i, ch_int in enumerate(valid_channels, 1):
         if getattr(temp, "STOP_REFRESH", False):
             break
             
-        try:
-            ch_int = int(ch) # 🔥 ID ko properly number banaya
-            # Bot agar admin hoga tabhi get_chat chalega
-            chat = await client.get_chat(ch_int)
-            
-            context = {
-                "is_all": True,
-                "current_ch": i,
-                "total_chs": total_channels,
-                "global_updated": total_updated
-            }
-            
-            count = await run_refresh_for_channel(client, ch_int, status_msg=status_msg, context=context)
+        context = {
+            "is_all": True,
+            "current_ch": i,
+            "total_chs": total_channels,
+            "global_updated": total_updated
+        }
+        
+        # Engine execution
+        count = await run_refresh_for_channel(client, ch_int, status_msg=status_msg, context=context)
+        
+        if count == -1:
+            failed_channels.append(str(ch_int))
+        else:
             total_updated += count
+            success_scanned += 1
             
-        except FloodWait as fw:
-            await asyncio.sleep(fw.value + 2)
-            failed_channels.append(str(ch))
-        except Exception:
-            failed_channels.append(str(ch))
-            
-        await asyncio.sleep(1.5) 
+        await asyncio.sleep(1.5) # Safe gap between channels
         
     if getattr(temp, "STOP_REFRESH", False):
-        return # UI already updated in the loop
+        return
         
-    # Kitne channel successfully scan hue
-    success_scanned = total_channels - len(failed_channels)
-    
     msg_text = (
         f"✅ **ALL Channels Refresh Complete!**\n\n"
         f"📢 **Channels Scanned:** `{success_scanned}`\n"
@@ -1791,11 +1766,10 @@ async def ref_ch_all(client, query):
         if len(failed_channels) > 5: failed_str += "` ...aur bhi hain"
         msg_text += f"\n⚠️ **Skipped (Not Admin/Removed):**\n`{failed_str}`\n_(Niche diye gaye buttons se open karein)_"
         
-        # Har ek failed channel ke liye button banayega
         for ch_id in failed_channels[:5]:
             short_id = str(ch_id).replace("-100", "")
             ch_link = f"https://t.me/c/{short_id}/1"
-            btn.append([InlineKeyboardButton(f"📢 Open & Fix {ch_id}", url=ch_link)])
+            btn.append([InlineKeyboardButton(f"📢 Fix {ch_id}", url=ch_link)])
             
     btn.append([InlineKeyboardButton("🔙 Back to Menu", callback_data="ref_ids_back")])
         

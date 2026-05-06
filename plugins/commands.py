@@ -1664,9 +1664,9 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
             except: pass
 
     # ✅ TASK COMPLETE
-    await db.bot_settings.delete_one({"_id": f"progress_{channel_id}"})
-            
-except Exception as e:
+    await db.bot_settings.delete_one({"_id": f"progress_{channel_id}"}) # <--- ISKA AAKHIRI BRACKET
+                
+    except Exception as e:
     logger.error(f"Error: {e}")
         
 return updated_count
@@ -1681,11 +1681,11 @@ async def refresh_index_command(client, message):
             return await msg.edit("❌ **Koi Indexed Channel Nahi Mila!**\nPehle files save karein.")
             
         await msg.edit(
-            "👇 **Select a channel to refresh its File IDs:**\n\n"
-            "_Ye command aapke database ki files ko naye bot ki ID se sync karegi._",
-            reply_markup=reply_markup
-        )
-    except Exception as e:
+                "👇 **Select a channel to refresh its File IDs:**\n\n"
+                "_Ye command aapke database ki files ko naye bot ki ID se sync karegi._",
+                reply_markup=reply_markup
+            ) # <--- YE WALA BRACKET CHHOOT GAYA HOGA
+        except Exception as e:
         await msg.edit(f"❌ **Command Error:** `{str(e)}`")
 
 @Client.on_callback_query(filters.regex(r"^stop_refresh#") & filters.user(ADMINS))

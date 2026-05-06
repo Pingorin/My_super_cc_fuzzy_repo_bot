@@ -1514,7 +1514,7 @@ async def get_grp_link_handler(client, query):
 # ==============================================================================
 
 async def get_refresh_ui_components(client):
-    """DB se indexed channels fetch karta hai aur sirf valid channels ke buttons banata hai"""
+    """DB se indexed channels fetch karta hai aur valid/invalid dono dikhata hai"""
     channels = await Media.data_col1.distinct("chat_id")
     if Media.has_db2:
         channels.extend(await Media.data_col2.distinct("chat_id"))
@@ -1534,7 +1534,9 @@ async def get_refresh_ui_components(client):
                 buttons.append([InlineKeyboardButton(f"📢 {name}", callback_data=f"ref_ch_do#{ch}")])
                 valid_channels.append(ch)
         except Exception:
-            pass 
+            # 🔥 FIX: Agar Bot channel me nahi hai (Kicked/Not Admin), toh uski ID dikhayega!
+            buttons.append([InlineKeyboardButton(f"🔒 ID: {ch}", callback_data=f"ref_ch_do#{ch}")])
+            valid_channels.append(ch) 
             
     if valid_channels:
         buttons.append([InlineKeyboardButton("♻️ Refresh All Channels", callback_data="ref_all_ch")])
@@ -1543,54 +1545,70 @@ async def get_refresh_ui_components(client):
     return valid_channels, InlineKeyboardMarkup(buttons)
 
 async def run_refresh_for_channel(client, channel_id, status_msg=None, context=None):
-    """Live Progress + DB Stats + Error Handling"""
+    """Smart Direct-Fetch Engine: MongoDB IDs se direct Telegram file fetch karta hai"""
     updated_count = 0
-    msg_count = 0  
     
     try:
         chat = await client.get_chat(channel_id)
-        if chat.type != enums.ChatType.CHANNEL:
-            return 0 
-            
-        # 📊 Stats Nikalna (Telegram vs MongoDB)
-        total_msgs = await client.get_chat_history_count(channel_id)
-        ch_name = chat.title[:20] + "..." if len(chat.title) > 20 else chat.title
+        ch_name = chat.title[:20] + "..." if chat.title and len(chat.title) > 20 else str(chat.title)
+    except Exception:
+        ch_name = str(channel_id)
         
-        # 🔥 DB Stats: Is channel ki kitni unique files DB me hain
-        db_count = await Media.data_col1.count_documents({"chat_id": channel_id})
-        if Media.has_db2: db_count += await Media.data_col2.count_documents({"chat_id": channel_id})
-        if Media.has_db3: db_count += await Media.data_col3.count_documents({"chat_id": channel_id})
+    try:
+        docs = []
+        async for doc in Media.data_col1.find({"chat_id": channel_id}): docs.append(doc)
+        if Media.has_db2:
+            async for doc in Media.data_col2.find({"chat_id": channel_id}): docs.append(doc)
+        if Media.has_db3:
+            async for doc in Media.data_col3.find({"chat_id": channel_id}): docs.append(doc)
+
+        total_msgs = len(docs)
+        if total_msgs == 0:
+            return 0
+
+        chunk_size = 100 
+        msg_count = 0
+
+        for i in range(0, total_msgs, chunk_size):
+            chunk = docs[i:i + chunk_size]
+            msg_ids = [doc['msg_id'] for doc in chunk]
             
-        async for ch_msg in client.get_chat_history(channel_id):
-            msg_count += 1
-            media = ch_msg.video or ch_msg.document
-            if media:
-                file_unique_id = media.file_unique_id
-                file_id = media.file_id
+            try:
+                messages = await client.get_messages(channel_id, message_ids=msg_ids)
                 
-                update_data = {'$set': {'file_id': file_id, 'msg_id': ch_msg.id}}
-                strict_filter = {'file_unique_id': file_unique_id, 'chat_id': ch_msg.chat.id}
+                for msg in messages:
+                    msg_count += 1
+                    if not msg or getattr(msg, "empty", False): 
+                        continue
+                        
+                    media = msg.video or msg.document
+                    if media:
+                        new_file_id = media.file_id
+                        file_unique_id = media.file_unique_id
+                        
+                        update_data = {'$set': {'file_id': new_file_id}}
+                        strict_filter = {'file_unique_id': file_unique_id, 'chat_id': channel_id}
+                        
+                        res1 = await Media.data_col1.update_one(strict_filter, update_data)
+                        if res1.modified_count > 0: updated_count += 1
+                        else:
+                            if Media.has_db2:
+                                res2 = await Media.data_col2.update_one(strict_filter, update_data)
+                                if res2.modified_count > 0: updated_count += 1
+                            elif Media.has_db3:
+                                res3 = await Media.data_col3.update_one(strict_filter, update_data)
+                                if res3.modified_count > 0: updated_count += 1
+
+            except FloodWait as e:
+                await asyncio.sleep(e.value + 2)
+            except Exception as e:
+                logger.error(f"Error fetching msgs in {channel_id}: {e}")
                 
-                # DB Updates
-                res1 = await Media.data_col1.update_one(strict_filter, update_data)
-                if res1.modified_count > 0: updated_count += 1
-                
-                if Media.has_db2:
-                    res2 = await Media.data_col2.update_one(strict_filter, update_data)
-                    if res2.modified_count > 0: updated_count += 1
-                    
-                if Media.has_db3:
-                    res3 = await Media.data_col3.update_one(strict_filter, update_data)
-                    if res3.modified_count > 0: updated_count += 1
+            await asyncio.sleep(2) 
             
-            # ⏱ Anti-Flood
-            if msg_count % 100 == 0: await asyncio.sleep(2)
-                
-            # 🚀 LIVE DASHBOARD UPDATE (Har 2500 msgs par)
-            if status_msg and (msg_count % 2500 == 0 or msg_count == total_msgs):
+            if status_msg and (msg_count % 1000 == 0 or msg_count == total_msgs):
                 try:
                     pct = (msg_count / total_msgs) * 100 if total_msgs > 0 else 0
-                    
                     if context and context.get("is_all"):
                         cur_ch = context['current_ch']
                         tot_chs = context['total_chs']
@@ -1598,25 +1616,23 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
                         text = (
                             f"🔄 **Refreshing ALL Channels ({cur_ch}/{tot_chs})**\n\n"
                             f"📢 **Channel:** `{ch_name}`\n"
-                            f"📁 **Files in DB:** `{db_count}`\n"
-                            f"📊 **Telegram Scan:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
+                            f"📁 **Files to Check:** `{total_msgs}`\n"
+                            f"📊 **Processing:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
                             f"✅ **Total Synced So Far:** `{glb_upd}`\n\n"
-                            f"⚡ _Background Process Active..._"
+                            f"⚡ _Smart Direct-Fetch Active..._"
                         )
                     else:
                         text = (
                             f"🔄 **Refresh Index Running...**\n\n"
                             f"📢 **Channel:** `{ch_name}`\n"
-                            f"📁 **Files in DB:** `{db_count}`\n"
-                            f"📊 **Telegram Scan:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
+                            f"📁 **Files to Check:** `{total_msgs}`\n"
+                            f"📊 **Processing:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
                             f"✅ **IDs Synced:** `{updated_count}`\n\n"
-                            f"⚡ _Anti-Flood Engine is ON._"
+                            f"⚡ _Smart Direct-Fetch Active..._"
                         )
                     await status_msg.edit(text)
                 except Exception: pass
                 
-    except FloodWait as e:
-        await asyncio.sleep(e.value + 2)
     except Exception as e:
         logger.error(f"Error in {channel_id}: {e}")
         if status_msg:
@@ -1624,7 +1640,6 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
             except: pass
             
     return updated_count
-
 
 @Client.on_message(filters.command("refresh_index") & filters.user(ADMINS))
 async def refresh_index_command(client, message):
@@ -1642,13 +1657,11 @@ async def refresh_index_command(client, message):
     except Exception as e:
         await msg.edit(f"❌ **Command Error:** `{str(e)}`")
 
-
 @Client.on_callback_query(filters.regex(r"^ref_ch_do#(-?\d+)$") & filters.user(ADMINS))
 async def ref_ch_single(client, query):
     channel_id = int(query.matches[0].group(1))
     status_msg = query.message
     
-    # 1. Admin Check
     try:
         member = await client.get_chat_member(channel_id, "me")
         if member.status not in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
@@ -1675,7 +1688,6 @@ async def ref_ch_single(client, query):
         except Exception as e:
             return await query.answer(f"❌ Error: Bot ko channel se nikal diya gaya hai!", show_alert=True)
 
-    # 2. Start Refresh
     await status_msg.edit(f"🔄 **Strict ID Refresh Started...**\n🆔 Channel: `{channel_id}`\n_Calculating total files, please wait..._")
     
     updated_count = await run_refresh_for_channel(client, channel_id, status_msg=status_msg)
@@ -1687,7 +1699,6 @@ async def ref_ch_single(client, query):
         f"📂 **Total Best IDs Updated:** `{updated_count}`",
         reply_markup=InlineKeyboardMarkup(btn)
     )
-
 
 @Client.on_callback_query(filters.regex(r"^ref_all_ch$") & filters.user(ADMINS))
 async def ref_ch_all(client, query):
@@ -1736,7 +1747,6 @@ async def ref_ch_all(client, query):
         msg_text += f"\n⚠️ **Skipped (Not Admin/Removed):**\n`{failed_str}`\n_(Kripya in IDs ko manually check karein)_"
         
     await status_msg.edit(msg_text, reply_markup=InlineKeyboardMarkup(btn))
-
 
 @Client.on_callback_query(filters.regex(r"^ref_ids_back$") & filters.user(ADMINS))
 async def ref_ids_back(client, query):

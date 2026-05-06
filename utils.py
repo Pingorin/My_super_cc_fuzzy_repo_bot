@@ -64,6 +64,7 @@ class temp(object):
     B_NAME = None
     B_LINK = None
     ME = None
+    STOP_REFRESH = False # 🚀 Pause/Stop Refresh Feature Ke Liye Default Value Set Kar Di Hai
 
 # ==============================================================================
 # 1. FILTER FUNCTIONS

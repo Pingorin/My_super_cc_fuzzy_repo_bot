@@ -1866,11 +1866,10 @@ async def get_refresh_ui_components(client):
     return valid_channels, InlineKeyboardMarkup(buttons)
 
 async def run_refresh_for_channel(client, channel_id, status_msg=None, context=None):
-    """Resume Feature + Stop Button + DB Checkpoints + Bypass Name Fetch Error"""
     updated_count = 0
     msg_count = 0
     
-    # 1. OPTIONAL ADMIN CHECK (Just for channel name, agar fail hua toh ID use karega)
+    # 1. SAFEST ADMIN CHECK (Agar error aaya toh bypass karega, skip nahi)
     ch_name = str(channel_id)
     try:
         chat = await client.get_chat(channel_id)
@@ -1878,9 +1877,8 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
     except FloodWait as fw:
         await asyncio.sleep(fw.value + 2)
     except Exception:
-        pass # DON'T FAIL HERE! Just use the ID as the name and proceed.
+        pass # Ignore and proceed with ID as name
         
-    # 2. Checkpoint nikalo
     progress_data = await db.bot_settings.find_one({"_id": f"progress_{channel_id}"})
     last_index = progress_data.get("last_index", 0) if progress_data else 0
 
@@ -1892,7 +1890,6 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
                 await status_msg.edit(f"🔄 **Step 1: Reading DB...**\n📢 `{ch_name}`\n_Loading files..._")
         except Exception: pass
 
-    # 3. DB Se saari IDs nikalna
     docs = []
     async for doc in Media.data_col1.find({"chat_id": channel_id}): docs.append(doc)
     if Media.has_db2:
@@ -1907,7 +1904,6 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
     chunk_size = 100 
     stop_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Stop & Save Progress", callback_data=f"stop_refresh#{channel_id}")]])
 
-    # 4. Telegram Sync Loop (Yahi decide karega sach me admin hai ya nahi)
     for i in range(last_index, total_msgs, chunk_size):
         if getattr(temp, "STOP_REFRESH", False):
             await db.bot_settings.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": i}}, upsert=True)
@@ -1945,14 +1941,12 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
             await asyncio.sleep(e.value + 2)
         except Exception as e:
             err = str(e).upper()
-            # 🔥 THE REAL ADMIN CHECK: Agar access hi nahi hai toh yahan fail hoga
-            if "CHAT_ADMIN_REQUIRED" in err or "CHANNEL_PRIVATE" in err or "PEER_ID_INVALID" in err:
-                return -1
-            pass # Chhoti moti error ignore karo
+            if "CHAT_ADMIN_REQUIRED" in err or "CHANNEL_PRIVATE" in err or "USER_BANNED_IN_CHANNEL" in err:
+                return -1 # REAL ADMIN FAILURE
+            pass
 
-        await asyncio.sleep(2)
+        await asyncio.sleep(2) # 🔥 Safe API Gap per 100 messages
 
-        # Progress Save & UI Update
         if msg_count % 1000 == 0:
             await db.bot_settings.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": msg_count}}, upsert=True)
 
@@ -1960,7 +1954,7 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
             pct = (msg_count / total_msgs) * 100 if total_msgs > 0 else 0
             if context and context.get("is_all"):
                 text = (
-                    f"🔄 **Step 2: Refreshing Channels ({context['current_ch']}/{context['total_chs']})**\n\n"
+                    f"🔄 **Step 2: Refreshing ({context['current_ch']}/{context['total_chs']})**\n\n"
                     f"📢 **Channel:** `{ch_name}`\n"
                     f"📊 **Progress:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
                     f"✅ **Global Synced:** `{context['global_updated'] + updated_count}`\n\n"
@@ -1979,7 +1973,7 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
 
     await db.bot_settings.delete_one({"_id": f"progress_{channel_id}"})
     return updated_count
-
+    
 @Client.on_message(filters.command("refresh_index") & filters.user(ADMINS))
 async def refresh_index_command(client, message):
     temp.STOP_REFRESH = False 
@@ -2053,13 +2047,10 @@ async def ref_ch_all(client, query):
         if getattr(temp, "STOP_REFRESH", False):
             break
             
-        # 🔥 THE FIX: Agle channel par jane se pehle 1.5 second ka fix delay
-        await asyncio.sleep(1.5)
+        # 🔥 ANTI-FLOOD WAIT: Agle channel se pehle saans lene ka time
+        await asyncio.sleep(2.5) 
             
         try:
-            # Bot agar admin hoga tabhi get_chat chalega
-            chat = await client.get_chat(ch_id)
-            
             context = {
                 "is_all": True,
                 "current_ch": i,
@@ -2067,7 +2058,7 @@ async def ref_ch_all(client, query):
                 "global_updated": total_updated
             }
             
-            # Engine execution
+            # 🔥 FIX: Yahan se 'client.get_chat()' hata diya hai. Seedha engine chalega.
             count = await run_refresh_for_channel(client, ch_id, status_msg=status_msg, context=context)
             
             if count == -1:
@@ -2076,17 +2067,13 @@ async def ref_ch_all(client, query):
                 total_updated += count
                 success_scanned += 1
                 
-        except FloodWait as fw:
-            await asyncio.sleep(fw.value + 2)
-            failed_channels.append(str(ch_id))
         except Exception as e:
             logger.error(f"Error in ref_all_ch for {ch_id}: {e}")
             failed_channels.append(str(ch_id))
             
     if getattr(temp, "STOP_REFRESH", False):
-        return # UI already updated in the loop
+        return 
         
-    # Kitne channel successfully scan hue
     msg_text = (
         f"✅ **ALL Channels Refresh Complete!**\n\n"
         f"📢 **Channels Scanned:** `{success_scanned}`\n"
@@ -2095,7 +2082,6 @@ async def ref_ch_all(client, query):
     
     btn = []
     
-    # 🔥 THE MASTER HACK: Skipped channels ke direct buttons
     if failed_channels:
         failed_str = "`, `".join(failed_channels[:5])
         if len(failed_channels) > 5: failed_str += "` ...aur bhi hain"

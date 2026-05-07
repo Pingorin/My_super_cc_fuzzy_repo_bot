@@ -1680,6 +1680,27 @@ async def ref_ch_single(client, query):
     status_msg = query.message
     temp.STOP_REFRESH = False
     
+    # Simplified Admin Check
+    try:
+        chat = await client.get_chat(channel_id)
+        ch_name = chat.title[:20] + "..." if chat.title else str(channel_id)
+    except Exception:
+        # Agar bot admin nahi hai ya usko nikal diya gaya hai
+        ch_name = "Unknown Private Channel"
+        short_id = str(channel_id).replace("-100", "")
+        ch_link = f"https://t.me/c/{short_id}/1" 
+
+        text = (
+            f"❌ **Admin Permission Missing!**\n\n"
+            f"Bot channel me admin nahi hai ya isko nikal diya gaya hai.\n"
+            f"🆔 ID: `{channel_id}`\n\n"
+            f"⚠️ **Action:** Niche 'Open Channel' par click karein aur bot ko add karke 'Post Messages' ki permission dein."
+        )
+        
+        btn = [[InlineKeyboardButton("📢 Open Channel", url=ch_link)]]
+        btn.append([InlineKeyboardButton("🔙 Back to List", callback_data="ref_ids_back")])
+        return await status_msg.edit(text, reply_markup=InlineKeyboardMarkup(btn))
+
     await status_msg.edit(f"🔄 **Strict ID Refresh Started...**\n🆔 Channel: `{channel_id}`\n_Calculating total files, please wait..._")
     
     # Engine chalana (Yahi batayega admin hai ya nahi)
@@ -1705,7 +1726,7 @@ async def ref_ch_single(client, query):
     btn = [[InlineKeyboardButton("🔙 Back to Channels", callback_data="ref_ids_back")]]
     await status_msg.edit(
         f"✅ **Refresh Complete!**\n\n"
-        f"📢 **Channel:** `{channel_id}`\n"
+        f"📢 **Channel:** `{ch_name}`\n"
         f"📂 **Total IDs Updated:** `{count}`",
         reply_markup=InlineKeyboardMarkup(btn)
     )
@@ -1731,26 +1752,36 @@ async def ref_ch_all(client, query):
         if getattr(temp, "STOP_REFRESH", False):
             break
             
-        context = {
-            "is_all": True,
-            "current_ch": i,
-            "total_chs": total_channels,
-            "global_updated": total_updated
-        }
-        
-        # Engine execution
-        count = await run_refresh_for_channel(client, ch_int, status_msg=status_msg, context=context)
-        
-        if count == -1:
+        try:
+            # Bot agar admin hoga tabhi get_chat chalega
+            chat = await client.get_chat(ch_int)
+            
+            context = {
+                "is_all": True,
+                "current_ch": i,
+                "total_chs": total_channels,
+                "global_updated": total_updated
+            }
+            
+            # Engine execution
+            count = await run_refresh_for_channel(client, ch_int, status_msg=status_msg, context=context)
+            
+            if count == -1:
+                failed_channels.append(str(ch_int))
+            else:
+                total_updated += count
+                success_scanned += 1
+                
+        except FloodWait as fw:
+            await asyncio.sleep(fw.value + 2)
             failed_channels.append(str(ch_int))
-        else:
-            total_updated += count
-            success_scanned += 1
+        except Exception:
+            failed_channels.append(str(ch_int))
             
         await asyncio.sleep(1.5) # Safe gap between channels
         
     if getattr(temp, "STOP_REFRESH", False):
-        return
+        return # UI already updated in the loop
         
     msg_text = (
         f"✅ **ALL Channels Refresh Complete!**\n\n"

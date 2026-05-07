@@ -1533,7 +1533,6 @@ async def get_refresh_ui_components(client):
                 buttons.append([InlineKeyboardButton(f"📢 {name}", callback_data=f"ref_ch_do#{ch}")])
                 valid_channels.append(ch)
         except Exception:
-            # 🔥 FIX: Agar Bot channel me nahi hai (Kicked/Not Admin), toh uski ID dikhayega!
             buttons.append([InlineKeyboardButton(f"🔒 ID: {ch}", callback_data=f"ref_ch_do#{ch}")])
             valid_channels.append(ch) 
             
@@ -1544,23 +1543,19 @@ async def get_refresh_ui_components(client):
     return valid_channels, InlineKeyboardMarkup(buttons)
 
 async def run_refresh_for_channel(client, channel_id, status_msg=None, context=None):
-    """Resume Feature + Stop Button + DB Checkpoints"""
+    """Resume Feature + Stop Button + DB Checkpoints + Bypass Name Fetch Error"""
     updated_count = 0
     msg_count = 0
     
-    # 1. ADMIN CHECK (With Anti-Spam Retry)
+    # 1. OPTIONAL ADMIN CHECK (Just for channel name, agar fail hua toh ID use karega)
+    ch_name = str(channel_id)
     try:
         chat = await client.get_chat(channel_id)
-        ch_name = chat.title[:20] + "..." if chat.title else str(channel_id)
-    except FloodWait as e:
-        await asyncio.sleep(e.value + 2)
-        try:
-            chat = await client.get_chat(channel_id)
-            ch_name = chat.title[:20] + "..." if chat.title else str(channel_id)
-        except Exception:
-            return -1 # Pakka Admin nahi hai
+        if chat.title: ch_name = chat.title[:20] + "..."
+    except FloodWait as fw:
+        await asyncio.sleep(fw.value + 2)
     except Exception:
-        return -1 # Kicked ya Not Admin
+        pass # DON'T FAIL HERE! Just use the ID as the name and proceed.
         
     # 2. Checkpoint nikalo
     progress_data = await db.bot_settings.find_one({"_id": f"progress_{channel_id}"})
@@ -1589,7 +1584,7 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
     chunk_size = 100 
     stop_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Stop & Save Progress", callback_data=f"stop_refresh#{channel_id}")]])
 
-    # 4. Telegram Sync Loop
+    # 4. Telegram Sync Loop (Yahi decide karega sach me admin hai ya nahi)
     for i in range(last_index, total_msgs, chunk_size):
         if getattr(temp, "STOP_REFRESH", False):
             await db.bot_settings.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": i}}, upsert=True)
@@ -1625,7 +1620,12 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
                 try: await status_msg.edit(f"⏳ **Rate Limit Hit!**\n_Sleeping for {e.value} seconds..._")
                 except: pass
             await asyncio.sleep(e.value + 2)
-        except Exception: pass
+        except Exception as e:
+            err = str(e).upper()
+            # 🔥 THE REAL ADMIN CHECK: Agar access hi nahi hai toh yahan fail hoga
+            if "CHAT_ADMIN_REQUIRED" in err or "CHANNEL_PRIVATE" in err or "PEER_ID_INVALID" in err:
+                return -1
+            pass # Chhoti moti error ignore karo
 
         await asyncio.sleep(2)
 
@@ -1634,7 +1634,7 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
             await db.bot_settings.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": msg_count}}, upsert=True)
 
         if status_msg and (msg_count % 200 == 0 or msg_count == total_msgs):
-            pct = (msg_count / total_msgs) * 100
+            pct = (msg_count / total_msgs) * 100 if total_msgs > 0 else 0
             if context and context.get("is_all"):
                 text = (
                     f"🔄 **Step 2: Refreshing Channels ({context['current_ch']}/{context['total_chs']})**\n\n"
@@ -1659,7 +1659,7 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
 
 @Client.on_message(filters.command("refresh_index") & filters.user(ADMINS))
 async def refresh_index_command(client, message):
-    temp.STOP_REFRESH = False # 🚀 Har baar command chalne par purana stop hatayein
+    temp.STOP_REFRESH = False 
     msg = await message.reply("🔄 **Fetching indexed channels from Database...**\n_Please wait..._")
     try:
         channels, reply_markup = await get_refresh_ui_components(client)
@@ -1680,30 +1680,8 @@ async def ref_ch_single(client, query):
     status_msg = query.message
     temp.STOP_REFRESH = False
     
-    # Simplified Admin Check
-    try:
-        chat = await client.get_chat(channel_id)
-        ch_name = chat.title[:20] + "..." if chat.title else str(channel_id)
-    except Exception:
-        # Agar bot admin nahi hai ya usko nikal diya gaya hai
-        ch_name = "Unknown Private Channel"
-        short_id = str(channel_id).replace("-100", "")
-        ch_link = f"https://t.me/c/{short_id}/1" 
-
-        text = (
-            f"❌ **Admin Permission Missing!**\n\n"
-            f"Bot channel me admin nahi hai ya isko nikal diya gaya hai.\n"
-            f"🆔 ID: `{channel_id}`\n\n"
-            f"⚠️ **Action:** Niche 'Open Channel' par click karein aur bot ko add karke 'Post Messages' ki permission dein."
-        )
-        
-        btn = [[InlineKeyboardButton("📢 Open Channel", url=ch_link)]]
-        btn.append([InlineKeyboardButton("🔙 Back to List", callback_data="ref_ids_back")])
-        return await status_msg.edit(text, reply_markup=InlineKeyboardMarkup(btn))
-
     await status_msg.edit(f"🔄 **Strict ID Refresh Started...**\n🆔 Channel: `{channel_id}`\n_Calculating total files, please wait..._")
     
-    # Engine chalana (Yahi batayega admin hai ya nahi)
     count = await run_refresh_for_channel(client, channel_id, status_msg=status_msg, context=None)
     
     if count == -1:
@@ -1721,12 +1699,12 @@ async def ref_ch_single(client, query):
         return await status_msg.edit(text, reply_markup=InlineKeyboardMarkup(btn))
 
     if getattr(temp, "STOP_REFRESH", False):
-        return # Paused message already sent by run_refresh_for_channel
+        return 
         
     btn = [[InlineKeyboardButton("🔙 Back to Channels", callback_data="ref_ids_back")]]
     await status_msg.edit(
         f"✅ **Refresh Complete!**\n\n"
-        f"📢 **Channel:** `{ch_name}`\n"
+        f"📢 **Channel:** `{channel_id}`\n"
         f"📂 **Total IDs Updated:** `{count}`",
         reply_markup=InlineKeyboardMarkup(btn)
     )
@@ -1752,36 +1730,25 @@ async def ref_ch_all(client, query):
         if getattr(temp, "STOP_REFRESH", False):
             break
             
-        try:
-            # Bot agar admin hoga tabhi get_chat chalega
-            chat = await client.get_chat(ch_int)
-            
-            context = {
-                "is_all": True,
-                "current_ch": i,
-                "total_chs": total_channels,
-                "global_updated": total_updated
-            }
-            
-            # Engine execution
-            count = await run_refresh_for_channel(client, ch_int, status_msg=status_msg, context=context)
-            
-            if count == -1:
-                failed_channels.append(str(ch_int))
-            else:
-                total_updated += count
-                success_scanned += 1
-                
-        except FloodWait as fw:
-            await asyncio.sleep(fw.value + 2)
+        context = {
+            "is_all": True,
+            "current_ch": i,
+            "total_chs": total_channels,
+            "global_updated": total_updated
+        }
+        
+        count = await run_refresh_for_channel(client, ch_int, status_msg=status_msg, context=context)
+        
+        if count == -1:
             failed_channels.append(str(ch_int))
-        except Exception:
-            failed_channels.append(str(ch_int))
+        else:
+            total_updated += count
+            success_scanned += 1
             
-        await asyncio.sleep(1.5) # Safe gap between channels
+        await asyncio.sleep(1.5) 
         
     if getattr(temp, "STOP_REFRESH", False):
-        return # UI already updated in the loop
+        return 
         
     msg_text = (
         f"✅ **ALL Channels Refresh Complete!**\n\n"
@@ -1791,7 +1758,6 @@ async def ref_ch_all(client, query):
     
     btn = []
     
-    # 🔥 THE MASTER HACK: Skipped channels ke direct buttons
     if failed_channels:
         failed_str = "`, `".join(failed_channels[:5])
         if len(failed_channels) > 5: failed_str += "` ...aur bhi hain"

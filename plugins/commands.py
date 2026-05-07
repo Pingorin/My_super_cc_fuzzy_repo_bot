@@ -1525,6 +1525,7 @@ async def get_refresh_ui_components(client):
     
     valid_channels = []
     buttons = []
+    
     for ch in channels:
         try:
             chat = await client.get_chat(int(ch))
@@ -1532,9 +1533,18 @@ async def get_refresh_ui_components(client):
                 name = chat.title[:20] + "..." if len(chat.title) > 20 else chat.title
                 buttons.append([InlineKeyboardButton(f"📢 {name}", callback_data=f"ref_ch_do#{ch}")])
                 valid_channels.append(ch)
+        except FloodWait as e:
+            # Agar limit aayi toh wait karega
+            await asyncio.sleep(e.value + 1)
+            buttons.append([InlineKeyboardButton(f"🔒 ID: {ch}", callback_data=f"ref_ch_do#{ch}")])
+            valid_channels.append(ch)
         except Exception:
+            # Agar Bot channel me nahi hai (Kicked/Not Admin)
             buttons.append([InlineKeyboardButton(f"🔒 ID: {ch}", callback_data=f"ref_ch_do#{ch}")])
             valid_channels.append(ch) 
+            
+        # 🔥 THE FIX: Har channel check karne ke baad 0.8 second ka wait karega
+        await asyncio.sleep(0.8)
             
     if valid_channels:
         buttons.append([InlineKeyboardButton("♻️ Refresh All Channels", callback_data="ref_all_ch")])
@@ -1726,30 +1736,44 @@ async def ref_ch_all(client, query):
     failed_channels = []
     success_scanned = 0
     
-    for i, ch_int in enumerate(valid_channels, 1):
+    for i, ch_id in enumerate(valid_channels, 1):
         if getattr(temp, "STOP_REFRESH", False):
             break
             
-        context = {
-            "is_all": True,
-            "current_ch": i,
-            "total_chs": total_channels,
-            "global_updated": total_updated
-        }
-        
-        count = await run_refresh_for_channel(client, ch_int, status_msg=status_msg, context=context)
-        
-        if count == -1:
-            failed_channels.append(str(ch_int))
-        else:
-            total_updated += count
-            success_scanned += 1
+        # 🔥 THE FIX: Agle channel par jane se pehle 1.5 second ka fix delay
+        await asyncio.sleep(1.5)
             
-        await asyncio.sleep(1.5) 
-        
+        try:
+            # Bot agar admin hoga tabhi get_chat chalega
+            chat = await client.get_chat(ch_id)
+            
+            context = {
+                "is_all": True,
+                "current_ch": i,
+                "total_chs": total_channels,
+                "global_updated": total_updated
+            }
+            
+            # Engine execution
+            count = await run_refresh_for_channel(client, ch_id, status_msg=status_msg, context=context)
+            
+            if count == -1:
+                failed_channels.append(str(ch_id))
+            else:
+                total_updated += count
+                success_scanned += 1
+                
+        except FloodWait as fw:
+            await asyncio.sleep(fw.value + 2)
+            failed_channels.append(str(ch_id))
+        except Exception as e:
+            logger.error(f"Error in ref_all_ch for {ch_id}: {e}")
+            failed_channels.append(str(ch_id))
+            
     if getattr(temp, "STOP_REFRESH", False):
-        return 
+        return # UI already updated in the loop
         
+    # Kitne channel successfully scan hue
     msg_text = (
         f"✅ **ALL Channels Refresh Complete!**\n\n"
         f"📢 **Channels Scanned:** `{success_scanned}`\n"
@@ -1758,15 +1782,16 @@ async def ref_ch_all(client, query):
     
     btn = []
     
+    # 🔥 THE MASTER HACK: Skipped channels ke direct buttons
     if failed_channels:
         failed_str = "`, `".join(failed_channels[:5])
         if len(failed_channels) > 5: failed_str += "` ...aur bhi hain"
         msg_text += f"\n⚠️ **Skipped (Not Admin/Removed):**\n`{failed_str}`\n_(Niche diye gaye buttons se open karein)_"
         
-        for ch_id in failed_channels[:5]:
-            short_id = str(ch_id).replace("-100", "")
+        for ch in failed_channels[:5]:
+            short_id = str(ch).replace("-100", "")
             ch_link = f"https://t.me/c/{short_id}/1"
-            btn.append([InlineKeyboardButton(f"📢 Fix {ch_id}", url=ch_link)])
+            btn.append([InlineKeyboardButton(f"📢 Fix {ch}", url=ch_link)])
             
     btn.append([InlineKeyboardButton("🔙 Back to Menu", callback_data="ref_ids_back")])
         

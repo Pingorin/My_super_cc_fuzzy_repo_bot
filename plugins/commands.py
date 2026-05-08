@@ -1870,17 +1870,36 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
     msg_count = 0
     progress_col = Media.data_col1.database['refresh_checkpoints']
     
+    # 1. 🛡️ PEHLE ADMIN CHECK (Join Button ke liye zaroori hai)
     ch_name = str(channel_id)
+    is_admin = False
     try:
         chat = await client.get_chat(channel_id)
         if chat.title: ch_name = chat.title[:20] + "..."
-    except: pass
-        
-    # Checkpoint load karna
+        is_admin = True
+    except FloodWait as fw:
+        await asyncio.sleep(fw.value + 2)
+        try:
+            chat = await client.get_chat(channel_id)
+            if chat.title: ch_name = chat.title[:20] + "..."
+            is_admin = True
+        except: pass
+    except Exception:
+        pass # Admin nahi hai toh niche -1 return hoga
+            
+    if not is_admin:
+        return -1 # 🛑 Bot admin nahi hai, engine turant 'Skip' signal dega
+
+    # 2. Checkpoint aur Resume logic (Pehle jaisa)
     progress_data = await progress_col.find_one({"_id": f"progress_{channel_id}"})
     last_index = progress_data.get("last_index", 0) if progress_data else 0
-    # Global count load karna agar pichle session se hai
     prev_global_count = progress_data.get("global_synced", 0) if progress_data else 0
+
+    if status_msg:
+        try:
+            msg_text = f"🔄 **Step 2: Refreshing ({context['current_ch']}/{context['total_chs']})**" if context else "🔄 **Refreshing Index...**"
+            await status_msg.edit(f"{msg_text}\n📢 `{ch_name}`\n_Loading files from DB..._")
+        except: pass
 
     docs = []
     async for doc in Media.data_col1.find({"chat_id": channel_id}): docs.append(doc)
@@ -1898,23 +1917,16 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
 
     for i in range(last_index, total_msgs, chunk_size):
         if getattr(temp, "STOP_REFRESH", False):
-            # 🔥 THE FIX: Global count ko bhi save karo taaki Resume par count na hate
             current_global = (context['global_updated'] if context else 0) + updated_count
-            save_data = {
-                "last_index": i, 
-                "global_synced": current_global,
-                "is_all_mode": True if context else False
-            }
-            await progress_col.update_one({"_id": f"progress_{channel_id}"}, {"$set": save_data}, upsert=True)
+            await progress_col.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": i, "global_synced": current_global, "is_all_mode": True if context else False}}, upsert=True)
             
-            # Resume button UI
-            resume_cb = "ref_all_ch" if (context or (progress_data and progress_data.get("is_all_mode"))) else f"ref_ch_do#{channel_id}"
+            resume_cb = "ref_all_ch" if context else f"ref_ch_do#{channel_id}"
             resume_btn = InlineKeyboardMarkup([
                 [InlineKeyboardButton("▶️ Resume Refresh", callback_data=resume_cb)],
                 [InlineKeyboardButton("🔙 Back to Menu", callback_data="ref_ids_back")]
             ])
             if status_msg:
-                await status_msg.edit(f"⏸ **Refresh Paused!**\n\n📢 Channel: `{ch_name}`\n📍 Saved at: `{msg_count}/{total_msgs}`\n✅ Synced so far: `{current_global}`\n\n_Niche Resume par click karke baaki channels bhi refresh ho jayenge._", reply_markup=resume_btn)
+                await status_msg.edit(f"⏸ **Refresh Paused!**\n\n📢 Channel: `{ch_name}`\n📍 Saved at: `{msg_count}/{total_msgs}`\n✅ Synced: `{current_global}`", reply_markup=resume_btn)
             return updated_count
 
         chunk = docs[i : i + chunk_size]
@@ -1942,25 +1954,16 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
 
         await asyncio.sleep(0.2) 
 
-        if status_msg and (msg_count % 400 == 0 or msg_count >= total_msgs):
+        if status_msg and (msg_count % 1000 == 0 or msg_count >= total_msgs):
             pct = (msg_count / total_msgs) * 100
             current_g = (context['global_updated'] if context else prev_global_count) + updated_count
-            if context:
-                text = (
-                    f"🔄 **Step 2: Refreshing ({context['current_ch']}/{context['total_chs']})**\n\n"
-                    f"📢 **Channel:** `{ch_name}`\n"
-                    f"📊 **Progress:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
-                    f"✅ **Global Synced:** `{current_g}`\n\n"
-                    f"⚠️ _Stop button dabane par progress save ho jayegi._"
-                )
-            else:
-                text = (
-                    f"🔄 **Refresh Index {'[Resumed]' if last_index > 0 else 'Running...'}**\n\n"
-                    f"📢 **Channel:** `{ch_name}`\n"
-                    f"📊 **Progress:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
-                    f"✅ **Synced:** `{current_g}`\n\n"
-                    f"⚠️ _Stop button dabane par progress save ho jayegi._"
-                )
+            text = (
+                f"🔄 **Step 2: Refreshing ({context['current_ch']}/{context['total_chs']})**\n\n" if context else f"🔄 **Refresh Index {'[Resumed]' if last_index > 0 else ''}**\n\n"
+                f"📢 **Channel:** `{ch_name}`\n"
+                f"📊 **Progress:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
+                f"✅ **Global Synced:** `{current_g}`\n\n"
+                f"⚠️ _Stop button dabane par progress save ho jayegi._"
+            )
             try: await status_msg.edit(text, reply_markup=stop_btn)
             except: pass
 
@@ -2020,11 +2023,10 @@ async def ref_ch_single(client, query):
     )
 
 @Client.on_callback_query(filters.regex(r"^ref_all_ch$") & filters.user(ADMINS))
-@Client.on_callback_query(filters.regex(r"^ref_all_ch$") & filters.user(ADMINS))
 async def ref_ch_all(client, query):
     status_msg = query.message
     temp.STOP_REFRESH = False
-    progress_col = Media.database['refresh_checkpoints']
+    progress_col = Media.data_col1.database['refresh_checkpoints']
     
     await status_msg.edit("🔄 **Initializing ALL Channels Refresh...**")
     
@@ -2035,18 +2037,17 @@ async def ref_ch_all(client, query):
     valid_channels = list(set([int(c) for c in channels if str(c).startswith("-100")]))
     total_channels = len(valid_channels)
     
-    # 🔥 THE GLOBAL RESUME FIX:
     total_updated_global = 0
     start_from_ch = 0
-    
-    # Pehle check karo ki kya koi purana checkpoint hai jisme global count save hai
-    async for check in progress_col.find({"is_all_mode": True}):
-        total_updated_global = check.get("global_synced", 0)
-        # Dhundho ki ye channel list mein kahan hai
-        ch_id = int(check["_id"].replace("progress_", ""))
-        if ch_id in valid_channels:
-            start_from_ch = valid_channels.index(ch_id)
-        break
+    failed_channels = []
+
+    # Resume mode check
+    checkpoint = await progress_col.find_one({"is_all_mode": True})
+    if checkpoint:
+        total_updated_global = checkpoint.get("global_synced", 0)
+        ch_id_check = int(checkpoint["_id"].replace("progress_", ""))
+        if ch_id_check in valid_channels:
+            start_from_ch = valid_channels.index(ch_id_check)
 
     for i in range(start_from_ch, total_channels):
         if getattr(temp, "STOP_REFRESH", False):
@@ -2055,17 +2056,12 @@ async def ref_ch_all(client, query):
         ch_id = valid_channels[i]
         await asyncio.sleep(2)
             
-        context = {
-            "is_all": True,
-            "current_ch": i + 1,
-            "total_chs": total_channels,
-            "global_updated": total_updated_global
-        }
+        context = {"is_all": True, "current_ch": i + 1, "total_chs": total_channels, "global_updated": total_updated_global}
         
         count = await run_refresh_for_channel(client, ch_id, status_msg=status_msg, context=context)
         
         if count == -1:
-            continue
+            failed_channels.append(str(ch_id)) # 👈 Skip mode: ID ko list me daalo aur agle par jao
         else:
             total_updated_global += count
             
@@ -2074,11 +2070,19 @@ async def ref_ch_all(client, query):
         
     msg_text = (
         f"✅ **ALL Channels Refresh Complete!**\n\n"
-        f"📢 **Channels Scanned:** `{total_channels}`\n"
+        f"📢 **Channels Scanned:** `{total_channels - len(failed_channels)}` / `{total_channels}`\n"
         f"📂 **Total Final IDs Updated:** `{total_updated_global}`\n"
     )
     
-    btn = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="ref_ids_back")]]
+    btn = []
+    # 🔥 THE SKIPPED BUTTONS: Admin missing channels ke liye fix button
+    if failed_channels:
+        msg_text += f"\n⚠️ **Skipped (Not Admin/Removed):**\n`{', '.join(failed_channels[:3])}`\n"
+        for ch in failed_channels[:5]: # Max 5 buttons taaki UI kharab na ho
+            short_id = str(ch).replace("-100", "")
+            btn.append([InlineKeyboardButton(f"📢 Open & Fix {ch}", url=f"https://t.me/c/{short_id}/1")])
+            
+    btn.append([InlineKeyboardButton("🔙 Back to Menu", callback_data="ref_ids_back")])
     await status_msg.edit(msg_text, reply_markup=InlineKeyboardMarkup(btn))
 
 @Client.on_callback_query(filters.regex(r"^ref_ids_back$") & filters.user(ADMINS))

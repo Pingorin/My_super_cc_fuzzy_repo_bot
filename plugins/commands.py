@@ -1867,10 +1867,9 @@ async def get_refresh_ui_components(client):
 
 async def run_refresh_for_channel(client, channel_id, status_msg=None, context=None):
     updated_count = 0
-    msg_count = 0
     progress_col = Media.data_col1.database['refresh_checkpoints']
     
-    # 1. 🛡️ PEHLE ADMIN CHECK (Join Button ke liye zaroori hai)
+    # 1. PEHLE ADMIN CHECK 
     ch_name = str(channel_id)
     is_admin = False
     try:
@@ -1885,12 +1884,12 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
             is_admin = True
         except: pass
     except Exception:
-        pass # Admin nahi hai toh niche -1 return hoga
+        pass 
             
     if not is_admin:
-        return -1 # 🛑 Bot admin nahi hai, engine turant 'Skip' signal dega
+        return -1 # Bot admin nahi hai, Engine turant 'Skip' signal dega
 
-    # 2. Checkpoint aur Resume logic (Pehle jaisa)
+    # 2. Checkpoint load karna
     progress_data = await progress_col.find_one({"_id": f"progress_{channel_id}"})
     last_index = progress_data.get("last_index", 0) if progress_data else 0
     prev_global_count = progress_data.get("global_synced", 0) if progress_data else 0
@@ -1901,6 +1900,7 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
             await status_msg.edit(f"{msg_text}\n📢 `{ch_name}`\n_Loading files from DB..._")
         except: pass
 
+    # 3. Database read karna
     docs = []
     async for doc in Media.data_col1.find({"chat_id": channel_id}): docs.append(doc)
     if Media.has_db2:
@@ -1911,10 +1911,10 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
     total_msgs = len(docs)
     if total_msgs == 0: return 0
 
-    msg_count = last_index
     chunk_size = 200 
     stop_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Stop & Save Progress", callback_data=f"stop_refresh#{channel_id}")]])
 
+    # 4. Main Refresh Loop
     for i in range(last_index, total_msgs, chunk_size):
         if getattr(temp, "STOP_REFRESH", False):
             current_global = (context['global_updated'] if context else 0) + updated_count
@@ -1926,7 +1926,8 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
                 [InlineKeyboardButton("🔙 Back to Menu", callback_data="ref_ids_back")]
             ])
             if status_msg:
-                await status_msg.edit(f"⏸ **Refresh Paused!**\n\n📢 Channel: `{ch_name}`\n📍 Saved at: `{msg_count}/{total_msgs}`\n✅ Synced: `{current_global}`", reply_markup=resume_btn)
+                try: await status_msg.edit(f"⏸ **Refresh Paused!**\n\n📢 Channel: `{ch_name}`\n📍 Saved at: `{i}/{total_msgs}`\n✅ Synced: `{current_global}`", reply_markup=resume_btn)
+                except: pass
             return updated_count
 
         chunk = docs[i : i + chunk_size]
@@ -1935,7 +1936,6 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
         try:
             messages = await client.get_messages(channel_id, message_ids=msg_ids)
             for msg in messages:
-                msg_count += 1
                 if not msg or getattr(msg, "empty", False): continue
                 media = msg.video or msg.document
                 if media:
@@ -1952,18 +1952,31 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
                             if res3.modified_count > 0: updated_count += 1
         except Exception: pass
 
-        await asyncio.sleep(0.2) 
+        processed_count = i + len(chunk)
 
-        if status_msg and (msg_count % 1000 == 0 or msg_count >= total_msgs):
-            pct = (msg_count / total_msgs) * 100
+        await asyncio.sleep(0.2) # API Safe Brake
+
+        # 🔥 THE FIX: Ab update 1000 par nahi, har Chunk (200 files) par hoga! Isse screen turant aage badhegi bina block hue.
+        if status_msg and (processed_count % chunk_size == 0 or processed_count >= total_msgs):
+            pct = (processed_count / total_msgs) * 100
             current_g = (context['global_updated'] if context else prev_global_count) + updated_count
-            text = (
-                f"🔄 **Step 2: Refreshing ({context['current_ch']}/{context['total_chs']})**\n\n" if context else f"🔄 **Refresh Index {'[Resumed]' if last_index > 0 else ''}**\n\n"
-                f"📢 **Channel:** `{ch_name}`\n"
-                f"📊 **Progress:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
-                f"✅ **Global Synced:** `{current_g}`\n\n"
-                f"⚠️ _Stop button dabane par progress save ho jayegi._"
-            )
+            
+            if context:
+                text = (
+                    f"🔄 **Step 2: Refreshing ({context['current_ch']}/{context['total_chs']})**\n\n"
+                    f"📢 **Channel:** `{ch_name}`\n"
+                    f"📊 **Progress:** `{processed_count} / {total_msgs}` ({pct:.1f}%)\n"
+                    f"✅ **Global Synced:** `{current_g}`\n\n"
+                    f"⚠️ _Stop button dabane par progress save ho jayegi._"
+                )
+            else:
+                text = (
+                    f"🔄 **Refresh Index {'[Resumed]' if last_index > 0 else ''}**\n\n"
+                    f"📢 **Channel:** `{ch_name}`\n"
+                    f"📊 **Progress:** `{processed_count} / {total_msgs}` ({pct:.1f}%)\n"
+                    f"✅ **Synced:** `{current_g}`\n\n"
+                    f"⚠️ _Stop button dabane par progress save ho jayegi._"
+                )
             try: await status_msg.edit(text, reply_markup=stop_btn)
             except: pass
 

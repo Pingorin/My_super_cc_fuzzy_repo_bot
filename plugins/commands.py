@@ -1869,7 +1869,10 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
     updated_count = 0
     msg_count = 0
     
-    # 1. SAFEST ADMIN CHECK (Agar error aaya toh bypass karega, skip nahi)
+    # 🔥 THE ARCHITECTURE FIX: Progress ko User DB ki jagah Media DB (DB 1) me save karenge!
+    progress_col = Media.data_col1.database['refresh_checkpoints']
+    
+    # 1. SAFEST ADMIN CHECK 
     ch_name = str(channel_id)
     try:
         chat = await client.get_chat(channel_id)
@@ -1879,7 +1882,7 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
     except Exception:
         pass # Ignore and proceed with ID as name
         
-    progress_data = await db.bot_settings.find_one({"_id": f"progress_{channel_id}"})
+    progress_data = await progress_col.find_one({"_id": f"progress_{channel_id}"})
     last_index = progress_data.get("last_index", 0) if progress_data else 0
 
     if status_msg:
@@ -1906,7 +1909,7 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
 
     for i in range(last_index, total_msgs, chunk_size):
         if getattr(temp, "STOP_REFRESH", False):
-            await db.bot_settings.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": i}}, upsert=True)
+            await progress_col.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": i}}, upsert=True)
             if status_msg: 
                 try: await status_msg.edit(f"⏸ **Refresh Paused!**\n\n📢 Channel: `{ch_name}`\n📍 Saved at: `{msg_count}/{total_msgs}`\n\n_Jab aap dubara chalayenge, ye yahin se shuru hoga._")
                 except: pass
@@ -1948,7 +1951,7 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
         await asyncio.sleep(2) # 🔥 Safe API Gap per 100 messages
 
         if msg_count % 1000 == 0:
-            await db.bot_settings.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": msg_count}}, upsert=True)
+            await progress_col.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": msg_count}}, upsert=True)
 
         if status_msg and (msg_count % 200 == 0 or msg_count == total_msgs):
             pct = (msg_count / total_msgs) * 100 if total_msgs > 0 else 0
@@ -1971,8 +1974,9 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
             try: await status_msg.edit(text, reply_markup=stop_btn)
             except: pass
 
-    await db.bot_settings.delete_one({"_id": f"progress_{channel_id}"})
+    await progress_col.delete_one({"_id": f"progress_{channel_id}"})
     return updated_count
+
     
 @Client.on_message(filters.command("refresh_index") & filters.user(ADMINS))
 async def refresh_index_command(client, message):
@@ -2047,8 +2051,7 @@ async def ref_ch_all(client, query):
         if getattr(temp, "STOP_REFRESH", False):
             break
             
-        # 🔥 ANTI-FLOOD WAIT: Agle channel se pehle saans lene ka time
-        await asyncio.sleep(2.5) 
+        await asyncio.sleep(2.5) # 🔥 Wait before processing next channel
             
         try:
             context = {
@@ -2058,7 +2061,6 @@ async def ref_ch_all(client, query):
                 "global_updated": total_updated
             }
             
-            # 🔥 FIX: Yahan se 'client.get_chat()' hata diya hai. Seedha engine chalega.
             count = await run_refresh_for_channel(client, ch_id, status_msg=status_msg, context=context)
             
             if count == -1:

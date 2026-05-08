@@ -13,6 +13,7 @@ import info
 from info import ADMINS, IS_VERIFY
 from utils import temp, get_shortlink, check_fsub_4_status
 from Script import script 
+from pymongo import UpdateOne
 
 logger = logging.getLogger(__name__)
 START_IMG = "https://graph.org/file/4d61886e61dfa37a25945.jpg"
@@ -1933,6 +1934,11 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
         chunk = docs[i : i + chunk_size]
         msg_ids = [doc['msg_id'] for doc in chunk]
         
+        # 🔥 THE ULTIMATE FIX: BULK WRITE OPERATIONS
+        bulk_ops1 = []
+        bulk_ops2 = []
+        bulk_ops3 = []
+
         try:
             messages = await client.get_messages(channel_id, message_ids=msg_ids)
             for msg in messages:
@@ -1941,22 +1947,24 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
                 if media:
                     strict_filter = {'file_unique_id': media.file_unique_id, 'chat_id': channel_id}
                     update_data = {'$set': {'file_id': media.file_id}}
-                    res1 = await Media.data_col1.update_one(strict_filter, update_data)
-                    if res1.modified_count > 0: updated_count += 1
-                    else:
-                        if Media.has_db2:
-                            res2 = await Media.data_col2.update_one(strict_filter, update_data)
-                            if res2.modified_count > 0: updated_count += 1
-                        elif Media.has_db3:
-                            res3 = await Media.data_col3.update_one(strict_filter, update_data)
-                            if res3.modified_count > 0: updated_count += 1
+                    
+                    # Operations list me daalo (Abhi DB me mat bhejo)
+                    bulk_ops1.append(UpdateOne(strict_filter, update_data))
+                    if Media.has_db2: bulk_ops2.append(UpdateOne(strict_filter, update_data))
+                    if Media.has_db3: bulk_ops3.append(UpdateOne(strict_filter, update_data))
+                    updated_count += 1
+                    
+            # 🔥 EK SAATH DB ME BHEJO (Truck Unload) - Ye 50 sec ka time 0.5 sec kar dega!
+            if bulk_ops1: await Media.data_col1.bulk_write(bulk_ops1, ordered=False)
+            if bulk_ops2 and Media.has_db2: await Media.data_col2.bulk_write(bulk_ops2, ordered=False)
+            if bulk_ops3 and Media.has_db3: await Media.data_col3.bulk_write(bulk_ops3, ordered=False)
+            
         except Exception: pass
 
         processed_count = i + len(chunk)
 
         await asyncio.sleep(0.2) # API Safe Brake
 
-        # 🔥 THE FIX: Ab update 1000 par nahi, har Chunk (200 files) par hoga! Isse screen turant aage badhegi bina block hue.
         if status_msg and (processed_count % chunk_size == 0 or processed_count >= total_msgs):
             pct = (processed_count / total_msgs) * 100
             current_g = (context['global_updated'] if context else prev_global_count) + updated_count
@@ -1967,7 +1975,7 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
                     f"📢 **Channel:** `{ch_name}`\n"
                     f"📊 **Progress:** `{processed_count} / {total_msgs}` ({pct:.1f}%)\n"
                     f"✅ **Global Synced:** `{current_g}`\n\n"
-                    f"⚠️ _Stop button dabane par progress save ho jayegi._"
+                    f"⚡ _Turbo DB-Write Active..._"
                 )
             else:
                 text = (
@@ -1975,7 +1983,7 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
                     f"📢 **Channel:** `{ch_name}`\n"
                     f"📊 **Progress:** `{processed_count} / {total_msgs}` ({pct:.1f}%)\n"
                     f"✅ **Synced:** `{current_g}`\n\n"
-                    f"⚠️ _Stop button dabane par progress save ho jayegi._"
+                    f"⚡ _Turbo DB-Write Active..._"
                 )
             try: await status_msg.edit(text, reply_markup=stop_btn)
             except: pass

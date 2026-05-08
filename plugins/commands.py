@@ -1869,18 +1869,28 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
     updated_count = 0
     msg_count = 0
     
-    # 🔥 THE ARCHITECTURE FIX: Progress ko User DB ki jagah Media DB (DB 1) me save karenge!
     progress_col = Media.data_col1.database['refresh_checkpoints']
     
-    # 1. SAFEST ADMIN CHECK 
+    # 1. 🛡️ STRICT ADMIN CHECK (Ab ignore nahi karega, admin na hone par seedha -1 dega)
     ch_name = str(channel_id)
-    try:
-        chat = await client.get_chat(channel_id)
-        if chat.title: ch_name = chat.title[:20] + "..."
-    except FloodWait as fw:
-        await asyncio.sleep(fw.value + 2)
-    except Exception:
-        pass # Ignore and proceed with ID as name
+    is_admin = False
+    
+    for attempt in range(3):
+        try:
+            chat = await client.get_chat(channel_id)
+            if chat.title: ch_name = chat.title[:20] + "..."
+            is_admin = True
+            break
+        except FloodWait as fw:
+            if status_msg:
+                try: await status_msg.edit(f"⏳ **Rate Limit on Info Fetch!**\n_Sleeping safely for {fw.value}s..._")
+                except: pass
+            await asyncio.sleep(fw.value + 2)
+        except Exception:
+            await asyncio.sleep(1) # Network issue wait
+            
+    if not is_admin:
+        return -1 # 🛑 IMMEDIATELY ABORT: Bot admin nahi hai!
         
     progress_data = await progress_col.find_one({"_id": f"progress_{channel_id}"})
     last_index = progress_data.get("last_index", 0) if progress_data else 0
@@ -1911,7 +1921,11 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
         if getattr(temp, "STOP_REFRESH", False):
             await progress_col.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": i}}, upsert=True)
             if status_msg: 
-                try: await status_msg.edit(f"⏸ **Refresh Paused!**\n\n📢 Channel: `{ch_name}`\n📍 Saved at: `{msg_count}/{total_msgs}`\n\n_Jab aap dubara chalayenge, ye yahin se shuru hoga._")
+                resume_btn = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("▶️ Resume Refresh", callback_data=f"ref_ch_do#{channel_id}")],
+                    [InlineKeyboardButton("🔙 Back to Channels", callback_data="ref_ids_back")]
+                ])
+                try: await status_msg.edit(f"⏸ **Refresh Paused!**\n\n📢 Channel: `{ch_name}`\n📍 Saved at: `{msg_count}/{total_msgs}`\n\n_Niche 'Resume' par click karke yahin se aage shuru karein._", reply_markup=resume_btn)
                 except: pass
             return updated_count
 
@@ -1944,7 +1958,7 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
             await asyncio.sleep(e.value + 2)
         except Exception as e:
             err = str(e).upper()
-            if "CHAT_ADMIN_REQUIRED" in err or "CHANNEL_PRIVATE" in err or "USER_BANNED_IN_CHANNEL" in err:
+            if any(x in err for x in ["CHAT_ADMIN_REQUIRED", "CHANNEL_PRIVATE", "USER_BANNED_IN_CHANNEL", "PEER_ID_INVALID", "CHANNEL_INVALID"]):
                 return -1 # REAL ADMIN FAILURE
             pass
 
@@ -1977,7 +1991,6 @@ async def run_refresh_for_channel(client, channel_id, status_msg=None, context=N
     await progress_col.delete_one({"_id": f"progress_{channel_id}"})
     return updated_count
 
-    
 @Client.on_message(filters.command("refresh_index") & filters.user(ADMINS))
 async def refresh_index_command(client, message):
     temp.STOP_REFRESH = False 
@@ -2006,7 +2019,7 @@ async def ref_ch_single(client, query):
     count = await run_refresh_for_channel(client, channel_id, status_msg=status_msg, context=None)
     
     if count == -1:
-        # Kicked UI Generator
+        # 🔥 Kicked UI Generator (Yahan se fix button banega)
         short_id = str(channel_id).replace("-100", "")
         ch_link = f"https://t.me/c/{short_id}/1" 
         text = (
@@ -2051,7 +2064,7 @@ async def ref_ch_all(client, query):
         if getattr(temp, "STOP_REFRESH", False):
             break
             
-        await asyncio.sleep(2.5) # 🔥 Wait before processing next channel
+        await asyncio.sleep(2.5) 
             
         try:
             context = {

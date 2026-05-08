@@ -35,7 +35,7 @@ if not USER_DB_URI:
 ADMINS_STR = os.environ.get("ADMINS", "7245547751") # Yahan "" ke andar default admin IDs dal sakte hain space se separate karke (e.g., "123456789 987654321")
 ADMINS = [int(i) for i in ADMINS_STR.split()] if ADMINS_STR else []
 
-LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1003474604893")) 
+LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1003903946843")) 
 PORT = int(os.environ.get("PORT", "8080"))
 CHANNELS = [int(ch) for ch in os.environ.get("CHANNELS", "0").split()] if os.environ.get("CHANNELS") else []
 

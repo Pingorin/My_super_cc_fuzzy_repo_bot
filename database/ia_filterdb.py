@@ -5,8 +5,8 @@ import uuid
 import html  
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.errors import BulkWriteError, OperationFailure
-from pymongo import ReturnDocument, ASCENDING
+from pymongo.errors import BulkWriteError
+from pymongo import ReturnDocument
 import info 
 from info import DATABASE_URI, DATABASE_NAME
 

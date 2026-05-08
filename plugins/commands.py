@@ -1866,127 +1866,111 @@ async def get_refresh_ui_components(client):
     return valid_channels, InlineKeyboardMarkup(buttons)
 
 async def run_refresh_for_channel(client, channel_id, status_msg=None, context=None):
+    """The Masterstroke: Turbo History Scanner for Refresh"""
     updated_count = 0
     msg_count = 0
     
     progress_col = Media.data_col1.database['refresh_checkpoints']
     
-    # 1. 🛡️ STRICT ADMIN CHECK (Ab ignore nahi karega, admin na hone par seedha -1 dega)
+    # 1. SAFEST ADMIN CHECK 
     ch_name = str(channel_id)
-    is_admin = False
-    
-    for attempt in range(3):
-        try:
-            chat = await client.get_chat(channel_id)
-            if chat.title: ch_name = chat.title[:20] + "..."
-            is_admin = True
-            break
-        except FloodWait as fw:
-            if status_msg:
-                try: await status_msg.edit(f"⏳ **Rate Limit on Info Fetch!**\n_Sleeping safely for {fw.value}s..._")
-                except: pass
-            await asyncio.sleep(fw.value + 2)
-        except Exception:
-            await asyncio.sleep(1) # Network issue wait
-            
-    if not is_admin:
-        return -1 # 🛑 IMMEDIATELY ABORT: Bot admin nahi hai!
+    try:
+        chat = await client.get_chat(channel_id)
+        if chat.title: ch_name = chat.title[:20] + "..."
+    except FloodWait as fw:
+        await asyncio.sleep(fw.value + 2)
+    except Exception as e:
+        err = str(e).upper()
+        if "CHAT_ADMIN_REQUIRED" in err or "CHANNEL_PRIVATE" in err or "PEER_ID_INVALID" in err:
+            return -1 # Pakka admin nahi hai
+        pass 
         
+    # 2. CHECKPOINT (Ab last_msg_id use karenge resume ke liye)
     progress_data = await progress_col.find_one({"_id": f"progress_{channel_id}"})
-    last_index = progress_data.get("last_index", 0) if progress_data else 0
+    last_msg_id = progress_data.get("last_msg_id", 0) if progress_data else 0
+
+    # UI ke liye Total Files ka andaza
+    total_msgs = await Media.data_col1.count_documents({"chat_id": channel_id})
+    if Media.has_db2: total_msgs += await Media.data_col2.count_documents({"chat_id": channel_id})
+    if Media.has_db3: total_msgs += await Media.data_col3.count_documents({"chat_id": channel_id})
 
     if status_msg:
         try:
             if context and context.get("is_all"):
-                await status_msg.edit(f"🔄 **Step 1: Reading DB ({context['current_ch']}/{context['total_chs']})**\n📢 `{ch_name}`\n_Loading files..._")
+                await status_msg.edit(f"🔄 **Step 1: Connecting to Channel ({context['current_ch']}/{context['total_chs']})**\n📢 `{ch_name}`\n_Starting Fast History Scan..._")
             else:
-                await status_msg.edit(f"🔄 **Step 1: Reading DB...**\n📢 `{ch_name}`\n_Loading files..._")
+                await status_msg.edit(f"🔄 **Step 1: Connecting to Channel...**\n📢 `{ch_name}`\n_Starting Fast History Scan..._")
         except Exception: pass
 
-    docs = []
-    async for doc in Media.data_col1.find({"chat_id": channel_id}): docs.append(doc)
-    if Media.has_db2:
-        async for doc in Media.data_col2.find({"chat_id": channel_id}): docs.append(doc)
-    if Media.has_db3:
-        async for doc in Media.data_col3.find({"chat_id": channel_id}): docs.append(doc)
-    
-    total_msgs = len(docs)
-    if total_msgs == 0: return 0
-
-    msg_count = last_index
-    chunk_size = 100 
     stop_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Stop & Save Progress", callback_data=f"stop_refresh#{channel_id}")]])
 
-    for i in range(last_index, total_msgs, chunk_size):
-        if getattr(temp, "STOP_REFRESH", False):
-            await progress_col.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": i}}, upsert=True)
-            if status_msg: 
-                resume_btn = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("▶️ Resume Refresh", callback_data=f"ref_ch_do#{channel_id}")],
-                    [InlineKeyboardButton("🔙 Back to Channels", callback_data="ref_ids_back")]
-                ])
-                try: await status_msg.edit(f"⏸ **Refresh Paused!**\n\n📢 Channel: `{ch_name}`\n📍 Saved at: `{msg_count}/{total_msgs}`\n\n_Niche 'Resume' par click karke yahin se aage shuru karein._", reply_markup=resume_btn)
-                except: pass
-            return updated_count
+    # 3. 🔥 THE MASTERSTROKE: Fast History Scanner (Direct Telegram Fetch)
+    try:
+        # offset_id se resume hota hai exactly us message se jahan chhoda tha!
+        async for msg in client.get_chat_history(channel_id, offset_id=last_msg_id):
+            if getattr(temp, "STOP_REFRESH", False):
+                await progress_col.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_msg_id": msg.id}}, upsert=True)
+                if status_msg: 
+                    resume_btn = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("▶️ Resume Refresh", callback_data=f"ref_ch_do#{channel_id}")],
+                        [InlineKeyboardButton("🔙 Back to Channels", callback_data="ref_ids_back")]
+                    ])
+                    try: await status_msg.edit(f"⏸ **Refresh Paused!**\n\n📢 Channel: `{ch_name}`\n📍 Scanned: `{msg_count}`\n\n_Niche 'Resume' par click karke yahin se aage shuru karein._", reply_markup=resume_btn)
+                    except: pass
+                return updated_count
 
-        chunk = docs[i : i + chunk_size]
-        msg_ids = [doc['msg_id'] for doc in chunk]
-        
-        try:
-            messages = await client.get_messages(channel_id, message_ids=msg_ids)
-            for msg in messages:
-                msg_count += 1
-                if not msg or getattr(msg, "empty", False): continue
-                media = msg.video or msg.document
-                if media:
-                    strict_filter = {'file_unique_id': media.file_unique_id, 'chat_id': channel_id}
-                    update_data = {'$set': {'file_id': media.file_id}}
-                    
-                    res1 = await Media.data_col1.update_one(strict_filter, update_data)
-                    if res1.modified_count > 0: updated_count += 1
+            msg_count += 1
+            media = msg.video or msg.document
+            
+            # Agar message me video/document hai, toh sidha DB update maaro
+            if media:
+                strict_filter = {'file_unique_id': media.file_unique_id, 'chat_id': channel_id}
+                update_data = {'$set': {'file_id': media.file_id}}
+                
+                res1 = await Media.data_col1.update_one(strict_filter, update_data)
+                if res1.modified_count > 0: updated_count += 1
+                else:
+                    if Media.has_db2:
+                        res2 = await Media.data_col2.update_one(strict_filter, update_data)
+                        if res2.modified_count > 0: updated_count += 1
+                    elif Media.has_db3:
+                        res3 = await Media.data_col3.update_one(strict_filter, update_data)
+                        if res3.modified_count > 0: updated_count += 1
+
+            # 🚀 Fast UI Update (Har 1000 files me 1 baar)
+            if msg_count % 1000 == 0:
+                await progress_col.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_msg_id": msg.id}}, upsert=True)
+                
+                pct = (msg_count / total_msgs) * 100 if total_msgs > 0 else 0
+                if pct > 100: pct = 100 # Kyunki channel history me DB se zyada kachra messages ho sakte hain
+
+                if status_msg:
+                    if context and context.get("is_all"):
+                        text = (
+                            f"🔄 **Step 2: Fast Refreshing ({context['current_ch']}/{context['total_chs']})**\n\n"
+                            f"📢 **Channel:** `{ch_name}`\n"
+                            f"📊 **Scanned:** `{msg_count}` (~{pct:.1f}%)\n"
+                            f"✅ **Global Synced:** `{context['global_updated'] + updated_count}`\n\n"
+                            f"⚡ _Turbo History Scan Active..._"
+                        )
                     else:
-                        if Media.has_db2:
-                            res2 = await Media.data_col2.update_one(strict_filter, update_data)
-                            if res2.modified_count > 0: updated_count += 1
-                        elif Media.has_db3:
-                            res3 = await Media.data_col3.update_one(strict_filter, update_data)
-                            if res3.modified_count > 0: updated_count += 1
-        except FloodWait as e:
-            if status_msg:
-                try: await status_msg.edit(f"⏳ **Rate Limit Hit!**\n_Sleeping for {e.value} seconds..._")
-                except: pass
-            await asyncio.sleep(e.value + 2)
-        except Exception as e:
-            err = str(e).upper()
-            if any(x in err for x in ["CHAT_ADMIN_REQUIRED", "CHANNEL_PRIVATE", "USER_BANNED_IN_CHANNEL", "PEER_ID_INVALID", "CHANNEL_INVALID"]):
-                return -1 # REAL ADMIN FAILURE
-            pass
+                        text = (
+                            f"🔄 **Fast Refresh Index {'[Resumed]' if last_msg_id > 0 else 'Running...'}**\n\n"
+                            f"📢 **Channel:** `{ch_name}`\n"
+                            f"📊 **Scanned:** `{msg_count}` (~{pct:.1f}%)\n"
+                            f"✅ **IDs Synced:** `{updated_count}`\n\n"
+                            f"⚡ _Turbo History Scan Active..._"
+                        )
+                    try: await status_msg.edit(text, reply_markup=stop_btn)
+                    except: pass
 
-        await asyncio.sleep(2) # 🔥 Safe API Gap per 100 messages
-
-        if msg_count % 1000 == 0:
-            await progress_col.update_one({"_id": f"progress_{channel_id}"}, {"$set": {"last_index": msg_count}}, upsert=True)
-
-        if status_msg and (msg_count % 200 == 0 or msg_count == total_msgs):
-            pct = (msg_count / total_msgs) * 100 if total_msgs > 0 else 0
-            if context and context.get("is_all"):
-                text = (
-                    f"🔄 **Step 2: Refreshing ({context['current_ch']}/{context['total_chs']})**\n\n"
-                    f"📢 **Channel:** `{ch_name}`\n"
-                    f"📊 **Progress:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
-                    f"✅ **Global Synced:** `{context['global_updated'] + updated_count}`\n\n"
-                    f"⚠️ _Stop button dabane par progress save ho jayegi._"
-                )
-            else:
-                text = (
-                    f"🔄 **Refresh Index {'[Resumed]' if last_index > 0 else 'Running...'}**\n\n"
-                    f"📢 **Channel:** `{ch_name}`\n"
-                    f"📊 **Progress:** `{msg_count} / {total_msgs}` ({pct:.1f}%)\n"
-                    f"✅ **Synced:** `{updated_count}`\n\n"
-                    f"⚠️ _Stop button dabane par progress save ho jayegi._"
-                )
-            try: await status_msg.edit(text, reply_markup=stop_btn)
+    except FloodWait as e:
+        if status_msg:
+            try: await status_msg.edit(f"⏳ **Rate Limit Hit!**\n_Sleeping for {e.value} seconds..._")
             except: pass
+        await asyncio.sleep(e.value + 2)
+    except Exception as e:
+        logger.error(f"History fetch error in refresh: {e}")
 
     await progress_col.delete_one({"_id": f"progress_{channel_id}"})
     return updated_count

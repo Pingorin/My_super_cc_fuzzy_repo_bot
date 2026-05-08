@@ -3,11 +3,10 @@ import re
 import datetime
 import uuid
 import html  
-import difflib  
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError, OperationFailure
-from pymongo import ReturnDocument, ASCENDING, TEXT
+from pymongo import ReturnDocument, ASCENDING
 import info 
 from info import DATABASE_URI, DATABASE_NAME
 
@@ -42,7 +41,7 @@ class MediaDB:
         self.data_col1 = self.db1.files_data   
         self.search_col1 = self.db1.files_search 
         
-        # Bot ka "Dimaag" (Counters, Settings aur Cache) hamesha DB 1 par rahega
+        # Bot ka "Dimaag" (Counters, Settings aur Cache) hamesha DB 1 par rahega!
         self.counters = self.db1.counters
         self.search_cache = self.db1.search_cache 
         self.temp_searches = self.db1.temp_searches
@@ -76,54 +75,32 @@ class MediaDB:
             try: await self.temp_searches.drop_index("created_at_1")
             except Exception: pass
 
-            # DB 1 Indexes
-            await self.search_col1.create_index("quality") 
-            await self.search_col1.create_index("languages") 
-            await self.search_col1.create_index("year") 
+            # DB 1 Indexes (Faltu TEXT, quality, languages hata diye)
             await self.search_col1.create_index("link_id")
-            await self.data_col1.create_index("file_id") # ✅ Fast Update ke liye File ID Index
+            await self.data_col1.create_index("file_id") # ✅ Fast Scan Index
             await self.data_col1.create_index("file_unique_id", unique=True)
-            
-            # 🔥 Traditional Text Index
-            await self.search_col1.create_index(
-                [("file_name", TEXT), ("search_text", TEXT), ("languages", TEXT)],
-                name="weighted_movie_search"
-            )
 
-            # Naye time wale rules
+            # Naye time wale rules banayenge
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
             await self.temp_searches.create_index("created_at", expireAfterSeconds=43200)
             
             # 🔥 DB 2 Indexes
             if self.has_db2:
-                await self.search_col2.create_index("quality") 
-                await self.search_col2.create_index("languages") 
-                await self.search_col2.create_index("year") 
                 await self.search_col2.create_index("link_id")
-                await self.data_col2.create_index("file_id") 
+                await self.data_col2.create_index("file_id")
                 await self.data_col2.create_index("file_unique_id", unique=True)
-                await self.search_col2.create_index(
-                    [("file_name", TEXT), ("search_text", TEXT), ("languages", TEXT)],
-                    name="weighted_movie_search"
-                )
 
             # 🔥 DB 3 Indexes
             if self.has_db3:
-                await self.search_col3.create_index("quality") 
-                await self.search_col3.create_index("languages") 
-                await self.search_col3.create_index("year") 
                 await self.search_col3.create_index("link_id")
-                await self.data_col3.create_index("file_id") 
+                await self.data_col3.create_index("file_id")
                 await self.data_col3.create_index("file_unique_id", unique=True)
-                await self.search_col3.create_index(
-                    [("file_name", TEXT), ("search_text", TEXT), ("languages", TEXT)],
-                    name="weighted_movie_search"
-                )
             
-            print("✅ Multi-Database Indexes Created Successfully! (Traditional Text-Index Mode)")
+            print("✅ Multi-Database Indexes Created Successfully! (Atlas Search Ready)")
         except Exception as e:
             print(f"❌ Error Creating Indexes: {e}")
 
+    # 🔥 UNIQUE COUNTER (Sabhi files ko ek line me rakhega)
     async def get_next_sequence_value(self, sequence_name, increment=1):
         try:
             doc = await self.counters.find_one_and_update(
@@ -170,11 +147,13 @@ class MediaDB:
         except Exception as e:
             return None
 
+    # 🔥 MANUAL OVERRIDE (Set Active DB) 🔥
     async def get_active_index_db(self):
         try:
             doc = await self.bot_settings.find_one({"_id": "active_db"})
             if doc: return doc.get("db_num", 1)
         except: pass
+        
         if self.has_db3: return 3
         if self.has_db2: return 2
         return 1
@@ -260,6 +239,7 @@ class MediaDB:
 
         unique_ids = [media.file_unique_id for media, msg in unique_batch_items]
         
+        # 🔥 SMART UPDATE MAPPING
         existing_map = {}
         link_ids_to_check = []
         
@@ -518,12 +498,13 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ MASTERMIND TRIPLE-SCORING SEARCH (TRADITIONAL TEXT INDEX)
+    # ⚡ ATLAS FUZZY SEARCH (ULTRA FAST + 3-TIER LOGIC + NUMBER PROTECTION)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
 
         try:
+            # 1. Basic Cleaning
             raw_query = query.strip().lower()
             clean_query = re.sub(r"(?i)\b(englsh|engls|engish|egnlish)\b", "english", raw_query)
             clean_query = re.sub(r"(?i)\b(hndi|hind|hni|hin)\b", "hindi", clean_query)
@@ -532,34 +513,50 @@ class MediaDB:
             clean_query = re.sub(r"(?i)\b(malyalam|malaylam|malyalm|malalam|mal)\b", "malayalam", clean_query)
             clean_query = re.sub(r"(?i)\b(kanada|kanda|kannad|kan)\b", "kannada", clean_query)
             
-            raw_words = clean_query.split()
-            if not raw_words: return []
-
-            stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to"}
-            text_search_words = [w for w in raw_words if w not in stop_words]
+            # 2. 🔥 DYNAMIC ATLAS FUZZY SEARCH
+            should_clauses = []
             
-            expanded_text_words = []
-            for w in text_search_words:
-                expanded_text_words.append(w)
-                if w.endswith('s') and len(w) > 3 and not w.endswith('ss'):
-                    expanded_text_words.append(w[:-1])
-                elif len(w) > 2 and not w.endswith('s'):
-                    expanded_text_words.append(w + 's')
+            for word in clean_query.split():
+                # 🛡️ Agar word me koi NUMBER hai (e.g. 2024, 1080p, 4k), toh 0 mistakes!
+                if any(char.isdigit() for char in word):
+                    edits = 0
+                # Word ke size ke hisab se edit limit set karna
+                elif len(word) <= 3:
+                    edits = 0  # KGF, PK, Bat -> No mistakes allowed
+                elif len(word) <= 5:
+                    edits = 1  # Thor, Hulk, Hindi -> 1 mistake allowed
+                else:
+                    edits = 2  # Pushpa, Avengers, Spdrman -> 2 mistakes allowed
+                
+                clause = {
+                    "text": {
+                        "query": word,
+                        "path": ["file_name", "search_text"]
+                    }
+                }
+                
+                # Agar edits 0 se zyada hain, tabhi fuzzy block add karenge
+                if edits > 0:
+                    clause["text"]["fuzzy"] = {
+                        "maxEdits": edits,
+                        "prefixLength": 1,
+                        "maxExpansions": 50
+                    }
                     
-            clean_query_for_text = " ".join(expanded_text_words) if expanded_text_words else " ".join(raw_words)
-            words = raw_words 
-            
-            if " " in clean_query_for_text:
-                smart_search_string = f'"{clean_query_for_text}" {clean_query_for_text}'
-            else:
-                smart_search_string = clean_query_for_text
+                should_clauses.append(clause)
 
-            meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series"}
-            title_words = [w for w in words if not (re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords)]
-            if not title_words: title_words = words 
+            search_stage = {
+                "$search": {
+                    "index": "default",
+                    "compound": {
+                        "should": should_clauses,
+                        "minimumShouldMatch": 1
+                    }
+                }
+            }
 
-            match_filters = {"$text": {"$search": smart_search_string}}
-
+            # 3. EXTRA FILTERS STAGE (Language, Quality, Year, etc.)
+            match_filters = {}
             if file_type and file_type != "none": match_filters["file_type"] = "video" if file_type.lower() == "video" else "document"
             if lang and lang != "none":
                 pattern = LANG_MAP.get(lang, lang)
@@ -575,53 +572,32 @@ class MediaDB:
                 elif size_range == "1gb-2gb": match_filters["file_size"] = {"$gte": GB_1, "$lt": GB_2}
                 elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
-            match_conditions = [0] 
-            alias_map = {"hindi": r"(hindi|hin)", "english": r"(english|eng)", "tamil": r"(tamil|tam)", "telugu": r"(telugu|tel)", "malayalam": r"(malayalam|mal)", "kannada": r"(kannada|kan)", "dual": r"(dual|multi)", "multi": r"(dual|multi)"}
+            # 4. PIPELINE BUILDER
+            pipeline = [search_stage]
             
-            safe_raw_query = re.escape(clean_query)
-            safe_title_phrase = re.escape(" ".join(title_words))
-            safe_first_word = re.escape(title_words[0]) if title_words else ""
+            if match_filters:
+                pipeline.append({"$match": match_filters})
 
-            match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{safe_raw_query}\b", "options": "i"}}, 5000, 0]})
-            if safe_title_phrase and safe_title_phrase != safe_raw_query:
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"\b{safe_title_phrase}\b", "options": "i"}}, 1000, 0]})
-            if safe_first_word:
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": rf"^[\W_]*{safe_first_word}\b", "options": "i"}}, 500, 0]})
-
-            for w in words[:5]: 
-                is_lang = w in ["hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "english", "dual", "multi", "punjabi", "marathi"]
-                is_meta = re.match(r"^(19|20)\d{2}$", w) or w in meta_keywords
-                
-                if w in alias_map:
-                    safe_w_regex = rf"\b{alias_map[w]}\b"
-                else:
-                    base = w[:-1] if (w.endswith('s') and len(w) > 3 and not w.endswith('ss')) else w
-                    safe_w_regex = rf"\b{re.escape(base)}s?\b"
-                
-                name_weight = 300 if is_lang else (20 if is_meta else 100)
-                text_weight = 50 if is_lang else (5 if is_meta else 20)
-                
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$file_name", ""]}, "regex": safe_w_regex, "options": "i"}}, name_weight, 0]})
-                match_conditions.append({"$cond": [{"$regexMatch": {"input": {"$ifNull": ["$search_text", ""]}, "regex": safe_w_regex, "options": "i"}}, text_weight, 0]})
-
-            pipeline = [
-                {"$match": match_filters},
-                {"$project": {
+            # Data extract karna aur Atlas Search ka asli score nikalna
+            pipeline.append({
+                "$project": {
                     "file_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
-                    "year": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1, "score": {"$meta": "textScore"},
+                    "year": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1, 
+                    "score": {"$meta": "searchScore"}, 
                     "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}
-                }},
-                {"$addFields": {"custom_score": {"$add": match_conditions}}}
-            ]
+                }
+            })
 
+            # 5. SORTING
             if sort == "new": pipeline.append({"$sort": {"_id": -1}}) 
             elif sort == "old": pipeline.append({"$sort": {"_id": 1}}) 
             elif sort == "large": pipeline.append({"$sort": {"file_size": -1}}) 
             elif sort == "small": pipeline.append({"$sort": {"file_size": 1}}) 
-            else: pipeline.append({"$sort": {"score": -1, "custom_score": -1, "name_length": 1, "_id": -1}}) 
+            else: pipeline.append({"$sort": {"score": -1, "name_length": 1, "_id": -1}}) 
 
             pipeline.append({"$limit": 100}) 
             
+            # 6. PARALLEL DB FETCHING (Speed x3)
             async def fetch_db(collection, pipe):
                 try:
                     return await collection.aggregate(pipe).to_list(length=100)
@@ -640,21 +616,20 @@ class MediaDB:
             
             if not files: raise Exception("Fallback Search Triggered")
 
+            # 🔥 3-DB Merge Sort: Rank cross-database results by exact Atlas Score
+            files.sort(key=lambda x: x.get('score', 0), reverse=True)
+
+            return files[:100]
+
         except Exception as e:
+            # 7. SAFE FALLBACK (Broad 'OR' Logic with Button Filters)
             try:
-                # ✅ Fallback OR Block with SAFE Regex and All Button Filters
                 fallback_match = {}
+                words = clean_query.split()
                 fallback_or_clauses = []
-                alias_map = {"hindi": r"(hindi|hin)", "english": r"(english|eng)", "tamil": r"(tamil|tam)", "telugu": r"(telugu|tel)", "malayalam": r"(malayalam|mal)", "kannada": r"(kannada|kan)", "dual": r"(dual|multi)", "multi": r"(dual|multi)"}
                 
                 for tw in words:
-                    if tw in alias_map: 
-                        safe_tw = rf"\b{alias_map[tw]}\b"
-                    else:
-                        base = tw[:-1] if (tw.endswith('s') and len(tw) > 3 and not tw.endswith('ss')) else tw
-                        fuzzy_regex_word = ".?".join(list(re.escape(base)))
-                        safe_tw = rf"\b{fuzzy_regex_word}\w*\b"
-                        
+                    safe_tw = rf"\b{re.escape(tw)}\b"
                     fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})
                     fallback_or_clauses.append({"file_name": {"$regex": safe_tw, "$options": "i"}})
                     
@@ -670,7 +645,6 @@ class MediaDB:
                 if year and year != "none":
                     fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
                 if size_range and size_range != "none":
-                    MB_500, GB_1, GB_2 = 500*1024*1024, 1024*1024*1024, 2*1024*1024*1024
                     if size_range == "min500": fallback_match["file_size"] = {"$lt": MB_500}
                     elif size_range == "500-1gb": fallback_match["file_size"] = {"$gte": MB_500, "$lt": GB_1}
                     elif size_range == "1gb-2gb": fallback_match["file_size"] = {"$gte": GB_1, "$lt": GB_2}
@@ -682,15 +656,14 @@ class MediaDB:
                         "file_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
                         "year": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1,
                         "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}
-                    }},
-                    {"$addFields": {"custom_score": {"$add": match_conditions if 'match_conditions' in locals() else [0]}}}
+                    }}
                 ]
                 
                 if sort == "new": fallback_pipeline.append({"$sort": {"_id": -1}})
                 elif sort == "old": fallback_pipeline.append({"$sort": {"_id": 1}})
                 elif sort == "large": fallback_pipeline.append({"$sort": {"file_size": -1}})
                 elif sort == "small": fallback_pipeline.append({"$sort": {"file_size": 1}})
-                else: fallback_pipeline.append({"$sort": {"custom_score": -1, "name_length": 1, "_id": -1}})
+                else: fallback_pipeline.append({"$sort": {"name_length": 1, "_id": -1}})
 
                 fallback_pipeline.append({"$limit": 30})
                 
@@ -709,24 +682,14 @@ class MediaDB:
                 files = []
                 for res in fb_results:
                     files.extend(res)
+                
+                # 🔥 Fallback 3-DB Merge Sort: Sort results combined from all databases
+                files.sort(key=lambda x: x.get('name_length', 999))
+                
+                return files[:30]
                     
             except Exception as inner_e:
-                files = []
-
-        # 🔥 UNIFIED PYTHON RE-RANKING (Sorts across all 3 DBs automatically)
-        if files:
-            query_title = " ".join(title_words).lower() if 'title_words' in locals() else clean_query
-            for file in files:
-                fname = file.get('file_name', '').lower()
-                if query_title in fname:
-                    file['fuzzy_score'] = 1.0
-                else:
-                    file['fuzzy_score'] = difflib.SequenceMatcher(None, query_title, fname).ratio()
-            
-            files.sort(key=lambda x: (x.get('score', 0), x.get('custom_score', 0), x.get('fuzzy_score', 0)), reverse=True)
-            files = files[:100] 
-
-        return files
+                return []
 
     async def total_files_count(self): 
         count = await self.data_col1.count_documents({})

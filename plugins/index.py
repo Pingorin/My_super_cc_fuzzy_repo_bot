@@ -11,7 +11,7 @@ RUNNING_TASKS = {}
 # ==============================================================================
 # 🗑️ SMART DELETE MANAGER (Surgical Strike)
 # ==============================================================================
-@Client.on_message(filters.command("delete_all") & filters.user(ADMINS), group=-1)
+@Client.on_message(filters.command(["delete_all", "deleteall"]) & filters.user(ADMINS), group=-1)
 async def delete_database_handler(bot, message):
     buttons = []
     
@@ -43,7 +43,12 @@ async def ask_delete_handler(bot, query):
     ]]
     
     target_name = "ALL Databases" if db_choice == "all" else f"Database {db_choice}"
-    await query.message.edit_text(f"⚠️ **FINAL WARNING:**\nKya aap sach me **{target_name}** ka saara data delete karna chahte hain?\n\n*(Sirf data jayega, Search Indexes safe rahenge)*", reply_markup=InlineKeyboardMarkup(btn))
+    await query.message.edit_text(
+        f"⚠️ **FINAL WARNING:**\n"
+        f"Kya aap sach me **{target_name}** ka saara data delete karna chahte hain?\n\n"
+        f"*(Sirf data jayega, Search Indexes safe rahenge)*", 
+        reply_markup=InlineKeyboardMarkup(btn)
+    )
 
 @Client.on_callback_query(filters.regex(r"^confirm_delete_(.*)"))
 async def confirm_delete_handler(bot, query):
@@ -56,7 +61,9 @@ async def confirm_delete_handler(bot, query):
         if db_choice in ['1', 'all']:
             await Media.search_col1.delete_many({}) 
             await Media.data_col1.delete_many({})
-            await Media.counters.delete_many({})
+            # 🔥 COUNTER BUG FIXED: Reset counter to 0 instead of deleting
+            await Media.counters.update_many({}, {"$set": {"sequence_value": 0}})
+            
             await Media.search_cache.delete_many({})
             await Media.temp_searches.delete_many({})
         
@@ -102,7 +109,7 @@ async def step_two_forward(bot, message):
             INDEX_CACHE[user_id]['chat_id'] = message.forward_from_chat.id
             INDEX_CACHE[user_id]['last_msg_id'] = message.forward_from_message_id
             INDEX_CACHE[user_id]['state'] = 'waiting_skip'
-            await message.reply_text(f"✅ **Detected!** Last ID: `{message.forward_from_message_id}`\n\n**Step 2:** Skip Number bhejein (e.g. 0).")
+            await message.reply_text(f"✅ **Detected!** Last ID: `{message.forward_from_message_id}`\n\n**Step 2:** Skip Number bhejein (Agar shuru se karna hai toh `0` likhein).")
         else:
             await message.reply("❌ Direct Channel se forward karein.")
 
@@ -129,7 +136,7 @@ async def step_three_skip(bot, message):
 @Client.on_callback_query(filters.regex("^start_index"))
 async def start_index(bot, query):
     user_id = query.from_user.id
-    if user_id not in INDEX_CACHE: return await query.answer("Expired.", show_alert=True)
+    if user_id not in INDEX_CACHE: return await query.answer("Session Expired.", show_alert=True)
     
     data = INDEX_CACHE[user_id]
     del INDEX_CACHE[user_id]
@@ -158,7 +165,8 @@ async def start_index(bot, query):
             try:
                 msgs = await bot.get_messages(chat_id, ids_to_fetch)
             except FloodWait as e:
-                await asyncio.sleep(e.value)
+                # 🔥 FloodWait fix: API restrict hone par 1 extra second wait karega
+                await asyncio.sleep(e.value + 1)
                 continue
             except Exception as e:
                 await query.message.edit(f"❌ Error fetching: {e}")
@@ -168,7 +176,8 @@ async def start_index(bot, query):
             
             for m in msgs:
                 stats['total'] += 1
-                if not m or m.empty: continue
+                # 🔥 Empty Message fix: Purane deleted messages ko safetly ignore karega
+                if not m or getattr(m, "empty", False): continue
                 
                 media = m.document or m.video 
                 if media:
@@ -181,29 +190,33 @@ async def start_index(bot, query):
                 stats['saved'] += saved
                 stats['dup'] += dups
 
+            # 🔥 UI Update block ko try/except me dala taaki floodwait crash na kare
             try: 
                 msg_text = (
-                    f"🚀 **Ultra-Fast Indexing...**\n"
-                    f"📥 Scanned: {min(end, last_id)} / {last_id}\n"
-                    f"✅ **Saved:** {stats['saved']}\n"
-                    f"♻️ **Duplicates:** {stats['dup']}\n"
-                    f"🗑️ Skipped: {stats['skip']}"
+                    f"🚀 **Ultra-Fast Indexing...**\n\n"
+                    f"📥 Scanned: `{min(end, last_id)}` / `{last_id}`\n"
+                    f"✅ **Saved:** `{stats['saved']}`\n"
+                    f"♻️ **Duplicates:** `{stats['dup']}`\n"
+                    f"🗑️ Skipped: `{stats['skip']}`"
                 )
                 await query.message.edit(msg_text, reply_markup=cancel_btn)
-            except: pass
+            except FloodWait as e:
+                await asyncio.sleep(e.value + 1)
+            except Exception: pass
             
             current += BATCH_SIZE
+            await asyncio.sleep(0.5) # API safe delay
             
     except Exception as e:
         await query.message.reply(f"Error: {e}")
 
     if user_id in RUNNING_TASKS: del RUNNING_TASKS[user_id]
     
-    await query.message.edit(f"✅ **Complete!**\nTotal Saved: {stats['saved']}\nDuplicates: {stats['dup']}")
+    await query.message.edit(f"✅ **Complete!**\n\nTotal Saved: `{stats['saved']}`\nDuplicates: `{stats['dup']}`\nSkipped: `{stats['skip']}`")
 
 @Client.on_callback_query(filters.regex("^cancel_index"))
 async def cancel(bot, query):
     user_id = query.from_user.id
     if user_id in INDEX_CACHE: del INDEX_CACHE[user_id]
     if user_id in RUNNING_TASKS: del RUNNING_TASKS[user_id]
-    await query.message.edit("🛑 Stopped.")
+    await query.message.edit("🛑 Indexing ya Deletion process Cancelled.")

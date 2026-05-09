@@ -25,6 +25,9 @@ from plugins.auto_post import auto_post_scheduler
 # ✅ Naya TMDB Channel Auto Poster
 from plugins.auto_poster import start_auto_poster
 
+# ✅ Auto-Batching Engine (Live Indexing Queue)
+from plugins.live_index import flush_index_queue
+
 # Logging Setup
 logging.config.fileConfig('logging.conf')
 logging.getLogger().setLevel(logging.INFO)
@@ -146,6 +149,10 @@ class Bot(Client):
         # 🔥 TMDB Channel Poster Scheduler
         asyncio.create_task(start_auto_poster(self))
         print("🎬 TMDB Channel Auto Poster Started", flush=True)
+
+        # ⚡ NEW: Dynamic Turbo Auto-Batching Engine Started
+        asyncio.create_task(flush_index_queue())
+        print("⚡ Dynamic Turbo Batching Queue Started", flush=True)
         
         # ✅ FIX 2: START HEARTBEAT ENGINE HERE
         from plugins.commands import bot_b_heartbeat

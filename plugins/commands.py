@@ -1069,9 +1069,11 @@ async def stats_handler(client, message):
         
         # 🎨 Helper function to design DB Box
         def format_db_block(name, stats):
-            t_mb = stats['known_total'] / (1024*1024)
+            t_mb = stats['total'] / (1024*1024)
             m_mb = stats['main_data'] / (1024*1024)
             idx_mb = stats['basic_index'] / (1024*1024)
+            atlas_mb = stats['atlas_search'] / (1024*1024)
+            oth_mb = stats['other'] / (1024*1024)
             rem_mb = stats['remaining_512mb'] / (1024*1024)
             
             pct = (t_mb / 512.0) * 100
@@ -1080,13 +1082,13 @@ async def stats_handler(client, message):
             bar = "🟩" * fill + "⬜" * (10 - fill)
             
             blk = f"🗄 **{name}**\n"
-            blk += f"💽 **Known Used:** `{t_mb:.2f} MB` / `512 MB` ({pct:.2f}%)\n"
+            blk += f"💽 **Total Used:** `{t_mb:.2f} MB` / `512 MB` ({pct:.2f}%)\n"
             blk += f"[{bar}]\n"
             blk += f" ├ 📁 Main Files (Data): `{m_mb:.2f} MB`\n"
             blk += f" ├ 🗂 Basic Indexes: `{idx_mb:.2f} MB`\n"
-            blk += f" ├ 🔍 Atlas Search Index: `(Hidden by MongoDB)*`\n"
-            blk += f" ├ 📦 Other (Cache): `(Included in Data)`\n"
-            blk += f" └ 📉 Est. Remaining: `~{rem_mb:.2f} MB`\n\n"
+            blk += f" ├ 🔍 Atlas Search Index: `~{atlas_mb:.2f} MB`\n"
+            blk += f" ├ 📦 Other (Cache/Sys): `{oth_mb:.2f} MB`\n"
+            blk += f" └ 📉 Remaining Space: `{rem_mb:.2f} MB`\n\n"
             return blk
 
         # 🖨️ Print Available Databases
@@ -1095,8 +1097,7 @@ async def stats_handler(client, message):
         if db_stats.get('db3'): text += format_db_block("DATABASE 3", db_stats['db3'])
 
         overall_mb = db_stats['total_overall'] / (1024*1024)
-        text += f"🌐 **Total Known Cloud Storage Used:** `{overall_mb:.2f} MB`\n\n"
-        text += f"*⚠️ **Note:** MongoDB M0 Tier me 'Atlas Search Index' ka size code se fetch karna allow nahi karta. Uska exact MB check karne ke liye aapko MongoDB Atlas Dashboard dekhna padega.*"
+        text += f"🌐 **Total Cloud Storage Used:** `{overall_mb:.2f} MB`\n"
             
         await msg.edit(text)
         

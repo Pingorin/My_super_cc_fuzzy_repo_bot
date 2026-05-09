@@ -127,7 +127,7 @@ async def step_three_skip(bot, message):
             InlineKeyboardButton("🚀 FAST Start", callback_data="start_index"),
             InlineKeyboardButton("❌ Cancel", callback_data="cancel_index")
         ]]
-        await message.reply_text(f"📊 **Ready (Ultra Fast Mode)**\nTotal Files: {total}\n🎯 **Target:** `Database {active_db}`", reply_markup=InlineKeyboardMarkup(buttons))
+        await message.reply_text(f"📊 **Ready (Ultra Fast Mode)**\nTotal Files: {max(0, total)}\n🎯 **Target:** `Database {active_db}`", reply_markup=InlineKeyboardMarkup(buttons))
 
 @Client.on_callback_query(filters.regex("^start_index"))
 async def start_index(bot, query):
@@ -144,8 +144,9 @@ async def start_index(bot, query):
     last_id = data['last_msg_id']
     current = data['skip'] + 1
     
+    # 🔥 FIXED: Now starting counting from 0 properly, not from skip value!
     stats = {
-        'total': 0, 'saved': data['skip'], 'dup': 0, 'skip': 0
+        'total': 0, 'saved': 0, 'dup': 0, 'skip': 0
     }
     
     cancel_btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_index")]])
@@ -164,8 +165,14 @@ async def start_index(bot, query):
                 await asyncio.sleep(e.value + 1)
                 continue
             except Exception as e:
-                await query.message.edit(f"❌ Error fetching: {e}")
-                break
+                # 🔥 FIXED: True error reporting. Stops processing immediately.
+                await query.message.edit(
+                    f"❌ **Error Fetching Messages!**\n\n"
+                    f"**Reason:** Bot is channel me Admin nahi hai, ya ID invalid hai.\n"
+                    f"*(System Error: {e})*"
+                )
+                if user_id in RUNNING_TASKS: del RUNNING_TASKS[user_id]
+                return
 
             batch_tasks = [] 
             
@@ -189,7 +196,7 @@ async def start_index(bot, query):
                 msg_text = (
                     f"🚀 **Ultra-Fast Indexing...**\n\n"
                     f"📥 Scanned: `{min(end, last_id)}` / `{last_id}`\n"
-                    f"✅ **Saved:** `{stats['saved']}`\n"
+                    f"✅ **New Saved:** `{stats['saved']}`\n"
                     f"♻️ **Duplicates:** `{stats['dup']}`\n"
                     f"🗑️ Skipped: `{stats['skip']}`"
                 )
@@ -203,11 +210,11 @@ async def start_index(bot, query):
             await asyncio.sleep(0.5) # API safe delay
             
     except Exception as e:
-        await query.message.reply(f"Error: {e}")
+        await query.message.reply(f"❌ Error: {e}")
 
     if user_id in RUNNING_TASKS: del RUNNING_TASKS[user_id]
     
-    await query.message.edit(f"✅ **Complete!**\n\nTotal Saved: `{stats['saved']}`\nDuplicates: `{stats['dup']}`\nSkipped: `{stats['skip']}`")
+    await query.message.edit(f"✅ **Complete!**\n\nNayi Files Saved: `{stats['saved']}`\nDuplicates: `{stats['dup']}`\nSkipped: `{stats['skip']}`")
 
 @Client.on_callback_query(filters.regex("^cancel_index"))
 async def cancel(bot, query):

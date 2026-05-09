@@ -6,7 +6,7 @@ import html
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError
-from pymongo import ReturnDocument, UpdateOne # 🔥 UPDATEONE ADDED FOR BULK UPDATE
+from pymongo import ReturnDocument, UpdateOne 
 import info 
 from info import DATABASE_URI, DATABASE_NAME
 
@@ -718,65 +718,91 @@ class MediaDB:
             return total
         except: return 0
 
+    # ==================================================================
+    # 📊 SMART DATABASE STATS (ATLAS SEARCH ESTIMATOR INCLUDED)
+    # ==================================================================
     async def get_detailed_stats(self):
         stats_dict = {"db1": None, "db2": None, "db3": None, "total_overall": 0}
         total_overall = 0
+        LIMIT_512MB = 512 * 1024 * 1024  # 512 MB in Bytes
+
+        # Helper function for exact collection stats
+        async def get_col_stats(collection):
+            try:
+                cursor = collection.aggregate([{"$collStats": {"storageStats": {}}}])
+                stats = await cursor.to_list(length=1)
+                if stats:
+                    s = stats[0].get("storageStats", {})
+                    return s.get("storageSize", 0), s.get("totalIndexSize", 0)
+            except: pass
+            return 0, 0
+
         try:
+            # ================= DB 1 STATS =================
             db_stats1 = await self.db1.command("dbstats")
-            t1 = db_stats1.get('storageSize', 0) + db_stats1.get('totalIndexSize', 0)
+            t1 = db_stats1.get('storageSize', 0) + db_stats1.get('indexSize', 0)
             
-            try:
-                cursor1 = self.search_col1.aggregate([{"$collStats": {"storageStats": {}}}])
-                stats_list1 = await cursor1.to_list(length=1)
-                tx1 = stats_list1[0].get("storageStats", {}).get("indexSizes", {}).get("weighted_movie_search", 0) if stats_list1 else 0
-            except Exception as e:
-                tx1 = 0
+            # Extract precise data and basic index sizes
+            data_storage1, data_idx1 = await get_col_stats(self.data_col1)
+            search_storage1, search_idx1 = await get_col_stats(self.search_col1)
+            cache_storage1, cache_idx1 = await get_col_stats(self.search_cache)
+            temp_storage1, temp_idx1 = await get_col_stats(self.temp_searches)
 
-            try:
-                cursor_cache1 = self.search_cache.aggregate([{"$collStats": {"storageStats": {}}}])
-                c1_list = await cursor_cache1.to_list(length=1)
-                if c1_list:
-                    ss = c1_list[0].get("storageStats", {})
-                    cache1 = ss.get('storageSize', 0) + ss.get('totalIndexSize', 0)
-                else: cache1 = 0
-            except: cache1 = 0
+            main_data1 = data_storage1 + search_storage1
+            basic_index1 = data_idx1 + search_idx1
+            other_cache1 = cache_storage1 + cache_idx1 + temp_storage1 + temp_idx1
 
-            try:
-                cursor_temp1 = self.temp_searches.aggregate([{"$collStats": {"storageStats": {}}}])
-                ts1_list = await cursor_temp1.to_list(length=1)
-                if ts1_list:
-                    ss = ts1_list[0].get("storageStats", {})
-                    temp1 = ss.get('storageSize', 0) + ss.get('totalIndexSize', 0)
-                else: temp1 = 0
-            except: temp1 = 0
+            # Atlas Search Index (Math Calculation: Total - Data - Indexes - Cache)
+            unaccounted1 = t1 - (main_data1 + basic_index1 + other_cache1)
+            atlas_size1 = max(unaccounted1 * 0.90, 0) # Assuming 90% of unaccounted is Atlas
+            system_other1 = max(unaccounted1 * 0.10, 0) # 10% is MongoDB system overhead
 
-            cache_total = cache1 + temp1
-            main1 = t1 - (tx1 + cache_total)
-            stats_dict["db1"] = {"total": t1, "text": tx1, "cache": cache_total, "main": max(main1, 0)}
+            stats_dict["db1"] = {
+                "total": t1,
+                "main_data": main_data1,
+                "basic_index": basic_index1,
+                "atlas_search": atlas_size1,
+                "other": other_cache1 + system_other1,
+                "remaining_512mb": max(LIMIT_512MB - t1, 0)
+            }
             total_overall += t1
 
+            # ================= DB 2 STATS =================
             if self.has_db2:
                 db_stats2 = await self.db2.command("dbstats")
-                t2 = db_stats2.get('storageSize', 0) + db_stats2.get('totalIndexSize', 0)
-                try:
-                    cursor2 = self.search_col2.aggregate([{"$collStats": {"storageStats": {}}}])
-                    stats_list2 = await cursor2.to_list(length=1)
-                    tx2 = stats_list2[0].get("storageStats", {}).get("indexSizes", {}).get("weighted_movie_search", 0) if stats_list2 else 0
-                except: tx2 = 0
-                main2 = t2 - tx2
-                stats_dict["db2"] = {"total": t2, "text": tx2, "main": max(main2, 0)}
+                t2 = db_stats2.get('storageSize', 0) + db_stats2.get('indexSize', 0)
+                
+                data_storage2, data_idx2 = await get_col_stats(self.data_col2)
+                search_storage2, search_idx2 = await get_col_stats(self.search_col2)
+                
+                main_data2 = data_storage2 + search_storage2
+                basic_index2 = data_idx2 + search_idx2
+                unaccounted2 = t2 - (main_data2 + basic_index2)
+                
+                stats_dict["db2"] = {
+                    "total": t2, "main_data": main_data2, "basic_index": basic_index2,
+                    "atlas_search": max(unaccounted2 * 0.95, 0), "other": max(unaccounted2 * 0.05, 0),
+                    "remaining_512mb": max(LIMIT_512MB - t2, 0)
+                }
                 total_overall += t2
 
+            # ================= DB 3 STATS =================
             if self.has_db3:
                 db_stats3 = await self.db3.command("dbstats")
-                t3 = db_stats3.get('storageSize', 0) + db_stats3.get('totalIndexSize', 0)
-                try:
-                    cursor3 = self.search_col3.aggregate([{"$collStats": {"storageStats": {}}}])
-                    stats_list3 = await cursor3.to_list(length=1)
-                    tx3 = stats_list3[0].get("storageStats", {}).get("indexSizes", {}).get("weighted_movie_search", 0) if stats_list3 else 0
-                except: tx3 = 0
-                main3 = t3 - tx3
-                stats_dict["db3"] = {"total": t3, "text": tx3, "main": max(main3, 0)}
+                t3 = db_stats3.get('storageSize', 0) + db_stats3.get('indexSize', 0)
+                
+                data_storage3, data_idx3 = await get_col_stats(self.data_col3)
+                search_storage3, search_idx3 = await get_col_stats(self.search_col3)
+                
+                main_data3 = data_storage3 + search_storage3
+                basic_index3 = data_idx3 + search_idx3
+                unaccounted3 = t3 - (main_data3 + basic_index3)
+
+                stats_dict["db3"] = {
+                    "total": t3, "main_data": main_data3, "basic_index": basic_index3,
+                    "atlas_search": max(unaccounted3 * 0.95, 0), "other": max(unaccounted3 * 0.05, 0),
+                    "remaining_512mb": max(LIMIT_512MB - t3, 0)
+                }
                 total_overall += t3
 
             stats_dict["total_overall"] = total_overall
@@ -784,7 +810,7 @@ class MediaDB:
             
         except Exception as e:
             print(f"Overall Stats Error: {e}")
-            return {"total_size": 0, "text_index_size": 0, "cache_size": 0, "other_size": 0}
+            return None
 
     async def save_search_results(self, query, files, chat_id):
         unique_id = str(uuid.uuid4())[:8]

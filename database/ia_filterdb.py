@@ -6,7 +6,7 @@ import html
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError
-from pymongo import ReturnDocument
+from pymongo import ReturnDocument, UpdateOne # 🔥 UPDATEONE ADDED FOR BULK UPDATE
 import info 
 from info import DATABASE_URI, DATABASE_NAME
 
@@ -69,28 +69,23 @@ class MediaDB:
 
     async def ensure_indexes(self):
         try:
-            # 🔥 TTL BUG FIX: Purane time wale rules ko pehle hatayenge taaki clash na ho
             try: await self.search_cache.drop_index("created_at_1")
             except Exception: pass
             try: await self.temp_searches.drop_index("created_at_1")
             except Exception: pass
 
-            # DB 1 Indexes (Faltu TEXT, quality, languages hata diye)
             await self.search_col1.create_index("link_id")
-            await self.data_col1.create_index("file_id") # ✅ Fast Scan Index
+            await self.data_col1.create_index("file_id") 
             await self.data_col1.create_index("file_unique_id", unique=True)
 
-            # Naye time wale rules banayenge
             await self.search_cache.create_index("created_at", expireAfterSeconds=3600)
             await self.temp_searches.create_index("created_at", expireAfterSeconds=43200)
             
-            # 🔥 DB 2 Indexes
             if self.has_db2:
                 await self.search_col2.create_index("link_id")
                 await self.data_col2.create_index("file_id")
                 await self.data_col2.create_index("file_unique_id", unique=True)
 
-            # 🔥 DB 3 Indexes
             if self.has_db3:
                 await self.search_col3.create_index("link_id")
                 await self.data_col3.create_index("file_id")
@@ -100,7 +95,6 @@ class MediaDB:
         except Exception as e:
             print(f"❌ Error Creating Indexes: {e}")
 
-    # 🔥 UNIQUE COUNTER (Sabhi files ko ek line me rakhega)
     async def get_next_sequence_value(self, sequence_name, increment=1):
         try:
             doc = await self.counters.find_one_and_update(
@@ -147,7 +141,6 @@ class MediaDB:
         except Exception as e:
             return None
 
-    # 🔥 MANUAL OVERRIDE (Set Active DB) 🔥
     async def get_active_index_db(self):
         try:
             doc = await self.bot_settings.find_one({"_id": "active_db"})
@@ -239,7 +232,6 @@ class MediaDB:
 
         unique_ids = [media.file_unique_id for media, msg in unique_batch_items]
         
-        # 🔥 SMART UPDATE MAPPING
         existing_map = {}
         link_ids_to_check = []
         
@@ -291,8 +283,12 @@ class MediaDB:
                 start_sequence = end_sequence - count + 1
         
         data_docs, search_docs = [], []
-        current_id = start_sequence
         
+        # 🔥 THE BULK UPDATE TRUCK (Queues for batch updating)
+        update_ops_data = {1: [], 2: [], 3: []}
+        update_ops_search = {1: [], 2: [], 3: []}
+        
+        current_id = start_sequence
         all_processing_items = [("new", m, msg, None) for m, msg in new_items] + [("update", m, msg, ex) for m, msg, ex in update_items]
         
         for process_type, media, message, ex_info in all_processing_items:
@@ -408,13 +404,6 @@ class MediaDB:
                 old_text_length = old_text_lengths.get(link_id, 0)
                 
                 if new_text_length > old_text_length:
-                    if db_num == 3 and self.has_db3:
-                        active_data, active_search = self.data_col3, self.search_col3
-                    elif db_num == 2 and self.has_db2:
-                        active_data, active_search = self.data_col2, self.search_col2
-                    else:
-                        active_data, active_search = self.data_col1, self.search_col1
-                        
                     data_update = {
                         'msg_id': message.id, 
                         'chat_id': message.chat.id, 
@@ -433,13 +422,14 @@ class MediaDB:
                     search_update['languages'] = parsed_meta['languages'] if parsed_meta['languages'] else []
                     search_update['year'] = parsed_meta['year'] if parsed_meta['year'] else []
 
-                    try:
-                        asyncio.create_task(active_data.update_one({'_id': link_id}, {'$set': data_update}))
-                        asyncio.create_task(active_search.update_one({'link_id': link_id}, {'$set': search_update}))
-                    except Exception: pass
+                    # 🔥 BULK UPDATE TRUCK ME DATA LOAD KARNA (Instead of executing 190 times)
+                    update_ops_data[db_num].append(UpdateOne({'_id': link_id}, {'$set': data_update}))
+                    update_ops_search[db_num].append(UpdateOne({'link_id': link_id}, {'$set': search_update}))
 
+        # 🚀 FINAL EXECUTION (Batches unload to MongoDB)
         saved_count = 0
         
+        # 1. NEW DATA BATCH WRITE
         if data_docs or search_docs:
             active_db_num = await self.get_active_index_db()
             
@@ -464,6 +454,24 @@ class MediaDB:
                 try: await active_search_col.insert_many(search_docs, ordered=False)
                 except BulkWriteError: pass
                 except Exception: pass
+                
+        # 2. 🔥 UPDATE DATA BULK WRITE (Zero Overload on DB)
+        try:
+            if update_ops_data[1]: await self.data_col1.bulk_write(update_ops_data[1], ordered=False)
+            if update_ops_search[1]: await self.search_col1.bulk_write(update_ops_search[1], ordered=False)
+        except Exception: pass
+        
+        if self.has_db2:
+            try:
+                if update_ops_data[2]: await self.data_col2.bulk_write(update_ops_data[2], ordered=False)
+                if update_ops_search[2]: await self.search_col2.bulk_write(update_ops_search[2], ordered=False)
+            except Exception: pass
+            
+        if self.has_db3:
+            try:
+                if update_ops_data[3]: await self.data_col3.bulk_write(update_ops_data[3], ordered=False)
+                if update_ops_search[3]: await self.search_col3.bulk_write(update_ops_search[3], ordered=False)
+            except Exception: pass
                 
         return saved_count, pre_duplicate_count
 

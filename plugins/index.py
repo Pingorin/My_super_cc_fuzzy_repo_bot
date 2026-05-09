@@ -18,11 +18,11 @@ async def delete_database_handler(bot, message):
     # DB 1 Button (Master)
     buttons.append([InlineKeyboardButton("🗑️ Delete DB 1 (Master + Cache)", callback_data="ask_delete_1")])
     
-    # DB 2 Button (Agar info.py me link hai)
+    # DB 2 Button 
     if Media.has_db2:
         buttons.append([InlineKeyboardButton("🗑️ Delete DB 2", callback_data="ask_delete_2")])
         
-    # DB 3 Button (Agar info.py me link hai)
+    # DB 3 Button 
     if Media.has_db3:
         buttons.append([InlineKeyboardButton("🗑️ Delete DB 3", callback_data="ask_delete_3")])
     
@@ -46,7 +46,7 @@ async def ask_delete_handler(bot, query):
     await query.message.edit_text(
         f"⚠️ **FINAL WARNING:**\n"
         f"Kya aap sach me **{target_name}** ka saara data delete karna chahte hain?\n\n"
-        f"*(Sirf data jayega, Search Indexes safe rahenge)*", 
+        f"*(Sirf movies aur links jayenge, Search Indexes aur Settings safe rahenge)*", 
         reply_markup=InlineKeyboardMarkup(btn)
     )
 
@@ -61,7 +61,7 @@ async def confirm_delete_handler(bot, query):
         if db_choice in ['1', 'all']:
             await Media.search_col1.delete_many({}) 
             await Media.data_col1.delete_many({})
-            # 🔥 COUNTER BUG FIXED: Reset counter to 0 instead of deleting
+            # 🔥 COUNTER RESET: Zero se wapas start karne ke liye
             await Media.counters.update_many({}, {"$set": {"sequence_value": 0}})
             
             await Media.search_cache.delete_many({})
@@ -77,16 +77,13 @@ async def confirm_delete_handler(bot, query):
             await Media.search_col3.delete_many({})
             await Media.data_col3.delete_many({})
         
-        # Indexes safe rakhne ke liye refresh
-        await Media.ensure_indexes()
-        
         # Agar current Active DB hi uda diya, toh wapas DB 1 par set kar do
         current_active = await Media.get_active_index_db()
         if db_choice == 'all' or str(current_active) == db_choice:
             await Media.set_active_index_db(1)
         
         target_name = "All Databases" if db_choice == "all" else f"Database {db_choice}"
-        await query.message.edit_text(f"✅ **{target_name} Reset Successfully!**\nAap naya data index kar sakte hain.")
+        await query.message.edit_text(f"✅ **{target_name} Reset Successfully!**\nDatabase ekdum fresh ho chuka hai.")
     except Exception as e:
         await query.message.edit_text(f"❌ Error: {e}")
 
@@ -124,7 +121,6 @@ async def step_three_skip(bot, message):
         data = INDEX_CACHE[user_id]
         total = data['last_msg_id'] - skip
         
-        # Ye check karega ki kis DB me index hone wala hai
         active_db = await Media.get_active_index_db()
         
         buttons = [[
@@ -165,7 +161,6 @@ async def start_index(bot, query):
             try:
                 msgs = await bot.get_messages(chat_id, ids_to_fetch)
             except FloodWait as e:
-                # 🔥 FloodWait fix: API restrict hone par 1 extra second wait karega
                 await asyncio.sleep(e.value + 1)
                 continue
             except Exception as e:
@@ -176,7 +171,6 @@ async def start_index(bot, query):
             
             for m in msgs:
                 stats['total'] += 1
-                # 🔥 Empty Message fix: Purane deleted messages ko safetly ignore karega
                 if not m or getattr(m, "empty", False): continue
                 
                 media = m.document or m.video 
@@ -190,7 +184,7 @@ async def start_index(bot, query):
                 stats['saved'] += saved
                 stats['dup'] += dups
 
-            # 🔥 UI Update block ko try/except me dala taaki floodwait crash na kare
+            # 🔥 FloodWait Safe UI Update
             try: 
                 msg_text = (
                     f"🚀 **Ultra-Fast Indexing...**\n\n"
@@ -202,7 +196,8 @@ async def start_index(bot, query):
                 await query.message.edit(msg_text, reply_markup=cancel_btn)
             except FloodWait as e:
                 await asyncio.sleep(e.value + 1)
-            except Exception: pass
+            except Exception: 
+                pass
             
             current += BATCH_SIZE
             await asyncio.sleep(0.5) # API safe delay

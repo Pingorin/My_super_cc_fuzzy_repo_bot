@@ -196,6 +196,7 @@ class MediaDB:
         cleaned_title = text
         metadata = {"quality": set(), "languages": set(), "year": set()}
 
+        # 1. Quality Extraction
         res_pattern = r"(?i)\b(480p|720p|1080p|2160p|4k|uhd)\b"
         for m in re.finditer(res_pattern, cleaned_title):
             val = m.group(1).lower()
@@ -203,18 +204,34 @@ class MediaDB:
             metadata['quality'].add(val)
         cleaned_title = re.sub(res_pattern, "", cleaned_title)
 
+        # 2. 🔥 SMART LANGUAGE EXTRACTION (ALL LANGUAGES ADDED)
         lang_map = {
-            'hin': 'Hindi', 'hindi': 'Hindi', 'tam': 'Tamil', 'tamil': 'Tamil', 'tel': 'Telugu', 'telugu': 'Telugu',
-            'mal': 'Malayalam', 'malayalam': 'Malayalam', 'kan': 'Kannada', 'kannada': 'Kannada', 'eng': 'English', 'english': 'English',
+            'hin': 'Hindi', 'hindi': 'Hindi', 'hi': 'Hindi',
+            'tam': 'Tamil', 'tamil': 'Tamil', 'ta': 'Tamil',
+            'tel': 'Telugu', 'telugu': 'Telugu', 'te': 'Telugu',
+            'mal': 'Malayalam', 'malayalam': 'Malayalam', 'ml': 'Malayalam',
+            'kan': 'Kannada', 'kannada': 'Kannada', 'kn': 'Kannada',
+            'eng': 'English', 'english': 'English', 'en': 'English',
+            'ben': 'Bengali', 'bengali': 'Bengali', 'bn': 'Bengali',
+            'pun': 'Punjabi', 'punjabi': 'Punjabi', 'pa': 'Punjabi',
+            'mar': 'Marathi', 'marathi': 'Marathi', 'mr': 'Marathi',
+            'guj': 'Gujarati', 'gujarati': 'Gujarati', 'gu': 'Gujarati',
+            'urdu': 'Urdu', 'ur': 'Urdu',
             'multi': 'Multi Audio', 'dual': 'Dual Audio'
         }
-        lang_pattern = r"(?i)\b(hindi|hin|tamil|tam|telugu|tel|malayalam|mal|kannada|kan|english|eng|multi[\s\-]?audio|dual[\s\-]?audio)\b"
+        
+        # Extended Regex for all common Indian & International languages
+        lang_pattern = r"(?i)\b(hindi|hin|tamil|tam|telugu|tel|malayalam|mal|kannada|kan|english|eng|bengali|ben|punjabi|pun|marathi|mar|gujarati|guj|urdu|ur|multi[\s\-]?audio|dual[\s\-]?audio)\b"
+        
         for m in re.finditer(lang_pattern, cleaned_title):
-            val = m.group(1).lower().replace('-', ' ').replace('audio', '').strip()
-            for key, mapped in lang_map.items():
-                if val in mapped.lower().split('|'): metadata['languages'].add(key)
+            raw_val = m.group(1).lower().replace('-', ' ').replace('audio', '').strip()
+            standard_lang = lang_map.get(raw_val)
+            if standard_lang:
+                metadata['languages'].add(standard_lang)
+                
         cleaned_title = re.sub(lang_pattern, "", cleaned_title)
 
+        # 3. Year Extraction
         year_pattern = r"\b(19\d{2}|20\d{2})\b"
         for m in re.finditer(year_pattern, cleaned_title): metadata['year'].add(m.group(1))
         

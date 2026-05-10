@@ -1072,8 +1072,6 @@ async def stats_handler(client, message):
             t_mb = stats['total'] / (1024*1024)
             m_mb = stats['main_data'] / (1024*1024)
             idx_mb = stats['basic_index'] / (1024*1024)
-            atlas_mb = stats['atlas_search'] / (1024*1024)
-            oth_mb = stats['other'] / (1024*1024)
             rem_mb = stats['remaining_512mb'] / (1024*1024)
             
             pct = (t_mb / 512.0) * 100
@@ -1084,11 +1082,10 @@ async def stats_handler(client, message):
             blk = f"🗄 **{name}**\n"
             blk += f"💽 **Total Used:** `{t_mb:.2f} MB` / `512 MB` ({pct:.2f}%)\n"
             blk += f"[{bar}]\n"
-            blk += f" ├ 📁 Main Files (Data): `{m_mb:.2f} MB`\n"
+            blk += f" ├ 📁 Main Files (Uncompressed): `{m_mb:.2f} MB`\n"
             blk += f" ├ 🗂 Basic Indexes: `{idx_mb:.2f} MB`\n"
-            blk += f" ├ 🔍 Atlas Search Index: `~{atlas_mb:.2f} MB`\n"
-            blk += f" ├ 📦 Other (Cache/Sys): `{oth_mb:.2f} MB`\n"
-            blk += f" └ 📉 Remaining Space: `{rem_mb:.2f} MB`\n\n"
+            blk += f" ├ 🔍 Atlas Search Index: `(Check Dashboard)*`\n"
+            blk += f" └ 📉 Remaining Limit: `{rem_mb:.2f} MB`\n\n"
             return blk
 
         # 🖨️ Print Available Databases
@@ -1097,7 +1094,8 @@ async def stats_handler(client, message):
         if db_stats.get('db3'): text += format_db_block("DATABASE 3", db_stats['db3'])
 
         overall_mb = db_stats['total_overall'] / (1024*1024)
-        text += f"🌐 **Total Cloud Storage Used:** `{overall_mb:.2f} MB`\n"
+        text += f"🌐 **Total Base Storage Used:** `{overall_mb:.2f} MB`\n\n"
+        text += f"*⚠️ **Note:** MongoDB PyMongo code se Atlas Search ka exact size fetch nahi kar sakte. Uski true limit Website (Dashboard) par hi milegi.*"
             
         await msg.edit(text)
         

@@ -204,24 +204,24 @@ class MediaDB:
             metadata['quality'].add(val)
         cleaned_title = re.sub(res_pattern, "", cleaned_title)
 
-        # 2. 🔥 SMART LANGUAGE EXTRACTION (ALL LANGUAGES ADDED)
+        # 2. 🔥 SMART LANGUAGE EXTRACTION (Safe 3-Letter Codes Only)
         lang_map = {
-            'hin': 'Hindi', 'hindi': 'Hindi', 'hi': 'Hindi',
-            'tam': 'Tamil', 'tamil': 'Tamil', 'ta': 'Tamil',
-            'tel': 'Telugu', 'telugu': 'Telugu', 'te': 'Telugu',
-            'mal': 'Malayalam', 'malayalam': 'Malayalam', 'ml': 'Malayalam',
-            'kan': 'Kannada', 'kannada': 'Kannada', 'kn': 'Kannada',
-            'eng': 'English', 'english': 'English', 'en': 'English',
-            'ben': 'Bengali', 'bengali': 'Bengali', 'bn': 'Bengali',
-            'pun': 'Punjabi', 'punjabi': 'Punjabi', 'pa': 'Punjabi',
-            'mar': 'Marathi', 'marathi': 'Marathi', 'mr': 'Marathi',
-            'guj': 'Gujarati', 'gujarati': 'Gujarati', 'gu': 'Gujarati',
-            'urdu': 'Urdu', 'ur': 'Urdu',
+            'hin': 'Hindi', 'hindi': 'Hindi',
+            'tam': 'Tamil', 'tamil': 'Tamil',
+            'tel': 'Telugu', 'telugu': 'Telugu',
+            'mal': 'Malayalam', 'malayalam': 'Malayalam',
+            'kan': 'Kannada', 'kannada': 'Kannada',
+            'eng': 'English', 'english': 'English',
+            'ben': 'Bengali', 'bengali': 'Bengali',
+            'pun': 'Punjabi', 'punjabi': 'Punjabi',
+            'mar': 'Marathi', 'marathi': 'Marathi',
+            'guj': 'Gujarati', 'gujarati': 'Gujarati',
+            'urdu': 'Urdu',
             'multi': 'Multi Audio', 'dual': 'Dual Audio'
         }
         
-        # Extended Regex for all common Indian & International languages
-        lang_pattern = r"(?i)\b(hindi|hin|tamil|tam|telugu|tel|malayalam|mal|kannada|kan|english|eng|bengali|ben|punjabi|pun|marathi|mar|gujarati|guj|urdu|ur|multi[\s\-]?audio|dual[\s\-]?audio)\b"
+        # 🛑 Regex se saare 2-letter codes (hi, en, ta) hata diye gaye hain
+        lang_pattern = r"(?i)\b(hindi|hin|tamil|tam|telugu|tel|malayalam|mal|kannada|kan|english|eng|bengali|ben|punjabi|pun|marathi|mar|gujarati|guj|urdu|multi[\s\-]?audio|dual[\s\-]?audio)\b"
         
         for m in re.finditer(lang_pattern, cleaned_title):
             raw_val = m.group(1).lower().replace('-', ' ').replace('audio', '').strip()

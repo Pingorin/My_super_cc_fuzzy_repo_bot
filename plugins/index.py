@@ -218,7 +218,11 @@ async def start_index(bot, query):
 
     if user_id in RUNNING_TASKS: del RUNNING_TASKS[user_id]
     
+    # 1. Edit the original message with final stats
     await query.message.edit(f"✅ **Complete!**\n\nNayi Files Saved: `{stats['saved']}`\nDuplicates: `{stats['dup']}`\nSkipped: `{stats['skip']}`")
+    
+    # 2. Send a brand new message immediately after
+    await query.message.reply_text("indexing complete ✅👍")
 
 @Client.on_callback_query(filters.regex("^cancel_index"))
 async def cancel(bot, query):

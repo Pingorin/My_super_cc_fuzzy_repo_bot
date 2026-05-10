@@ -726,43 +726,20 @@ class MediaDB:
         total_overall = 0
         LIMIT_512MB = 512 * 1024 * 1024  # 512 MB in Bytes
 
-        # Helper function for exact collection stats
-        async def get_col_stats(collection):
-            try:
-                cursor = collection.aggregate([{"$collStats": {"storageStats": {}}}])
-                stats = await cursor.to_list(length=1)
-                if stats:
-                    s = stats[0].get("storageStats", {})
-                    return s.get("storageSize", 0), s.get("totalIndexSize", 0)
-            except: pass
-            return 0, 0
-
         try:
             # ================= DB 1 STATS =================
             db_stats1 = await self.db1.command("dbstats")
-            t1 = db_stats1.get('storageSize', 0) + db_stats1.get('indexSize', 0)
+            # 🔥 FIX: Fetching Logical 'dataSize' (104 MB) instead of compressed 'storageSize' (35 MB)
+            data_size1 = db_stats1.get('dataSize', 0) 
+            index_size1 = db_stats1.get('indexSize', 0) 
             
-            # Extract precise data and basic index sizes
-            data_storage1, data_idx1 = await get_col_stats(self.data_col1)
-            search_storage1, search_idx1 = await get_col_stats(self.search_col1)
-            cache_storage1, cache_idx1 = await get_col_stats(self.search_cache)
-            temp_storage1, temp_idx1 = await get_col_stats(self.temp_searches)
-
-            main_data1 = data_storage1 + search_storage1
-            basic_index1 = data_idx1 + search_idx1
-            other_cache1 = cache_storage1 + cache_idx1 + temp_storage1 + temp_idx1
-
-            # Atlas Search Index (Math Calculation: Total - Data - Indexes - Cache)
-            unaccounted1 = t1 - (main_data1 + basic_index1 + other_cache1)
-            atlas_size1 = max(unaccounted1 * 0.90, 0) # Assuming 90% of unaccounted is Atlas
-            system_other1 = max(unaccounted1 * 0.10, 0) # 10% is MongoDB system overhead
+            # MongoDB Atlas M0 calculates limit based roughly on Data + Indexes
+            t1 = data_size1 + index_size1
 
             stats_dict["db1"] = {
                 "total": t1,
-                "main_data": main_data1,
-                "basic_index": basic_index1,
-                "atlas_search": atlas_size1,
-                "other": other_cache1 + system_other1,
+                "main_data": data_size1,
+                "basic_index": index_size1,
                 "remaining_512mb": max(LIMIT_512MB - t1, 0)
             }
             total_overall += t1
@@ -770,18 +747,12 @@ class MediaDB:
             # ================= DB 2 STATS =================
             if self.has_db2:
                 db_stats2 = await self.db2.command("dbstats")
-                t2 = db_stats2.get('storageSize', 0) + db_stats2.get('indexSize', 0)
-                
-                data_storage2, data_idx2 = await get_col_stats(self.data_col2)
-                search_storage2, search_idx2 = await get_col_stats(self.search_col2)
-                
-                main_data2 = data_storage2 + search_storage2
-                basic_index2 = data_idx2 + search_idx2
-                unaccounted2 = t2 - (main_data2 + basic_index2)
+                data_size2 = db_stats2.get('dataSize', 0)
+                index_size2 = db_stats2.get('indexSize', 0)
+                t2 = data_size2 + index_size2
                 
                 stats_dict["db2"] = {
-                    "total": t2, "main_data": main_data2, "basic_index": basic_index2,
-                    "atlas_search": max(unaccounted2 * 0.95, 0), "other": max(unaccounted2 * 0.05, 0),
+                    "total": t2, "main_data": data_size2, "basic_index": index_size2,
                     "remaining_512mb": max(LIMIT_512MB - t2, 0)
                 }
                 total_overall += t2
@@ -789,18 +760,12 @@ class MediaDB:
             # ================= DB 3 STATS =================
             if self.has_db3:
                 db_stats3 = await self.db3.command("dbstats")
-                t3 = db_stats3.get('storageSize', 0) + db_stats3.get('indexSize', 0)
+                data_size3 = db_stats3.get('dataSize', 0)
+                index_size3 = db_stats3.get('indexSize', 0)
+                t3 = data_size3 + index_size3
                 
-                data_storage3, data_idx3 = await get_col_stats(self.data_col3)
-                search_storage3, search_idx3 = await get_col_stats(self.search_col3)
-                
-                main_data3 = data_storage3 + search_storage3
-                basic_index3 = data_idx3 + search_idx3
-                unaccounted3 = t3 - (main_data3 + basic_index3)
-
                 stats_dict["db3"] = {
-                    "total": t3, "main_data": main_data3, "basic_index": basic_index3,
-                    "atlas_search": max(unaccounted3 * 0.95, 0), "other": max(unaccounted3 * 0.05, 0),
+                    "total": t3, "main_data": data_size3, "basic_index": index_size3,
                     "remaining_512mb": max(LIMIT_512MB - t3, 0)
                 }
                 total_overall += t3

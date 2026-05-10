@@ -538,6 +538,20 @@ class MediaDB:
             clean_query = re.sub(r"(?i)\b(malyalam|malaylam|malyalm|malalam|mal)\b", "malayalam", clean_query)
             clean_query = re.sub(r"(?i)\b(kanada|kanda|kannad|kan)\b", "kannada", clean_query)
             
+            # 🔥 NEW: HINGLISH SPELLING NORMALIZER (Atlas Friendly)
+            DESI_SPELLING_MAP = {
+                "rat": "raat", "bat": "baat", "ag": "aag", "aj": "aaj", "ser": "sher",
+                "ful": "phool", "fir": "phir", "bai": "bhai", "isq": "ishq", "kch": "kuchh", 
+                "kuda": "khuda", "fansi": "phaansi", "babi": "bhabhi", "aashiki": "aashiqui", 
+                "ashiqui": "aashiqui", "nhi": "nahi", "nai": "nahi", "ni": "nahi", 
+                "hn": "haan", "ha": "haan", "haa": "haan", "mai": "main", "me": "mein", 
+                "hu": "hoon", "hun": "hoon"
+            }
+            
+            query_words = clean_query.split()
+            normalized_words = [DESI_SPELLING_MAP.get(w, w) for w in query_words]
+            clean_query = " ".join(normalized_words)
+
             # 2. 🔥 DYNAMIC ATLAS FUZZY SEARCH
             should_clauses = []
             

@@ -83,7 +83,11 @@ async def confirm_delete_handler(bot, query):
             await Media.set_active_index_db(1)
         
         target_name = "All Databases" if db_choice == "all" else f"Database {db_choice}"
-        await query.message.edit_text(f"✅ **{target_name} Reset Successfully!**\nDatabase ekdum fresh ho chuka hai.")
+        await query.message.edit_text(
+            f"✅ **{target_name} Reset Successfully!**\n\n"
+            f"🧹 Saari files safely delete ho gayi hain.\n"
+            f"🛡️ Aapka Atlas Search Index ekdum safe hai. Ab aap directly naya data index kar sakte hain!"
+        )
     except Exception as e:
         await query.message.edit_text(f"❌ Error: {e}")
 

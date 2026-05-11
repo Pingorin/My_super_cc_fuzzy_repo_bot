@@ -683,8 +683,30 @@ class MediaDB:
             
             if not files: raise Exception("Fallback Search Triggered")
 
-            # 🔥 3-DB Merge Sort: Rank cross-database results by exact Atlas Score
-            files.sort(key=lambda x: x.get('score', 0), reverse=True)
+            # 🔥 SMART PYTHON RANKING (Title & Size Logic)
+            q_lower = clean_query.lower()
+            def smart_sort(x):
+                score = x.get('score', 0)
+                fname = str(x.get('file_name', '')).lower()
+                
+                # 1. Prefix Bonus (Agar naam query se shuru hota hai)
+                if fname.startswith(q_lower + " ") or fname.startswith(q_lower + ".") or fname == q_lower:
+                    score += 500  # Sabse highest priority (e.g., "Batman Begins")
+                    
+                # 2. Exact Word Bonus (Agar exact word beech me ho)
+                elif f" {q_lower} " in f" {fname} ":
+                    score += 100
+                    
+                # 3. Junk/Sample Remover (Size based)
+                # Agar file 50MB se choti hai, toh wo shayad sample hai, usko neeche bhejo
+                size_mb = x.get('file_size', 0) / (1024 * 1024)
+                if size_mb < 50:
+                    score -= 50
+                    
+                return score
+
+            # Apply the sort
+            files.sort(key=smart_sort, reverse=True)
 
             return files[:100]
 

@@ -196,12 +196,25 @@ class MediaDB:
         cleaned_title = text
         metadata = {"quality": set(), "languages": set(), "year": set()}
 
-        # 1. Quality Extraction
-        res_pattern = r"(?i)\b(480p|720p|1080p|2160p|4k|uhd)\b"
+        # 1. 🔥 SMART QUALITY EXTRACTION (Language ki tarah)
+        qual_map = {
+            '4k': '2160p', 'uhd': '2160p', '2160p': '2160p',
+            '1080p': '1080p', '720p': '720p', '480p': '480p', '360p': '360p',
+            'bluray': 'Bluray', 'blu-ray': 'Bluray', 'bdrip': 'Bluray',
+            'hd': 'HD', 'hdtv': 'HD', 'hdrip': 'HD', 'hq': 'HD',
+            'sd': 'SD', 'sdqv': 'SD',
+            'cam': 'CAM', 'camrip': 'CAM', 'hdcam': 'CAM',
+            'dvd': 'DVD', 'dvdrip': 'DVD'
+        }
+        
+        res_pattern = r"(?i)\b(480p|720p|1080p|2160p|360p|4k|uhd|bluray|blu-ray|bdrip|hd|hdtv|hdrip|hq|sd|sdqv|cam|camrip|hdcam|dvd|dvdrip)\b"
+        
         for m in re.finditer(res_pattern, cleaned_title):
-            val = m.group(1).lower()
-            if val in ['4k', 'uhd']: val = '2160p'
-            metadata['quality'].add(val)
+            raw_val = m.group(1).lower()
+            std_qual = qual_map.get(raw_val)
+            if std_qual:
+                metadata['quality'].add(std_qual)
+                
         cleaned_title = re.sub(res_pattern, "", cleaned_title)
 
         # 2. 🔥 SMART LANGUAGE EXTRACTION (Safe 3-Letter Codes Only)
@@ -827,3 +840,5 @@ class MediaDB:
     async def get_cached_results(self, unique_id): return await self.search_cache.find_one({"_id": unique_id})
 
 Media = MediaDB(DATABASE_URI, DATABASE_URI_2, DATABASE_URI_3, DATABASE_NAME)
+
+Ek bar dyan se dono file check karo kuch missing ya error na bacha ho

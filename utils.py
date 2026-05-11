@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 
 # ✅ CONSTANTS
 LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu", "Dual Audio", "Multi Audio"]
-QUALITIES = ["Bluray", "4k", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
+# 🔥 UPDATE: Removed "4k" to sync with Database 2160p logic
+QUALITIES = ["Bluray", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
 
 # ✅ REGEX (Kept as Fallback for Old Data)
 LANG_REGEX = {
@@ -89,7 +90,7 @@ def filter_by_lang(files, lang):
             filtered.append(f)
         # Fallback for old files
         else:
-            text = (f.get('file_name', '') + " " + (f.get('caption') or "")).lower()
+            text = f.get('file_name', '').lower()
             if regex:
                 if regex.search(text): filtered.append(f)
             elif lang.lower() in text: filtered.append(f)
@@ -157,22 +158,20 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
     
     for f in files:
         fname = f.get('file_name', '')
-        caption = f.get('caption') or ""
-        full_text = f"{fname} {caption}"
         ftype = f.get('file_type', 'document')
         
         if ftype == 'video': has_video = True
         elif ftype == 'document': has_docs = True
         
-        # Languages Check (Array -> Regex)
+        # Languages Check
         if f.get('languages'): has_lang_data = True
         elif not has_lang_data:
             for lang, regex in LANG_REGEX.items():
-                if regex.search(full_text):
+                if regex.search(fname):
                     has_lang_data = True
                     break
                     
-        # Quality Check (Array -> Regex)
+        # Quality Check
         if f.get('quality'): has_qual_data = True
         elif not has_qual_data:
             for qual, regex in QUALITY_REGEX.items():
@@ -180,7 +179,7 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
                     has_qual_data = True
                     break
                     
-        # Year Check (Array -> Regex)
+        # Year Check
         if f.get('year'): has_year_data = True
         elif not has_year_data:
             if YEAR_REGEX.search(fname):
@@ -304,7 +303,7 @@ def get_language_buttons(search_id, files, active_type=None, active_qual=None, a
                 stats[lang] = stats.get(lang, 0) + 1
         # Fallback for old files
         else:
-            text = (file.get('file_name', '') + " " + (file.get('caption') or "")).lower()
+            text = file.get('file_name', '').lower()
             for lang, regex in LANG_REGEX.items():
                 if regex.search(text):
                     stats[lang] += 1
@@ -422,7 +421,7 @@ def get_size_buttons(search_id, active_type=None, active_lang=None, active_qual=
     return buttons
 
 # ==============================================================================
-# 3. FORMATTING & PAGINATION
+# 3. FORMATTING & PAGINATION (CLEANED)
 # ==============================================================================
 
 def get_size(size):
@@ -449,17 +448,11 @@ def format_text_results(files, query, chat_id):
     bot_username = FILE_STORE_BOT if FILE_STORE_BOT else temp.U_NAME
     
     for i, file in enumerate(files, 1):
-        f_name = file['file_name']
-        f_size = get_size(file['file_size'])
-        link_id = file['link_id']
-        f_chat_id = chat_id
+        f_name = file.get('file_name', 'Unknown File')
+        f_size = get_size(file.get('file_size', 0))
+        link_id = file.get('link_id')
         
-        caption = file.get('caption', '')
-        if query.lower() not in f_name.lower() and query.lower() in caption.lower():
-             clean_cap = caption.replace("<b>", "").replace("</b>", "")[:50] + "..."
-             f_name = clean_cap
-
-        link = f"https://t.me/{bot_username}?start=get_{link_id}_{f_chat_id}"
+        link = f"https://t.me/{bot_username}?start=get_{link_id}_{chat_id}"
         text += f"{i}. 📂 <a href='{link}'>{f_name}</a> [{f_size}]\n\n"
     return text
 
@@ -468,42 +461,24 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         f"⚡ **Hey {query} lovers!**\n"
         f"👻 **Here are your results....**\n"
         f"⌛ **Time taken:** {time_taken} seconds\n"
-        f"code: {len(files)}\n\n"
+        f"📂 **Total Files:** {len(files)}\n\n"
     )
     # 🔥 REDIRECT LOGIC FOR BOT B
     bot_username = FILE_STORE_BOT if FILE_STORE_BOT else temp.U_NAME
     
     for file in files:
-        f_name = file['file_name']
-        f_size = get_size(file['file_size'])
-        link_id = file['link_id']
-        f_chat_id = chat_id
+        f_name = file.get('file_name', 'Unknown File')
+        f_size = get_size(file.get('file_size', 0))
+        link_id = file.get('link_id')
         
-        caption = file.get('caption') or ""
-        if query.lower() not in f_name.lower() and query.lower() in caption.lower():
-             clean_cap = caption.replace("<b>", "").replace("</b>", "")[:50] + "..."
-        
-        link = f"https://t.me/{bot_username}?start=get_{link_id}_{f_chat_id}"
+        link = f"https://t.me/{bot_username}?start=get_{link_id}_{chat_id}"
         
         # High Speed DB Extraction
         db_quals = file.get('quality', [])
         db_langs = file.get('languages', [])
         
-        if db_quals:
-            quality = ", ".join(db_quals)
-        else:
-            q_match = re.search(r"\b(1080p|720p|480p|360p|2160p|4k|HDRip|WEBRip|BluRay|DVDRip|CAM)\b", f_name, re.IGNORECASE)
-            quality = q_match.group(0) if q_match else "N/A"
-            
-        if db_langs:
-            lang_str = ", ".join(db_langs)
-        else:
-            langs_found = []
-            text_to_check = (f_name + " " + caption).lower()
-            for lang, regex in LANG_REGEX.items():
-                if regex.search(text_to_check):
-                    langs_found.append(lang)
-            lang_str = ", ".join(sorted(set(langs_found))) if langs_found else "N/A"
+        quality = ", ".join(db_quals) if db_quals else "N/A"
+        lang_str = ", ".join(db_langs) if db_langs else "N/A"
 
         text += f"📂 <a href='{link}'>Click to get this file 📥</a>\n"
         text += f"🖥 Name: {f_name}\n"
@@ -518,8 +493,8 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
     return text
 
 def format_card_result(file, current_index, total_count):
-    f_name = file['file_name']
-    f_size = get_size(file['file_size'])
+    f_name = file.get('file_name', 'Unknown File')
+    f_size = get_size(file.get('file_size', 0))
     return f"🎬 **{f_name}**\n💾 Size: {f_size}\n\nFile {current_index + 1} of {total_count}"
 
 async def post_to_telegraph(files, query, chat_id):
@@ -529,11 +504,10 @@ async def post_to_telegraph(files, query, chat_id):
     bot_username = FILE_STORE_BOT if FILE_STORE_BOT else temp.U_NAME
     
     for file in files:
-        f_name = file['file_name']
-        f_size = get_size(file['file_size'])
-        link_id = file['link_id']
-        f_chat_id = chat_id
-        link = f"https://t.me/{bot_username}?start=get_{link_id}_{f_chat_id}"
+        f_name = file.get('file_name', 'Unknown File')
+        f_size = get_size(file.get('file_size', 0))
+        link_id = file.get('link_id')
+        link = f"https://t.me/{bot_username}?start=get_{link_id}_{chat_id}"
         html_content += f"<p>📂 <a href='{link}'>{f_name}</a> [{f_size}]</p><hr>"
     try:
         response = telegraph_client.create_page(title=f"Results: {query}", html_content=html_content)
@@ -574,19 +548,11 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active
         f_name = file.get('file_name', 'Unknown File')
         f_size = get_size(file.get('file_size', 0))
         link_id = file.get('link_id')
-        caption = file.get('caption')
-        display_name = f_name
         
-        if query and isinstance(query, str) and caption:
-            q = query.lower()
-            if q not in f_name.lower() and q in caption.lower():
-                display_name = caption.replace("<b>", "").replace("</b>", "")[:57] + "..."
-        
-        btn_text = f"📂 {display_name} [{f_size}]"
-        if link_id is not None:
-            if bot_username:
-                url = f"https://t.me/{bot_username}?start=get_{link_id}_{chat_id}"
-                buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
+        btn_text = f"📂 {f_name} [{f_size}]"
+        if link_id is not None and bot_username:
+            url = f"https://t.me/{bot_username}?start=get_{link_id}_{chat_id}"
+            buttons.append([InlineKeyboardButton(text=btn_text, url=url)])
             
     pagination = get_pagination_row(search_id, offset, limit, len(files), active_filter, active_lang, active_qual, active_year, active_size)
     if pagination: buttons.append(pagination)

@@ -840,5 +840,3 @@ class MediaDB:
     async def get_cached_results(self, unique_id): return await self.search_cache.find_one({"_id": unique_id})
 
 Media = MediaDB(DATABASE_URI, DATABASE_URI_2, DATABASE_URI_3, DATABASE_NAME)
-
-Ek bar dyan se dono file check karo kuch missing ya error na bacha ho

@@ -583,7 +583,8 @@ class MediaDB:
                 clause = {
                     "text": {
                         "query": word,
-                        "path": ["file_name", "search_text"]
+                        # 🔥 MAIN FIX YAHAN HAI: file_name ko 10x zyada Score/Priority mil raha hai
+                        "path": [{"value": "file_name", "multi": 10}, {"value": "search_text", "multi": 1}]
                     }
                 }
                 

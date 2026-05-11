@@ -580,23 +580,37 @@ class MediaDB:
                 else:
                     edits = 2  # Pushpa, Avengers, Spdrman -> 2 mistakes allowed
                 
-                clause = {
+                # 🥇 MAIN FIX: Asli Atlas Search Boosting Syntax
+                # 1. FILE NAME KELIYE CLAUSE (Priority 10x)
+                clause_fname = {
                     "text": {
                         "query": word,
-                        # 🔥 MAIN FIX YAHAN HAI: file_name ko 10x zyada Score/Priority mil raha hai
-                        "path": [{"value": "file_name", "multi": 10}, {"value": "search_text", "multi": 1}]
+                        "path": "file_name",
+                        "score": {"boost": {"value": 10}} # 🔥 10 Guna (10x) Score!
                     }
                 }
                 
-                # Agar edits 0 se zyada hain, tabhi fuzzy block add karenge
+                # 2. SEARCH TEXT (CAPTION) KELIYE CLAUSE (Normal Priority 1x)
+                clause_stext = {
+                    "text": {
+                        "query": word,
+                        "path": "search_text"
+                    }
+                }
+                
+                # Agar edits 0 se zyada hain, tabhi fuzzy dono me add karenge
                 if edits > 0:
-                    clause["text"]["fuzzy"] = {
+                    fuzzy_logic = {
                         "maxEdits": edits,
                         "prefixLength": 1,
                         "maxExpansions": 50
                     }
+                    clause_fname["text"]["fuzzy"] = fuzzy_logic
+                    clause_stext["text"]["fuzzy"] = fuzzy_logic
                     
-                should_clauses.append(clause)
+                # Dono clauses ko search pipeline me daal do
+                should_clauses.append(clause_fname)
+                should_clauses.append(clause_stext)
 
             search_stage = {
                 "$search": {

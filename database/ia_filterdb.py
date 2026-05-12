@@ -551,7 +551,7 @@ class MediaDB:
         atlas_search_query = " ".join([w for w in normalized_words if w not in stop_words]) or clean_query
 
         # Core Title (Bollywood Hindi Medium Fix)
-        meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series"}
+        meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series", "remastered", "esub", "hq"}
         words_list = clean_query.split()
         while words_list and (words_list[-1] in meta_keywords or re.match(r"^(19|20)\d{2}$", words_list[-1])):
             words_list.pop()
@@ -560,62 +560,27 @@ class MediaDB:
         files_map = {} 
 
         try:
-            # 2. 🔥 DYNAMIC ATLAS FUZZY SEARCH (Aapka Original Detail Wala Code)
+            # 2. 🔥 DYNAMIC ATLAS FUZZY SEARCH
             should_clauses = []
             
             for word in atlas_search_query.split():
-                # 🛡️ Agar word me koi NUMBER hai (e.g. 2024, 1080p, 4k), toh 0 mistakes!
-                if any(char.isdigit() for char in word):
-                    edits = 0
-                # Word ke size ke hisab se edit limit set karna
-                elif len(word) <= 3:
-                    edits = 0  # KGF, PK, Bat -> No mistakes allowed
-                elif len(word) <= 5:
-                    edits = 1  # Thor, Hulk, Hindi -> 1 mistake allowed
-                else:
-                    edits = 2  # Pushpa, Avengers, Spdrman -> 2 mistakes allowed
+                if any(char.isdigit() for char in word): edits = 0
+                elif len(word) <= 3: edits = 0 
+                elif len(word) <= 5: edits = 1 
+                else: edits = 2 
                 
-                # 🥇 MAIN FIX: Asli Atlas Search Boosting Syntax
-                # 1. FILE NAME KELIYE CLAUSE (Priority 10x)
-                clause_fname = {
-                    "text": {
-                        "query": word,
-                        "path": "file_name",
-                        "score": {"boost": {"value": 10}} # 🔥 10 Guna (10x) Score!
-                    }
-                }
+                clause_fname = {"text": {"query": word, "path": "file_name", "score": {"boost": {"value": 10}}}}
+                clause_stext = {"text": {"query": word, "path": "search_text"}}
                 
-                # 2. SEARCH TEXT (CAPTION) KELIYE CLAUSE (Normal Priority 1x)
-                clause_stext = {
-                    "text": {
-                        "query": word,
-                        "path": "search_text"
-                    }
-                }
-                
-                # Agar edits 0 se zyada hain, tabhi fuzzy dono me add karenge
                 if edits > 0:
-                    fuzzy_logic = {
-                        "maxEdits": edits,
-                        "prefixLength": 1,
-                        "maxExpansions": 50
-                    }
+                    fuzzy_logic = {"maxEdits": edits, "prefixLength": 1, "maxExpansions": 50}
                     clause_fname["text"]["fuzzy"] = fuzzy_logic
                     clause_stext["text"]["fuzzy"] = fuzzy_logic
                     
-                # Dono clauses ko search pipeline me daal do
                 should_clauses.append(clause_fname)
                 should_clauses.append(clause_stext)
 
-            search_stage = {
-                "$search": {
-                    "index": "default",
-                    "compound": {
-                        "should": should_clauses,
-                        "minimumShouldMatch": 1
-                    }
-                }
-            }
+            search_stage = {"$search": {"index": "default", "compound": {"should": should_clauses, "minimumShouldMatch": 1}}}
             
             match_filters = {}
             if file_type and file_type != "none": match_filters["file_type"] = "video" if file_type.lower() == "video" else "document"
@@ -633,6 +598,7 @@ class MediaDB:
                 elif size_range == "1gb-2gb": match_filters["file_size"] = {"$gte": GB_1, "$lt": GB_2}
                 elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
+            pipeline = [search_stage]
             if match_filters: pipeline.append({"$match": match_filters})
 
             pipeline.append({
@@ -727,28 +693,55 @@ class MediaDB:
             def smart_sort(x):
                 score = x.get('score', 0)
                 
-                # 🛡️ FIX 1: Safe fallback if name_length is None or missing
+                # 🛡️ FIX 1: The Length Tie-Breaker (Hamesha active rahega - chote naam upar)
                 name_len = x.get('name_length') or 0
-                if name_len > 0 and score == 0:
+                if name_len > 0:
                     score += (100 / (name_len + 1)) 
 
                 raw_fname = str(x.get('file_name', '')).lower()
                 clean_fname = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
                 
-                check_name = clean_fname
-                if check_name.startswith("the "): check_name = check_name[4:]
-                elif check_name.startswith("a "): check_name = check_name[2:]
-                elif check_name.startswith("an "): check_name = check_name[3:]
+                # Article stripping helper
+                def remove_articles(text):
+                    if text.startswith("the "): return text[4:]
+                    if text.startswith("a "): return text[2:]
+                    if text.startswith("an "): return text[3:]
+                    return text
 
-                # Rank Bonus
-                if check_name.startswith(core_title + " ") or check_name == core_title: score += 500
-                elif f" {core_title} " in f" {clean_fname} ": score += 100
+                search_strict = core_title
+                search_flex = remove_articles(core_title)
                 
-                # 🛡️ FIX 2: Crash-Proof Size Logic (Agar DB me size null ho toh 0 maane)
+                db_strict = clean_fname
+                db_flex = remove_articles(clean_fname)
+
+                # 👑 THE "THE" FIX & ULTIMATE EXACT DETECTOR
+                if db_strict == search_strict:
+                    score += 2000  # 100% Exact
+                elif db_strict.startswith(search_strict + " "):
+                    remainder = db_strict[len(search_strict):].strip()
+                    next_word = remainder.split()[0] if remainder else ""
+                    
+                    if re.match(r"^(19|20)\d{2}$", next_word) or next_word in meta_keywords or re.match(r"^s\d+$", next_word):
+                        score += 1000  # Exact movie (Batman 1989)
+                    else:
+                        score += 800   # Prefix match (Batman Begins)
+                        
+                # 🛡️ FALLBACK: Agar 'Batman' search kiya, toh 'The Batman' bhi milna chahiye, par neeche
+                elif db_flex.startswith(search_flex + " "):
+                    remainder = db_flex[len(search_flex):].strip()
+                    next_word = remainder.split()[0] if remainder else ""
+                    
+                    if re.match(r"^(19|20)\d{2}$", next_word) or next_word in meta_keywords or re.match(r"^s\d+$", next_word):
+                        score += 500
+                    else:
+                        score += 300
+                        
+                elif f" {search_flex} " in f" {db_flex} ":
+                    score += 100
+                
+                # Crash-Proof Size Penalty
                 raw_size = x.get('file_size') or 0
                 size_mb = raw_size / (1024 * 1024)
-                
-                # Basic Size Penalty (Sirf choti kachra files ko neeche bhejne ke liye)
                 if size_mb > 0 and size_mb < 20: 
                     score -= 50
                 

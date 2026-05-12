@@ -196,7 +196,6 @@ class MediaDB:
         cleaned_title = text
         metadata = {"quality": set(), "languages": set(), "year": set()}
 
-        # 1. 🔥 SMART QUALITY EXTRACTION (Language ki tarah)
         qual_map = {
             '4k': '2160p', 'uhd': '2160p', '2160p': '2160p',
             '1080p': '1080p', '720p': '720p', '480p': '480p', '360p': '360p',
@@ -217,23 +216,15 @@ class MediaDB:
                 
         cleaned_title = re.sub(res_pattern, "", cleaned_title)
 
-        # 2. 🔥 SMART LANGUAGE EXTRACTION (Safe 3-Letter Codes Only)
         lang_map = {
-            'hin': 'Hindi', 'hindi': 'Hindi',
-            'tam': 'Tamil', 'tamil': 'Tamil',
-            'tel': 'Telugu', 'telugu': 'Telugu',
-            'mal': 'Malayalam', 'malayalam': 'Malayalam',
-            'kan': 'Kannada', 'kannada': 'Kannada',
-            'eng': 'English', 'english': 'English',
-            'ben': 'Bengali', 'bengali': 'Bengali',
-            'pun': 'Punjabi', 'punjabi': 'Punjabi',
-            'mar': 'Marathi', 'marathi': 'Marathi',
-            'guj': 'Gujarati', 'gujarati': 'Gujarati',
-            'urdu': 'Urdu',
-            'multi': 'Multi Audio', 'dual': 'Dual Audio'
+            'hin': 'Hindi', 'hindi': 'Hindi', 'tam': 'Tamil', 'tamil': 'Tamil',
+            'tel': 'Telugu', 'telugu': 'Telugu', 'mal': 'Malayalam', 'malayalam': 'Malayalam',
+            'kan': 'Kannada', 'kannada': 'Kannada', 'eng': 'English', 'english': 'English',
+            'ben': 'Bengali', 'bengali': 'Bengali', 'pun': 'Punjabi', 'punjabi': 'Punjabi',
+            'mar': 'Marathi', 'marathi': 'Marathi', 'guj': 'Gujarati', 'gujarati': 'Gujarati',
+            'urdu': 'Urdu', 'multi': 'Multi Audio', 'dual': 'Dual Audio'
         }
         
-        # 🛑 Regex se saare 2-letter codes (hi, en, ta) hata diye gaye hain
         lang_pattern = r"(?i)\b(hindi|hin|tamil|tam|telugu|tel|malayalam|mal|kannada|kan|english|eng|bengali|ben|punjabi|pun|marathi|mar|gujarati|guj|urdu|multi[\s\-]?audio|dual[\s\-]?audio)\b"
         
         for m in re.finditer(lang_pattern, cleaned_title):
@@ -244,7 +235,6 @@ class MediaDB:
                 
         cleaned_title = re.sub(lang_pattern, "", cleaned_title)
 
-        # 3. Year Extraction
         year_pattern = r"\b(19\d{2}|20\d{2})\b"
         for m in re.finditer(year_pattern, cleaned_title): metadata['year'].add(m.group(1))
         
@@ -313,8 +303,6 @@ class MediaDB:
                 start_sequence = end_sequence - count + 1
         
         data_docs, search_docs = [], []
-        
-        # 🔥 THE BULK UPDATE TRUCK (Queues for batch updating)
         update_ops_data = {1: [], 2: [], 3: []}
         update_ops_search = {1: [], 2: [], 3: []}
         
@@ -335,7 +323,6 @@ class MediaDB:
             }
             
             clean_fname = self.clean_text(raw_fname)
-            
             meta_regex = r"(?i)(1080p|720p|480p|4k|2160p|s\d+|e\d+|\b19\d{2}\b|\b20\d{2}\b|hindi|tamil|telugu|dual)"
             
             clean_cap_line = ""
@@ -440,7 +427,6 @@ class MediaDB:
                         'file_id': media.file_id, 
                         'file_type': file_type
                     }
-                    
                     search_update = {
                         'file_name': final_display_name, 
                         'file_size': media.file_size, 
@@ -452,17 +438,12 @@ class MediaDB:
                     search_update['languages'] = parsed_meta['languages'] if parsed_meta['languages'] else []
                     search_update['year'] = parsed_meta['year'] if parsed_meta['year'] else []
 
-                    # 🔥 BULK UPDATE TRUCK ME DATA LOAD KARNA (Instead of executing 190 times)
                     update_ops_data[db_num].append(UpdateOne({'_id': link_id}, {'$set': data_update}))
                     update_ops_search[db_num].append(UpdateOne({'link_id': link_id}, {'$set': search_update}))
 
-        # 🚀 FINAL EXECUTION (Batches unload to MongoDB)
         saved_count = 0
-        
-        # 1. NEW DATA BATCH WRITE
         if data_docs or search_docs:
             active_db_num = await self.get_active_index_db()
-            
             if active_db_num == 3 and self.has_db3:
                 active_data_col = self.data_col3
                 active_search_col = self.search_col3
@@ -478,30 +459,25 @@ class MediaDB:
                     await active_data_col.insert_many(data_docs, ordered=False)
                     saved_count = len(data_docs)
                 except BulkWriteError as bwe: saved_count = bwe.details['nInserted']
-                except Exception: pass 
-            
+                except: pass 
             if search_docs:
                 try: await active_search_col.insert_many(search_docs, ordered=False)
-                except BulkWriteError: pass
-                except Exception: pass
+                except: pass
                 
-        # 2. 🔥 UPDATE DATA BULK WRITE (Zero Overload on DB)
         try:
             if update_ops_data[1]: await self.data_col1.bulk_write(update_ops_data[1], ordered=False)
             if update_ops_search[1]: await self.search_col1.bulk_write(update_ops_search[1], ordered=False)
-        except Exception: pass
-        
+        except: pass
         if self.has_db2:
             try:
                 if update_ops_data[2]: await self.data_col2.bulk_write(update_ops_data[2], ordered=False)
                 if update_ops_search[2]: await self.search_col2.bulk_write(update_ops_search[2], ordered=False)
-            except Exception: pass
-            
+            except: pass
         if self.has_db3:
             try:
                 if update_ops_data[3]: await self.data_col3.bulk_write(update_ops_data[3], ordered=False)
                 if update_ops_search[3]: await self.search_col3.bulk_write(update_ops_search[3], ordered=False)
-            except Exception: pass
+            except: pass
                 
         return saved_count, pre_duplicate_count
 
@@ -521,54 +497,62 @@ class MediaDB:
         try:
             res1 = await self.data_col1.update_one({'file_id': old_file_id}, {'$set': {'file_id': new_file_id}})
             if res1.modified_count > 0: return True
-            
             if self.has_db2:
                 res2 = await self.data_col2.update_one({'file_id': old_file_id}, {'$set': {'file_id': new_file_id}})
                 if res2.modified_count > 0: return True
-                
             if self.has_db3:
                 res3 = await self.data_col3.update_one({'file_id': old_file_id}, {'$set': {'file_id': new_file_id}})
                 if res3.modified_count > 0: return True
-                
             return False
         except Exception as e:
             logger.error(f"Error updating file_id for Smart Cache: {e}")
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (ULTRA FAST + 3-TIER LOGIC + NUMBER PROTECTION)
+    # ⚡ ATLAS FUZZY SEARCH (ULTRA FAST + MULTI-DB ENGINE)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
 
-        try:
-            # 1. Basic Cleaning
-            raw_query = query.strip().lower()
-            clean_query = re.sub(r"(?i)\b(englsh|engls|engish|egnlish)\b", "english", raw_query)
-            clean_query = re.sub(r"(?i)\b(hndi|hind|hni|hin)\b", "hindi", clean_query)
-            clean_query = re.sub(r"(?i)\b(tmal|taml|tmil|tam)\b", "tamil", clean_query)
-            clean_query = re.sub(r"(?i)\b(telgu|tlgu|telug|telegu|tel)\b", "telugu", clean_query)
-            clean_query = re.sub(r"(?i)\b(malyalam|malaylam|malyalm|malalam|mal)\b", "malayalam", clean_query)
-            clean_query = re.sub(r"(?i)\b(kanada|kanda|kannad|kan)\b", "kannada", clean_query)
-            
-            # 🔥 NEW: HINGLISH SPELLING NORMALIZER (Atlas Friendly)
-            DESI_SPELLING_MAP = {
-                "rat": "raat", "bat": "baat", "ag": "aag", "aj": "aaj", "ser": "sher",
-                "ful": "phool", "fir": "phir", "bai": "bhai", "isq": "ishq", "kch": "kuchh", 
-                "kuda": "khuda", "fansi": "phaansi", "babi": "bhabhi", "aashiki": "aashiqui", 
-                "ashiqui": "aashiqui", "nhi": "nahi", "nai": "nahi", "ni": "nahi", 
-                "hn": "haan", "ha": "haan", "haa": "haan", "mai": "main", "me": "mein", 
-                "hu": "hoon", "hun": "hoon"
-            }
-            
-            query_words = clean_query.split()
-            normalized_words = [DESI_SPELLING_MAP.get(w, w) for w in query_words]
-            clean_query = " ".join(normalized_words)
+        # 1. 🔥 UNIVERSAL PRE-PROCESSING (Common for all)
+        raw_query = query.strip().lower()
+        raw_query = re.sub(r"[^\w\s]", " ", raw_query) # Punctuation Fix
+        
+        # Safe Roman Numeral Fix
+        roman_map_search = {r'ii': '2', r'iii': '3', r'iv': '4', r'vi': '6', r'vii': '7', r'viii': '8', r'ix': '9'}
+        for roman, digit in roman_map_search.items():
+            raw_query = re.sub(rf"(?i)\b{roman}\b", digit, raw_query)
 
-            # 2. 🔥 DYNAMIC ATLAS FUZZY SEARCH
+        # Hinglish & Language Normalizer
+        clean_query = re.sub(r"(?i)\b(englsh|engls|engish|egnlish)\b", "english", raw_query)
+        clean_query = re.sub(r"(?i)\b(hndi|hind|hni|hin)\b", "hindi", clean_query)
+        clean_query = re.sub(r"(?i)\b(tmal|taml|tmil|tam)\b", "tamil", clean_query)
+        clean_query = re.sub(r"(?i)\b(telgu|tlgu|telug|telegu|tel)\b", "telugu", clean_query)
+        clean_query = re.sub(r"(?i)\b(malyalam|malaylam|malyalm|malalam|mal)\b", "malayalam", clean_query)
+        clean_query = re.sub(r"(?i)\b(kanada|kanda|kannad|kan)\b", "kannada", clean_query)
+
+        DESI_SPELLING_MAP = {"rat": "raat", "bat": "baat", "ag": "aag", "aj": "aaj", "ser": "sher", "nhi": "nahi", "nai": "nahi", "ni": "nahi", "hn": "haan", "ha": "haan", "haa": "haan", "mai": "main", "me": "mein", "hu": "hoon", "hun": "hoon", "ashiqui": "aashiqui", "aashiki": "aashiqui", "kch": "kuchh", "isq": "ishq", "bai": "bhai", "fir": "phir", "ful": "phool", "kuda": "khuda", "fansi": "phaansi", "babi": "bhabhi"}
+        query_words = clean_query.split()
+        normalized_words = [DESI_SPELLING_MAP.get(w, w) for w in query_words]
+        
+        # Stop Words for Database Speed
+        stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to"}
+        atlas_search_query = " ".join([w for w in normalized_words if w not in stop_words]) or clean_query
+
+        # Core Title (Bollywood Hindi Medium Fix)
+        meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series"}
+        words_list = clean_query.split()
+        while words_list and (words_list[-1] in meta_keywords or re.match(r"^(19|20)\d{2}$", words_list[-1])):
+            words_list.pop()
+        core_title = " ".join(words_list) if words_list else clean_query
+
+        files_map = {} 
+
+        try:
+            # 2. 🔥 DYNAMIC ATLAS FUZZY SEARCH (Aapka Original Detail Wala Code)
             should_clauses = []
             
-            for word in clean_query.split():
+            for word in atlas_search_query.split():
                 # 🛡️ Agar word me koi NUMBER hai (e.g. 2024, 1080p, 4k), toh 0 mistakes!
                 if any(char.isdigit() for char in word):
                     edits = 0
@@ -621,8 +605,7 @@ class MediaDB:
                     }
                 }
             }
-
-            # 3. EXTRA FILTERS STAGE (Language, Quality, Year, etc.)
+            
             match_filters = {}
             if file_type and file_type != "none": match_filters["file_type"] = "video" if file_type.lower() == "video" else "document"
             if lang and lang != "none":
@@ -639,13 +622,8 @@ class MediaDB:
                 elif size_range == "1gb-2gb": match_filters["file_size"] = {"$gte": GB_1, "$lt": GB_2}
                 elif size_range == "max2gb": match_filters["file_size"] = {"$gte": GB_2}
 
-            # 4. PIPELINE BUILDER
-            pipeline = [search_stage]
-            
-            if match_filters:
-                pipeline.append({"$match": match_filters})
+            if match_filters: pipeline.append({"$match": match_filters})
 
-            # Data extract karna aur Atlas Search ka asli score nikalna
             pipeline.append({
                 "$project": {
                     "file_name": 1, "search_text": 1, "quality": 1, "languages": 1, 
@@ -655,75 +633,37 @@ class MediaDB:
                 }
             })
 
-            # 5. SORTING
             if sort == "new": pipeline.append({"$sort": {"_id": -1}}) 
             elif sort == "old": pipeline.append({"$sort": {"_id": 1}}) 
             elif sort == "large": pipeline.append({"$sort": {"file_size": -1}}) 
             elif sort == "small": pipeline.append({"$sort": {"file_size": 1}}) 
-            else: pipeline.append({"$sort": {"score": -1, "name_length": 1, "_id": -1}}) 
 
             pipeline.append({"$limit": 100}) 
             
-            # 6. PARALLEL DB FETCHING (Speed x3)
-            async def fetch_db(collection, pipe):
-                try:
-                    return await collection.aggregate(pipe).to_list(length=100)
-                except Exception:
-                    return []
-                    
+            async def fetch_db(col, pipe):
+                try: return await col.aggregate(pipe).to_list(length=100)
+                except: return []
+            
             tasks = [fetch_db(self.search_col1, pipeline)]
             if self.has_db2: tasks.append(fetch_db(self.search_col2, pipeline))
             if self.has_db3: tasks.append(fetch_db(self.search_col3, pipeline))
             
-            results = await asyncio.gather(*tasks)
+            all_res = await asyncio.gather(*tasks)
+            for res in all_res:
+                for f in res: files_map[f['link_id']] = f
             
-            files = []
-            for res in results:
-                files.extend(res)
-            
-            if not files: raise Exception("Fallback Search Triggered")
-
-            # 🔥 SMART PYTHON RANKING (Title & Size Logic)
-            q_lower = clean_query.lower()
-            def smart_sort(x):
-                score = x.get('score', 0)
-                fname = str(x.get('file_name', '')).lower()
-                
-                # 1. Prefix Bonus (Agar naam query se shuru hota hai)
-                if fname.startswith(q_lower + " ") or fname.startswith(q_lower + ".") or fname == q_lower:
-                    score += 500  # Sabse highest priority (e.g., "Batman Begins")
-                    
-                # 2. Exact Word Bonus (Agar exact word beech me ho)
-                elif f" {q_lower} " in f" {fname} ":
-                    score += 100
-                    
-                # 3. Junk/Sample Remover (Size based)
-                # Agar file 50MB se choti hai, toh wo shayad sample hai, usko neeche bhejo
-                size_mb = x.get('file_size', 0) / (1024 * 1024)
-                if size_mb < 50:
-                    score -= 50
-                    
-                return score
-
-            # Apply the sort
-            files.sort(key=smart_sort, reverse=True)
-
-            return files[:100]
-
-        except Exception as e:
-            # 7. SAFE FALLBACK (Broad 'OR' Logic with Button Filters)
+            if not files_map: raise Exception("Fallback")
+        except:
+            # 3. 🛡️ FALLBACK REGEX ENGINE
             try:
                 fallback_match = {}
-                words = clean_query.split()
                 fallback_or_clauses = []
-                
-                for tw in words:
+                for tw in atlas_search_query.split():
                     safe_tw = rf"\b{re.escape(tw)}\b"
                     fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})
                     fallback_or_clauses.append({"file_name": {"$regex": safe_tw, "$options": "i"}})
                     
-                if fallback_or_clauses: 
-                    fallback_match["$or"] = fallback_or_clauses
+                if fallback_or_clauses: fallback_match["$or"] = fallback_or_clauses
                 
                 if file_type and file_type != "none": fallback_match["file_type"] = "video" if file_type.lower() == "video" else "document"
                 if lang and lang != "none":
@@ -734,6 +674,7 @@ class MediaDB:
                 if year and year != "none":
                     fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
                 if size_range and size_range != "none":
+                    MB_500, GB_1, GB_2 = 500*1024*1024, 1024*1024*1024, 2*1024*1024*1024
                     if size_range == "min500": fallback_match["file_size"] = {"$lt": MB_500}
                     elif size_range == "500-1gb": fallback_match["file_size"] = {"$gte": MB_500, "$lt": GB_1}
                     elif size_range == "1gb-2gb": fallback_match["file_size"] = {"$gte": GB_1, "$lt": GB_2}
@@ -752,33 +693,52 @@ class MediaDB:
                 elif sort == "old": fallback_pipeline.append({"$sort": {"_id": 1}})
                 elif sort == "large": fallback_pipeline.append({"$sort": {"file_size": -1}})
                 elif sort == "small": fallback_pipeline.append({"$sort": {"file_size": 1}})
-                else: fallback_pipeline.append({"$sort": {"name_length": 1, "_id": -1}})
 
-                fallback_pipeline.append({"$limit": 30})
+                fallback_pipeline.append({"$limit": 50})
                 
-                async def fetch_fallback(collection, pipe):
-                    try:
-                        return await collection.aggregate(pipe).to_list(length=30)
-                    except Exception:
-                        return []
+                async def fetch_fallback(col, pipe):
+                    try: return await col.aggregate(pipe).to_list(length=50)
+                    except: return []
                         
                 fb_tasks = [fetch_fallback(self.search_col1, fallback_pipeline)]
                 if self.has_db2: fb_tasks.append(fetch_fallback(self.search_col2, fallback_pipeline))
                 if self.has_db3: fb_tasks.append(fetch_fallback(self.search_col3, fallback_pipeline))
                 
-                fb_results = await asyncio.gather(*fb_tasks)
+                fb_res = await asyncio.gather(*fb_tasks)
+                for res in fb_res:
+                    for f in res: files_map[f['link_id']] = f
+            except: pass
+
+        files = list(files_map.values())
+
+        # 4. 🔥 FINAL SMART RANKER (Universal)
+        if files and (sort == "relevance" or not sort):
+            def smart_sort(x):
+                score = x.get('score', 0)
+                if 'name_length' in x and score == 0:
+                    score += (100 / (x['name_length'] + 1)) 
+
+                raw_fname = str(x.get('file_name', '')).lower()
+                clean_fname = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
                 
-                files = []
-                for res in fb_results:
-                    files.extend(res)
+                check_name = clean_fname
+                if check_name.startswith("the "): check_name = check_name[4:]
+                elif check_name.startswith("a "): check_name = check_name[2:]
+                elif check_name.startswith("an "): check_name = check_name[3:]
+
+                # Rank Bonus
+                if check_name.startswith(core_title + " ") or check_name == core_title: score += 500
+                elif f" {core_title} " in f" {clean_fname} ": score += 100
                 
-                # 🔥 Fallback 3-DB Merge Sort: Sort results combined from all databases
-                files.sort(key=lambda x: x.get('name_length', 999))
+                # Basic Size Penalty (Sirf choti kachra files ko neeche bhejne ke liye)
+                size_mb = x.get('file_size', 0) / (1024 * 1024)
+                if size_mb < 20: score -= 50
                 
-                return files[:30]
-                    
-            except Exception as inner_e:
-                return []
+                return score
+
+            files.sort(key=smart_sort, reverse=True)
+
+        return files[:100]
 
     async def total_files_count(self): 
         count = await self.data_col1.count_documents({})
@@ -799,63 +759,35 @@ class MediaDB:
             return total
         except: return 0
 
-    # ==================================================================
-    # 📊 SMART DATABASE STATS (ATLAS SEARCH ESTIMATOR INCLUDED)
-    # ==================================================================
     async def get_detailed_stats(self):
         stats_dict = {"db1": None, "db2": None, "db3": None, "total_overall": 0}
         total_overall = 0
-        LIMIT_512MB = 512 * 1024 * 1024  # 512 MB in Bytes
+        LIMIT_512MB = 512 * 1024 * 1024  
 
         try:
-            # ================= DB 1 STATS =================
             db_stats1 = await self.db1.command("dbstats")
-            # 🔥 FIX: Fetching Logical 'dataSize' (104 MB) instead of compressed 'storageSize' (35 MB)
             data_size1 = db_stats1.get('dataSize', 0) 
             index_size1 = db_stats1.get('indexSize', 0) 
             
-            # MongoDB Atlas M0 calculates limit based roughly on Data + Indexes
             t1 = data_size1 + index_size1
-
-            stats_dict["db1"] = {
-                "total": t1,
-                "main_data": data_size1,
-                "basic_index": index_size1,
-                "remaining_512mb": max(LIMIT_512MB - t1, 0)
-            }
+            stats_dict["db1"] = {"total": t1, "main_data": data_size1, "basic_index": index_size1, "remaining_512mb": max(LIMIT_512MB - t1, 0)}
             total_overall += t1
 
-            # ================= DB 2 STATS =================
             if self.has_db2:
                 db_stats2 = await self.db2.command("dbstats")
-                data_size2 = db_stats2.get('dataSize', 0)
-                index_size2 = db_stats2.get('indexSize', 0)
-                t2 = data_size2 + index_size2
-                
-                stats_dict["db2"] = {
-                    "total": t2, "main_data": data_size2, "basic_index": index_size2,
-                    "remaining_512mb": max(LIMIT_512MB - t2, 0)
-                }
+                t2 = db_stats2.get('dataSize', 0) + db_stats2.get('indexSize', 0)
+                stats_dict["db2"] = {"total": t2, "main_data": db_stats2.get('dataSize', 0), "basic_index": db_stats2.get('indexSize', 0), "remaining_512mb": max(LIMIT_512MB - t2, 0)}
                 total_overall += t2
 
-            # ================= DB 3 STATS =================
             if self.has_db3:
                 db_stats3 = await self.db3.command("dbstats")
-                data_size3 = db_stats3.get('dataSize', 0)
-                index_size3 = db_stats3.get('indexSize', 0)
-                t3 = data_size3 + index_size3
-                
-                stats_dict["db3"] = {
-                    "total": t3, "main_data": data_size3, "basic_index": index_size3,
-                    "remaining_512mb": max(LIMIT_512MB - t3, 0)
-                }
+                t3 = db_stats3.get('dataSize', 0) + db_stats3.get('indexSize', 0)
+                stats_dict["db3"] = {"total": t3, "main_data": db_stats3.get('dataSize', 0), "basic_index": db_stats3.get('indexSize', 0), "remaining_512mb": max(LIMIT_512MB - t3, 0)}
                 total_overall += t3
 
             stats_dict["total_overall"] = total_overall
             return stats_dict
-            
         except Exception as e:
-            print(f"Overall Stats Error: {e}")
             return None
 
     async def save_search_results(self, query, files, chat_id):

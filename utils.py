@@ -24,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 # ✅ CONSTANTS
 LANGUAGES = ["English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Punjabi", "Marathi", "Gujarati", "Urdu", "Dual Audio", "Multi Audio"]
-# 🔥 UPDATE: Removed "4k" to sync with Database 2160p logic
-QUALITIES = ["Bluray", "2160p", "1080p", "720p", "480p", "360p", "HD", "SD", "CAM", "DVD"]
+
+# 🔥 UPDATE: Removed SD and DVD, Kept 2160p in Sync with DB logic
+QUALITIES = ["Bluray", "2160p", "1080p", "720p", "480p", "360p", "HD", "CAM"]
 
 # ✅ REGEX (Kept as Fallback for Old Data)
 LANG_REGEX = {
@@ -44,18 +45,16 @@ LANG_REGEX = {
     "Multi Audio": re.compile(r"\b(multi[\s\-]?audio)\b", re.IGNORECASE)
 }
 
+# SD aur DVD regex se bhi hata diye
 QUALITY_REGEX = {
     "Bluray": re.compile(r"\b(bluray|blu-ray|bdrip)\b", re.IGNORECASE),
-    "4k": re.compile(r"\b(4k|ultra\s?hd|uhd)\b", re.IGNORECASE),
-    "2160p": re.compile(r"\b2160p\b", re.IGNORECASE),
+    "2160p": re.compile(r"\b(2160p|4k|uhd)\b", re.IGNORECASE),
     "1080p": re.compile(r"\b1080p\b", re.IGNORECASE),
     "720p": re.compile(r"\b720p\b", re.IGNORECASE),
     "480p": re.compile(r"\b480p\b", re.IGNORECASE),
     "360p": re.compile(r"\b360p\b", re.IGNORECASE),
     "HD": re.compile(r"\b(hd|hdtv|hdrip|hq)\b", re.IGNORECASE),
-    "SD": re.compile(r"\b(sd|sdqv)\b", re.IGNORECASE),
-    "CAM": re.compile(r"\b(cam|camrip|hdcam)\b", re.IGNORECASE),
-    "DVD": re.compile(r"\b(dvd|dvdrip)\b", re.IGNORECASE)
+    "CAM": re.compile(r"\b(cam|camrip|hdcam)\b", re.IGNORECASE)
 }
 
 YEAR_REGEX = re.compile(r"\b(?:19|20)\d{2}\b")
@@ -85,10 +84,8 @@ def filter_by_lang(files, lang):
     filtered = []
     regex = LANG_REGEX.get(lang)
     for f in files:
-        # Check DB List first (Fast)
         if lang in f.get('languages', []):
             filtered.append(f)
-        # Fallback for old files
         else:
             text = f.get('file_name', '').lower()
             if regex:
@@ -101,10 +98,8 @@ def filter_by_quality(files, quality):
     filtered = []
     regex = QUALITY_REGEX.get(quality)
     for f in files:
-        # Check DB List first (Fast)
         if quality in f.get('quality', []):
             filtered.append(f)
-        # Fallback for old files
         else:
             fname = f.get('file_name', '')
             if regex:
@@ -117,10 +112,8 @@ def filter_by_year(files, year):
     filtered = []
     target_year = str(year)
     for f in files:
-        # Check DB List first (Fast)
         if target_year in f.get('year', []):
             filtered.append(f)
-        # Fallback for old files
         else:
             fname = f.get('file_name', '')
             if target_year in fname: filtered.append(f)
@@ -149,7 +142,6 @@ def filter_by_size(files, size_range):
 # ==============================================================================
 
 def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None, active_sort=None):
-    # Scan logic
     has_video = False
     has_docs = False
     has_lang_data = False
@@ -163,7 +155,6 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
         if ftype == 'video': has_video = True
         elif ftype == 'document': has_docs = True
         
-        # Languages Check
         if f.get('languages'): has_lang_data = True
         elif not has_lang_data:
             for lang, regex in LANG_REGEX.items():
@@ -171,7 +162,6 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
                     has_lang_data = True
                     break
                     
-        # Quality Check
         if f.get('quality'): has_qual_data = True
         elif not has_qual_data:
             for qual, regex in QUALITY_REGEX.items():
@@ -179,13 +169,11 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
                     has_qual_data = True
                     break
                     
-        # Year Check
         if f.get('year'): has_year_data = True
         elif not has_year_data:
             if YEAR_REGEX.search(fname):
                 has_year_data = True
 
-    # -----------------------------------------------------------
     buttons = []
     
     curr_type = active_filter if active_filter else "none"
@@ -221,7 +209,8 @@ def get_filter_buttons(search_id, files, active_filter=None, active_lang=None, a
         row2.append(InlineKeyboardButton(btn_text, callback_data=f"lang_menu_{search_id}_{curr_type}_{curr_qual}_{curr_year}_{curr_size}_{curr_sort}_{curr_lang}"))
 
     if has_qual_data or (active_qual and active_qual != "none"):
-        btn_text = f"Qual: {active_qual} ✅" if active_qual and active_qual != "none" else "Select Quality 📀"
+        display_qual = "2160p (4k)" if active_qual == "2160p" else active_qual
+        btn_text = f"Qual: {display_qual} ✅" if active_qual and active_qual != "none" else "Select Quality 📀"
         row2.append(InlineKeyboardButton(btn_text, callback_data=f"qual_menu_{search_id}_{curr_type}_{curr_lang}_{curr_year}_{curr_size}_{curr_sort}_{curr_qual}"))
     
     if row2: buttons.append(row2)
@@ -297,11 +286,9 @@ def get_language_buttons(search_id, files, active_type=None, active_qual=None, a
     stats = {lang: 0 for lang in LANGUAGES}
     for file in files:
         langs = file.get('languages', [])
-        # High Speed DB Check
         if langs:
             for lang in langs:
                 stats[lang] = stats.get(lang, 0) + 1
-        # Fallback for old files
         else:
             text = file.get('file_name', '').lower()
             for lang, regex in LANG_REGEX.items():
@@ -334,11 +321,9 @@ def get_quality_buttons(search_id, files, active_type=None, active_lang=None, ac
     stats = {qual: 0 for qual in QUALITIES}
     for file in files:
         quals = file.get('quality', [])
-        # High Speed DB Check
         if quals:
             for qual in quals:
                 stats[qual] = stats.get(qual, 0) + 1
-        # Fallback for old files
         else:
             fname = file.get('file_name', '')
             for qual, regex in QUALITY_REGEX.items():
@@ -347,7 +332,10 @@ def get_quality_buttons(search_id, files, active_type=None, active_lang=None, ac
                 
     for qual, count in stats.items():
         if count > 0:
-            btn_txt = f"{qual} ({count})"
+            # 🔥 DISPLAY LOGIC: Replace 2160p with 2160p (4k) ONLY for the button text
+            display_qual = "2160p (4k)" if qual == "2160p" else qual
+            btn_txt = f"{display_qual} ({count})"
+            
             if qual == active_qual: btn_txt += " ✅"
             row.append(InlineKeyboardButton(btn_txt, callback_data=f"filter_qual_{search_id}_{qual}_{c_type}_{c_lang}_{c_year}_{c_size}_{c_sort}_0"))
         if len(row) == 3:
@@ -371,10 +359,8 @@ def get_year_buttons(search_id, files, active_type=None, active_lang=None, activ
     years = set()
     for file in files:
         yrs = file.get('year', [])
-        # High Speed DB Check
         if yrs:
             for y in yrs: years.add(y)
-        # Fallback for old files
         else:
             fname = file.get('file_name', '')
             matches = YEAR_REGEX.findall(fname)
@@ -473,11 +459,13 @@ def format_detailed_results(files, query, chat_id, time_taken=0):
         
         link = f"https://t.me/{bot_username}?start=get_{link_id}_{chat_id}"
         
-        # High Speed DB Extraction
         db_quals = file.get('quality', [])
         db_langs = file.get('languages', [])
         
-        quality = ", ".join(db_quals) if db_quals else "N/A"
+        # 🔥 Text formatting: Update 2160p to 2160p (4k) in the text response as well
+        formatted_quals = ["2160p (4k)" if q == "2160p" else q for q in db_quals]
+        quality = ", ".join(formatted_quals) if formatted_quals else "N/A"
+        
         lang_str = ", ".join(db_langs) if db_langs else "N/A"
 
         text += f"📂 <a href='{link}'>Click to get this file 📥</a>\n"
@@ -500,7 +488,6 @@ def format_card_result(file, current_index, total_count):
 async def post_to_telegraph(files, query, chat_id):
     if not telegraph_client: return None
     html_content = f"<h3>Search Results for: {query}</h3><br>"
-    # 🔥 REDIRECT LOGIC FOR BOT B
     bot_username = FILE_STORE_BOT if FILE_STORE_BOT else temp.U_NAME
     
     for file in files:
@@ -541,7 +528,6 @@ def get_pagination_row(search_id, current_offset, limit, total_count, active_fil
 def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active_filter=None, active_lang=None, active_qual=None, active_year=None, active_size=None):
     current_files = files[offset : offset + limit]
     buttons = []
-    # 🔥 REDIRECT LOGIC FOR BOT B
     bot_username = FILE_STORE_BOT if FILE_STORE_BOT else temp.U_NAME
     
     for file in current_files:
@@ -565,16 +551,13 @@ async def get_shortlink(site, api, link):
     
     for attempt in range(2):
         try:
-            # Har koshish ke liye max 15 seconds ka wait
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params, timeout=15) as response:
                     if response.status == 200:
                         try:
-                            # content_type=None lagaya taaki Cloudflare ke errors crash na karein
                             data = await response.json(content_type=None)
                         except:
-                            # Agar website ne JSON ki jagah HTML (Error page) bhej diya
-                            if attempt < 1: await asyncio.sleep(2) # Pehli baar fail hua toh 2 sec ruko
+                            if attempt < 1: await asyncio.sleep(2) 
                             continue 
                             
                         if data and "shortenedUrl" in data: 
@@ -582,20 +565,15 @@ async def get_shortlink(site, api, link):
                         elif data and "status" in data and data["status"] == "success" and "shortenedUrl" in data: 
                             return data["shortenedUrl"]
                         else:
-                            # Agar API Key galat hai, toh turant fail kar do
                             return None 
                     else:
-                        # Server down hai (502, 503 error)
                         if attempt < 1: await asyncio.sleep(2)
                         
         except asyncio.TimeoutError:
-            # Website bohot slow hai (Timeout)
             if attempt < 1: await asyncio.sleep(2)
         except Exception as e:
-            # Koi aur internet error
             if attempt < 1: await asyncio.sleep(2)
             
-    # Agar 2 koshish (Attempts) ke baad bhi link na bane, TABHI None return karega (Skip hoga)
     return None
 
 async def _get_fsub_status(bot, user_id, channel_id):

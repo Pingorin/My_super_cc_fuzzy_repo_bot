@@ -464,20 +464,31 @@ class MediaDB:
                 try: await active_search_col.insert_many(search_docs, ordered=False)
                 except: pass
                 
-        try:
-            if update_ops_data[1]: await self.data_col1.bulk_write(update_ops_data[1], ordered=False)
-            if update_ops_search[1]: await self.search_col1.bulk_write(update_ops_search[1], ordered=False)
-        except: pass
+        # 🟢 DB 1 Updates (The Sync-Breaker Fix)
+        if update_ops_data[1]:
+            try: await self.data_col1.bulk_write(update_ops_data[1], ordered=False)
+            except Exception: pass
+        if update_ops_search[1]:
+            try: await self.search_col1.bulk_write(update_ops_search[1], ordered=False)
+            except Exception: pass
+        
+        # 🔵 DB 2 Updates
         if self.has_db2:
-            try:
-                if update_ops_data[2]: await self.data_col2.bulk_write(update_ops_data[2], ordered=False)
-                if update_ops_search[2]: await self.search_col2.bulk_write(update_ops_search[2], ordered=False)
-            except: pass
+            if update_ops_data[2]:
+                try: await self.data_col2.bulk_write(update_ops_data[2], ordered=False)
+                except Exception: pass
+            if update_ops_search[2]:
+                try: await self.search_col2.bulk_write(update_ops_search[2], ordered=False)
+                except Exception: pass
+                
+        # 🟣 DB 3 Updates
         if self.has_db3:
-            try:
-                if update_ops_data[3]: await self.data_col3.bulk_write(update_ops_data[3], ordered=False)
-                if update_ops_search[3]: await self.search_col3.bulk_write(update_ops_search[3], ordered=False)
-            except: pass
+            if update_ops_data[3]:
+                try: await self.data_col3.bulk_write(update_ops_data[3], ordered=False)
+                except Exception: pass
+            if update_ops_search[3]:
+                try: await self.search_col3.bulk_write(update_ops_search[3], ordered=False)
+                except Exception: pass
                 
         return saved_count, pre_duplicate_count
 
@@ -715,8 +726,11 @@ class MediaDB:
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
                 score = x.get('score', 0)
-                if 'name_length' in x and score == 0:
-                    score += (100 / (x['name_length'] + 1)) 
+                
+                # 🛡️ FIX 1: Safe fallback if name_length is None or missing
+                name_len = x.get('name_length') or 0
+                if name_len > 0 and score == 0:
+                    score += (100 / (name_len + 1)) 
 
                 raw_fname = str(x.get('file_name', '')).lower()
                 clean_fname = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
@@ -730,9 +744,13 @@ class MediaDB:
                 if check_name.startswith(core_title + " ") or check_name == core_title: score += 500
                 elif f" {core_title} " in f" {clean_fname} ": score += 100
                 
+                # 🛡️ FIX 2: Crash-Proof Size Logic (Agar DB me size null ho toh 0 maane)
+                raw_size = x.get('file_size') or 0
+                size_mb = raw_size / (1024 * 1024)
+                
                 # Basic Size Penalty (Sirf choti kachra files ko neeche bhejne ke liye)
-                size_mb = x.get('file_size', 0) / (1024 * 1024)
-                if size_mb < 20: score -= 50
+                if size_mb > 0 and size_mb < 20: 
+                    score -= 50
                 
                 return score
 

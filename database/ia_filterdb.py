@@ -41,7 +41,6 @@ class MediaDB:
         self.data_col1 = self.db1.files_data   
         self.search_col1 = self.db1.files_search 
         
-        # Bot ka "Dimaag" (Counters, Settings aur Cache) hamesha DB 1 par rahega!
         self.counters = self.db1.counters
         self.search_cache = self.db1.search_cache 
         self.temp_searches = self.db1.temp_searches
@@ -146,7 +145,6 @@ class MediaDB:
             doc = await self.bot_settings.find_one({"_id": "active_db"})
             if doc: return doc.get("db_num", 1)
         except: pass
-        
         if self.has_db3: return 3
         if self.has_db2: return 2
         return 1
@@ -184,14 +182,12 @@ class MediaDB:
 
         spam_and_tags = [r"download", r"full movie", r"free", r"watch online", r"join", r"esub", r"hc-esub", r"x264", r"x265", r"code"]
         text = re.sub(r"\b(" + "|".join(spam_and_tags) + r")\b", "", text, flags=re.IGNORECASE)
-        
         text = re.sub(r"[^\w\s:()\[\]{}\-&]|_", " ", text)
         return re.sub(r"\s+", " ", text).strip()
 
     @staticmethod
     def parse_metadata(text):
         if not text: return {"quality": [], "languages": [], "year": []}
-        
         text = html.unescape(text)
         cleaned_title = text
         metadata = {"quality": set(), "languages": set(), "year": set()}
@@ -201,19 +197,13 @@ class MediaDB:
             '1080p': '1080p', '720p': '720p', '480p': '480p', '360p': '360p',
             'bluray': 'Bluray', 'blu-ray': 'Bluray', 'bdrip': 'Bluray',
             'hd': 'HD', 'hdtv': 'HD', 'hdrip': 'HD', 'hq': 'HD',
-            'sd': 'SD', 'sdqv': 'SD',
-            'cam': 'CAM', 'camrip': 'CAM', 'hdcam': 'CAM',
-            'dvd': 'DVD', 'dvdrip': 'DVD'
+            'cam': 'CAM', 'camrip': 'CAM', 'hdcam': 'CAM'
         }
-        
-        res_pattern = r"(?i)\b(480p|720p|1080p|2160p|360p|4k|uhd|bluray|blu-ray|bdrip|hd|hdtv|hdrip|hq|sd|sdqv|cam|camrip|hdcam|dvd|dvdrip)\b"
-        
+        res_pattern = r"(?i)\b(480p|720p|1080p|2160p|360p|4k|uhd|bluray|blu-ray|bdrip|hd|hdtv|hdrip|hq|cam|camrip|hdcam)\b"
         for m in re.finditer(res_pattern, cleaned_title):
             raw_val = m.group(1).lower()
             std_qual = qual_map.get(raw_val)
-            if std_qual:
-                metadata['quality'].add(std_qual)
-                
+            if std_qual: metadata['quality'].add(std_qual)
         cleaned_title = re.sub(res_pattern, "", cleaned_title)
 
         lang_map = {
@@ -224,25 +214,19 @@ class MediaDB:
             'mar': 'Marathi', 'marathi': 'Marathi', 'guj': 'Gujarati', 'gujarati': 'Gujarati',
             'urdu': 'Urdu', 'multi': 'Multi Audio', 'dual': 'Dual Audio'
         }
-        
         lang_pattern = r"(?i)\b(hindi|hin|tamil|tam|telugu|tel|malayalam|mal|kannada|kan|english|eng|bengali|ben|punjabi|pun|marathi|mar|gujarati|guj|urdu|multi[\s\-]?audio|dual[\s\-]?audio)\b"
-        
         for m in re.finditer(lang_pattern, cleaned_title):
             raw_val = m.group(1).lower().replace('-', ' ').replace('audio', '').strip()
             standard_lang = lang_map.get(raw_val)
-            if standard_lang:
-                metadata['languages'].add(standard_lang)
-                
+            if standard_lang: metadata['languages'].add(standard_lang)
         cleaned_title = re.sub(lang_pattern, "", cleaned_title)
 
         year_pattern = r"\b(19\d{2}|20\d{2})\b"
         for m in re.finditer(year_pattern, cleaned_title): metadata['year'].add(m.group(1))
-        
         return {"quality": list(metadata["quality"]), "languages": list(metadata["languages"]), "year": list(metadata["year"])}
 
     async def save_batch(self, items):
         if not items: return 0, 0 
-        
         unique_batch_items = []
         batch_ids = set()
         for media, msg in items:
@@ -251,7 +235,6 @@ class MediaDB:
                 unique_batch_items.append((media, msg))
 
         unique_ids = [media.file_unique_id for media, msg in unique_batch_items]
-        
         existing_map = {}
         link_ids_to_check = []
         
@@ -260,13 +243,11 @@ class MediaDB:
             for doc in existing_docs_1: 
                 existing_map[doc['file_unique_id']] = {'db': 1, 'link_id': doc['_id']}
                 link_ids_to_check.append(doc['_id'])
-            
             if self.has_db2:
                 existing_docs_2 = await self.data_col2.find({"file_unique_id": {"$in": unique_ids}}).to_list(length=len(unique_batch_items))
                 for doc in existing_docs_2: 
                     existing_map[doc['file_unique_id']] = {'db': 2, 'link_id': doc['_id']}
                     link_ids_to_check.append(doc['_id'])
-                
             if self.has_db3:
                 existing_docs_3 = await self.data_col3.find({"file_unique_id": {"$in": unique_ids}}).to_list(length=len(unique_batch_items))
                 for doc in existing_docs_3: 
@@ -279,11 +260,9 @@ class MediaDB:
             try:
                 old_search_1 = await self.search_col1.find({"link_id": {"$in": link_ids_to_check}}).to_list(length=len(link_ids_to_check))
                 for doc in old_search_1: old_text_lengths[doc['link_id']] = len(doc.get('file_name', '')) + len(doc.get('search_text', ''))
-                
                 if self.has_db2:
                     old_search_2 = await self.search_col2.find({"link_id": {"$in": link_ids_to_check}}).to_list(length=len(link_ids_to_check))
                     for doc in old_search_2: old_text_lengths[doc['link_id']] = len(doc.get('file_name', '')) + len(doc.get('search_text', ''))
-                
                 if self.has_db3:
                     old_search_3 = await self.search_col3.find({"link_id": {"$in": link_ids_to_check}}).to_list(length=len(link_ids_to_check))
                     for doc in old_search_3: old_text_lengths[doc['link_id']] = len(doc.get('file_name', '')) + len(doc.get('search_text', ''))
@@ -291,7 +270,6 @@ class MediaDB:
 
         new_items = [(media, msg) for media, msg in unique_batch_items if media.file_unique_id not in existing_map]
         update_items = [(media, msg, existing_map[media.file_unique_id]) for media, msg in unique_batch_items if media.file_unique_id in existing_map]
-        
         pre_duplicate_count = len(items) - len(new_items)
             
         count = len(new_items)
@@ -305,7 +283,6 @@ class MediaDB:
         data_docs, search_docs = [], []
         update_ops_data = {1: [], 2: [], 3: []}
         update_ops_search = {1: [], 2: [], 3: []}
-        
         current_id = start_sequence
         all_processing_items = [("new", m, msg, None) for m, msg in new_items] + [("update", m, msg, ex) for m, msg, ex in update_items]
         
@@ -315,7 +292,6 @@ class MediaDB:
             
             meta_name = self.parse_metadata(raw_fname)
             meta_cap = self.parse_metadata(raw_cap)
-
             parsed_meta = {
                 "quality": list(set(meta_name.get('quality', []) + meta_cap.get('quality', []))),
                 "languages": list(set(meta_name.get('languages', []) + meta_cap.get('languages', []))),
@@ -324,7 +300,6 @@ class MediaDB:
             
             clean_fname = self.clean_text(raw_fname)
             meta_regex = r"(?i)(1080p|720p|480p|4k|2160p|s\d+|e\d+|\b19\d{2}\b|\b20\d{2}\b|hindi|tamil|telugu|dual)"
-            
             clean_cap_line = ""
             score_cap = 0
             if raw_cap:
@@ -344,7 +319,6 @@ class MediaDB:
                 final_display_name = clean_fname if (score_cap == 0 and score_fname > 0) else clean_cap_line
             else:
                 final_display_name = clean_fname
-                
             final_display_name = final_display_name or "Unknown File"
 
             untrimmed_raw_text = f"{raw_fname} {raw_cap}"
@@ -354,54 +328,41 @@ class MediaDB:
             untrimmed_raw_text = re.sub(r"(?i)\b(\d{1,2})\s*x\s*(\d{1,4})\b", r"S\1 E\2", untrimmed_raw_text)
             untrimmed_raw_text = re.sub(r"(?i)\b(?:season|s)\s*(\d+)\b", r"S\1", untrimmed_raw_text)
             untrimmed_raw_text = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", untrimmed_raw_text)
-
             seasons = re.findall(r"(?i)\bS(\d+)\b", untrimmed_raw_text)
             episodes = re.findall(r"(?i)\bE(\d+)\b", untrimmed_raw_text)
             
             variations = []
             orig_raw = (media.file_name or "").lower()
-            
             for s in seasons: variations.append(f"s{int(s)} s{str(int(s)).zfill(2)} season{int(s)}")
             for e in episodes: variations.append(f"e{int(e)} e{str(int(e)).zfill(2)} ep{int(e)}")
             for s in seasons:
                 for e in episodes: variations.append(f"s{int(s)}e{int(e)} s{str(int(s)).zfill(2)}e{str(int(e)).zfill(2)}")
-
             for tag in ["part", "vol", "chapter", "ch"]:
                 for v in re.findall(rf"(?i){tag}(?:ume)?\s*(\d+)", orig_raw): variations.append(f"{tag}{v}")
-
             variation_text = " ".join(list(set(variations)))
             spaceless_name = re.sub(r"[^\w]", "", final_display_name).lower()
 
             clean_full_cap = self.clean_text(raw_cap)
             raw_hidden_data = f"{clean_fname} {clean_full_cap}"
-            
             promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
             clean_hidden_data = re.sub(r"<[^>]+>", " ", raw_hidden_data)
             clean_hidden_data = re.sub(promo_patterns, " ", clean_hidden_data, flags=re.IGNORECASE)
-            
             roman_map = {r'I': '1', r'II': '2', r'III': '3', r'IV': '4', r'V': '5', r'VI': '6', r'VII': '7', r'VIII': '8', r'IX': '9', r'X': '10'}
-            for roman, digit in roman_map.items():
-                clean_hidden_data = re.sub(rf"(?i)(?<=\s)\b{roman}\b", digit, clean_hidden_data)
+            for roman, digit in roman_map.items(): clean_hidden_data = re.sub(rf"(?i)(?<=\s)\b{roman}\b", digit, clean_hidden_data)
             
             meta_injection = " ".join(parsed_meta['quality'] + parsed_meta['year'] + parsed_meta['languages'])
             raw_master_text = f"{clean_hidden_data} {spaceless_name} {variation_text} {meta_injection}".lower()
-            
             punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)
             clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
-            
             all_search_words = set(clean_master_text.split())
             display_words = set(re.sub(r"[^\w\s&]", " ", final_display_name.lower()).split())
-            
             spam_words = {"nf", "esub", "esubs", "hc", "x264", "x265", "10bit", "org", "rip", "webdl", "web", "dl", "download", "join", "mkv", "mp4", "avi", "hevc", "crav", "ddp", "aac", "ott", "hdrip", "bluray", "print", "audio", "dual", "multi", "subs", "sub", "telegram", "channel", "movies", "movie", "series", "hd", "hub", "link", "watch", "online", "free", "admin", "upload", "uploaded"}
-            
             final_unique_words = (all_search_words - display_words) - spam_words
             master_search_text = " ".join(final_unique_words)
-
             file_type = "video" if message.video else "document"
 
             if process_type == "new" and current_id > 0:
                 data_docs.append({'_id': current_id, 'msg_id': message.id, 'chat_id': message.chat.id, 'file_id': media.file_id, 'file_unique_id': media.file_unique_id, 'file_type': file_type})
-                
                 search_doc = {
                     'file_name': final_display_name, 'file_size': media.file_size, 'search_text': master_search_text, 
                     'link_id': current_id, 'chat_id': message.chat.id, 'file_type': file_type
@@ -409,35 +370,22 @@ class MediaDB:
                 if parsed_meta['quality']: search_doc['quality'] = parsed_meta['quality']
                 if parsed_meta['languages']: search_doc['languages'] = parsed_meta['languages']
                 if parsed_meta['year']: search_doc['year'] = parsed_meta['year']
-
                 search_docs.append(search_doc)
                 current_id += 1
-                
             elif process_type == "update":
                 db_num = ex_info['db']
                 link_id = ex_info['link_id']
-                
                 new_text_length = len(final_display_name) + len(master_search_text)
                 old_text_length = old_text_lengths.get(link_id, 0)
-                
                 if new_text_length > old_text_length:
-                    data_update = {
-                        'msg_id': message.id, 
-                        'chat_id': message.chat.id, 
-                        'file_id': media.file_id, 
-                        'file_type': file_type
-                    }
+                    data_update = {'msg_id': message.id, 'chat_id': message.chat.id, 'file_id': media.file_id, 'file_type': file_type}
                     search_update = {
-                        'file_name': final_display_name, 
-                        'file_size': media.file_size, 
-                        'search_text': master_search_text, 
-                        'chat_id': message.chat.id, 
-                        'file_type': file_type
+                        'file_name': final_display_name, 'file_size': media.file_size, 'search_text': master_search_text, 
+                        'chat_id': message.chat.id, 'file_type': file_type
                     }
                     search_update['quality'] = parsed_meta['quality'] if parsed_meta['quality'] else []
                     search_update['languages'] = parsed_meta['languages'] if parsed_meta['languages'] else []
                     search_update['year'] = parsed_meta['year'] if parsed_meta['year'] else []
-
                     update_ops_data[db_num].append(UpdateOne({'_id': link_id}, {'$set': data_update}))
                     update_ops_search[db_num].append(UpdateOne({'link_id': link_id}, {'$set': search_update}))
 
@@ -464,15 +412,13 @@ class MediaDB:
                 try: await active_search_col.insert_many(search_docs, ordered=False)
                 except: pass
                 
-        # 🟢 DB 1 Updates (The Sync-Breaker Fix)
+        # 🟢 DB Updates
         if update_ops_data[1]:
             try: await self.data_col1.bulk_write(update_ops_data[1], ordered=False)
             except Exception: pass
         if update_ops_search[1]:
             try: await self.search_col1.bulk_write(update_ops_search[1], ordered=False)
             except Exception: pass
-        
-        # 🔵 DB 2 Updates
         if self.has_db2:
             if update_ops_data[2]:
                 try: await self.data_col2.bulk_write(update_ops_data[2], ordered=False)
@@ -480,8 +426,6 @@ class MediaDB:
             if update_ops_search[2]:
                 try: await self.search_col2.bulk_write(update_ops_search[2], ordered=False)
                 except Exception: pass
-                
-        # 🟣 DB 3 Updates
         if self.has_db3:
             if update_ops_data[3]:
                 try: await self.data_col3.bulk_write(update_ops_data[3], ordered=False)
@@ -516,25 +460,20 @@ class MediaDB:
                 if res3.modified_count > 0: return True
             return False
         except Exception as e:
-            logger.error(f"Error updating file_id for Smart Cache: {e}")
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (ULTRA FAST + MULTI-DB ENGINE)
+    # ⚡ ATLAS FUZZY SEARCH (ULTIMATE EXACT & MULTI-WORD RANKER)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
 
-        # 1. 🔥 UNIVERSAL PRE-PROCESSING (Common for all)
         raw_query = query.strip().lower()
-        raw_query = re.sub(r"[^\w\s]", " ", raw_query) # Punctuation Fix
+        raw_query = re.sub(r"[^\w\s]", " ", raw_query) 
         
-        # Safe Roman Numeral Fix
         roman_map_search = {r'ii': '2', r'iii': '3', r'iv': '4', r'vi': '6', r'vii': '7', r'viii': '8', r'ix': '9'}
-        for roman, digit in roman_map_search.items():
-            raw_query = re.sub(rf"(?i)\b{roman}\b", digit, raw_query)
+        for roman, digit in roman_map_search.items(): raw_query = re.sub(rf"(?i)\b{roman}\b", digit, raw_query)
 
-        # Hinglish & Language Normalizer
         clean_query = re.sub(r"(?i)\b(englsh|engls|engish|egnlish)\b", "english", raw_query)
         clean_query = re.sub(r"(?i)\b(hndi|hind|hni|hin)\b", "hindi", clean_query)
         clean_query = re.sub(r"(?i)\b(tmal|taml|tmil|tam)\b", "tamil", clean_query)
@@ -546,24 +485,38 @@ class MediaDB:
         query_words = clean_query.split()
         normalized_words = [DESI_SPELLING_MAP.get(w, w) for w in query_words]
         
-        # Stop Words for Database Speed
         stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to"}
         atlas_search_query = " ".join([w for w in normalized_words if w not in stop_words]) or clean_query
 
-        # Core Title (Bollywood Hindi Medium Fix)
         meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series", "remastered", "esub", "hq"}
         words_list = clean_query.split()
         while words_list and (words_list[-1] in meta_keywords or re.match(r"^(19|20)\d{2}$", words_list[-1])):
             words_list.pop()
         core_title = " ".join(words_list) if words_list else clean_query
 
+        search_core = core_title
+        if search_core.startswith("the "): search_core = search_core[4:]
+        elif search_core.startswith("a "): search_core = search_core[2:]
+        elif search_core.startswith("an "): search_core = search_core[3:]
+
         files_map = {} 
 
         try:
-            # 2. 🔥 DYNAMIC ATLAS FUZZY SEARCH
             should_clauses = []
+            atlas_words = atlas_search_query.split()
             
-            for word in atlas_search_query.split():
+            # 🔥 NEW FIX: MULTI-WORD PHRASE BOOST (Force Atlas to prioritize full phrase match)
+            if len(atlas_words) > 1:
+                should_clauses.append({
+                    "phrase": {
+                        "query": atlas_search_query,
+                        "path": "file_name",
+                        "slop": 5, 
+                        "score": {"boost": {"value": 50}}
+                    }
+                })
+
+            for word in atlas_words:
                 if any(char.isdigit() for char in word): edits = 0
                 elif len(word) <= 3: edits = 0 
                 elif len(word) <= 5: edits = 1 
@@ -631,7 +584,7 @@ class MediaDB:
             
             if not files_map: raise Exception("Fallback")
         except:
-            # 3. 🛡️ FALLBACK REGEX ENGINE
+            # 3. 🛡️ FALLBACK REGEX ENGINE (Limit increased to 100 for better multi-word net)
             try:
                 fallback_match = {}
                 fallback_or_clauses = []
@@ -671,10 +624,10 @@ class MediaDB:
                 elif sort == "large": fallback_pipeline.append({"$sort": {"file_size": -1}})
                 elif sort == "small": fallback_pipeline.append({"$sort": {"file_size": 1}})
 
-                fallback_pipeline.append({"$limit": 50})
+                fallback_pipeline.append({"$limit": 100})
                 
                 async def fetch_fallback(col, pipe):
-                    try: return await col.aggregate(pipe).to_list(length=50)
+                    try: return await col.aggregate(pipe).to_list(length=100)
                     except: return []
                         
                 fb_tasks = [fetch_fallback(self.search_col1, fallback_pipeline)]
@@ -693,15 +646,13 @@ class MediaDB:
             def smart_sort(x):
                 score = x.get('score', 0)
                 
-                # 🛡️ FIX 1: The Length Tie-Breaker (Hamesha active rahega - chote naam upar)
                 name_len = x.get('name_length') or 0
-                if name_len > 0:
+                if name_len > 0 and score == 0:
                     score += (100 / (name_len + 1)) 
 
                 raw_fname = str(x.get('file_name', '')).lower()
                 clean_fname = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
                 
-                # Article stripping helper
                 def remove_articles(text):
                     if text.startswith("the "): return text[4:]
                     if text.startswith("a "): return text[2:]
@@ -714,23 +665,20 @@ class MediaDB:
                 db_strict = clean_fname
                 db_flex = remove_articles(clean_fname)
 
-                # 👑 THE "THE" FIX & ULTIMATE EXACT DETECTOR
+                # 👑 1. PREFIX AND EXACT MATCH LOGIC
                 if db_strict == search_strict:
-                    score += 2000  # 100% Exact
+                    score += 2000 
                 elif db_strict.startswith(search_strict + " "):
                     remainder = db_strict[len(search_strict):].strip()
                     next_word = remainder.split()[0] if remainder else ""
-                    
                     if re.match(r"^(19|20)\d{2}$", next_word) or next_word in meta_keywords or re.match(r"^s\d+$", next_word):
-                        score += 1000  # Exact movie (Batman 1989)
+                        score += 1000  
                     else:
-                        score += 800   # Prefix match (Batman Begins)
+                        score += 800   
                         
-                # 🛡️ FALLBACK: Agar 'Batman' search kiya, toh 'The Batman' bhi milna chahiye, par neeche
                 elif db_flex.startswith(search_flex + " "):
                     remainder = db_flex[len(search_flex):].strip()
                     next_word = remainder.split()[0] if remainder else ""
-                    
                     if re.match(r"^(19|20)\d{2}$", next_word) or next_word in meta_keywords or re.match(r"^s\d+$", next_word):
                         score += 500
                     else:
@@ -739,6 +687,21 @@ class MediaDB:
                 elif f" {search_flex} " in f" {db_flex} ":
                     score += 100
                 
+                # 🔥 2. NEW FIX: MULTI-WORD PRESENCE BOOST (Solves "Police Wala" and "Batman Begins" single-word clash)
+                search_words_list = search_flex.split()
+                if len(search_words_list) > 1:
+                    matched_count = 0
+                    for w in search_words_list:
+                        # Use root of word (wala -> wal) to match fuzzy filenames
+                        root_w = w[:len(w)-1] if len(w) > 3 else w
+                        if root_w in db_flex:
+                            matched_count += 1
+                            
+                    if matched_count == len(search_words_list):
+                        score += 250  # Massive Boost if ALL words found
+                    else:
+                        score += (matched_count * 15) # Small boost for partial words
+
                 # Crash-Proof Size Penalty
                 raw_size = x.get('file_size') or 0
                 size_mb = raw_size / (1024 * 1024)

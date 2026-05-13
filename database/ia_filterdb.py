@@ -352,7 +352,10 @@ class MediaDB:
             punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)
             clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
             all_search_words = set(clean_master_text.split())
-            display_words = set(re.sub(r"[^\w\s&]", " final_display_name.lower()).split())
+            
+            # ✅ THE FIX IS HERE! Space ke baad quote aur comma add kiya gaya hai
+            display_words = set(re.sub(r"[^\w\s&]", " ", final_display_name.lower()).split())
+            
             spam_words = {"nf", "esub", "esubs", "hc", "x264", "x265", "10bit", "org", "rip", "webdl", "web", "dl", "download", "join", "mkv", "mp4", "avi", "hevc", "crav", "ddp", "aac", "ott", "hdrip", "bluray", "print", "audio", "dual", "multi", "subs", "sub", "telegram", "channel", "movies", "movie", "series", "hd", "hub", "link", "watch", "online", "free", "admin", "upload", "uploaded"}
             final_unique_words = (all_search_words - display_words) - spam_words
             master_search_text = " ".join(final_unique_words)
@@ -460,7 +463,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (THE CORE WEIGHTAGE FIX)
+    # ⚡ ATLAS FUZZY SEARCH
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -487,7 +490,6 @@ class MediaDB:
 
         meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series", "remastered", "esub", "hq"}
         
-        # 🚨 THE DB FETCH FIX: Separate Core and Meta for DB Priority
         search_query_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", clean_query)).strip()
         all_query_words = search_query_full.split()
         
@@ -511,7 +513,6 @@ class MediaDB:
                 })
 
             for word in all_query_words:
-                # 👑 CORE WORDS GET 100x MORE PRIORITY IN DATABASE FETCH
                 is_core = word in search_core_words
                 boost_val = 100 if is_core else 2 
                 
@@ -658,7 +659,19 @@ class MediaDB:
                 def strip_articles(t):
                     return re.sub(r"^(the|a|an)\s+", "", t).strip()
 
-                # TIER 1: Core words matching
+                search_query_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", clean_query)).strip()
+                sq_full_words = search_query_full.split()
+                
+                search_core_words = [w for w in sq_full_words if w not in meta_keywords and not re.match(r"^(19|20)\d{2}$", w)]
+                if not search_core_words: 
+                    search_core_words = sq_full_words 
+                
+                sq_flex = strip_articles(" ".join(search_core_words))
+                db_flex = strip_articles(db_full)
+                db_flex_padded = f" {db_flex} "
+                
+                meta_words = [w for w in sq_full_words if w not in search_core_words]
+
                 if search_core_words:
                     core_matched = 0
                     for w in search_core_words:
@@ -671,17 +684,11 @@ class MediaDB:
                     score += (core_matched * 10000000) 
                     score -= ((len(search_core_words) - core_matched) * 5000000) 
 
-                # TIER 2: Absolute Exact Query Boost
                 if db_full == search_query_full:
                     score += 2500000
                 elif db_full.startswith(search_query_full + " "):
                     score += 2000000
 
-                # TIER 3: Exact Prefix & Sequel Checker
-                sq_flex = strip_articles(" ".join(search_core_words))
-                db_flex = strip_articles(db_full)
-                db_flex_padded = f" {db_flex} "
-                
                 meta_regex = r"^(19\d{2}|20\d{2}|\d{1,3}|i|ii|iii|iv|v|vi|vii|viii|ix|x|part\d+|vol\d+|s\d+|e\d+|hindi|tamil|telugu|malayalam|kannada|english|1080p|720p|480p|4k|bluray|hdrip|cam|esub)$"
 
                 if db_flex == sq_flex:
@@ -696,7 +703,6 @@ class MediaDB:
                 elif f" {sq_flex} " in db_flex_padded:
                     score += 50000
 
-                # TIER 4: Meta Words Scoring
                 if meta_words:
                     meta_matched = 0
                     for w in meta_words:
@@ -705,7 +711,6 @@ class MediaDB:
                     score += (meta_matched * 10000) 
                     score -= ((len(meta_words) - meta_matched) * 500)
 
-                # TIER 5: Tie-Breakers (Size & Length)
                 raw_size = x.get('file_size') or 0
                 size_mb = raw_size / (1024 * 1024)
                 if size_mb > 0 and size_mb < 20: 

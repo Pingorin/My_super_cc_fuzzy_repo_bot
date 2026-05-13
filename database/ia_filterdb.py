@@ -460,7 +460,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (ZERO-META SCORING + ABSOLUTE EXACT BOOST)
+    # ⚡ ATLAS FUZZY SEARCH (THE ULTIMATE BULLETPROOF RANKER v2)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -628,43 +628,50 @@ class MediaDB:
 
         files = list(files_map.values())
 
-        # 4. 🔥 FINAL SMART RANKER (ZERO-META SCORING & THE "THE" FACTOR)
+        # 4. 🔥 FINAL SMART RANKER (THE TRUE CORE FIX)
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
                 score = x.get('score', 0)
                 
                 raw_fname = str(x.get('file_name', '')).lower()
                 db_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
+                db_full_padded = f" {db_full} "
+                
+                db_search_text = str(x.get('search_text', '')).lower()
+                db_langs = " ".join([str(l).lower() for l in x.get('languages', [])])
+                db_quals = " ".join([str(q).lower() for q in x.get('quality', [])])
+                db_year = " ".join([str(y).lower() for y in x.get('year', [])])
+                
+                full_text_to_search = f"{db_full} {db_search_text} {db_langs} {db_quals} {db_year}"
                 
                 def strip_articles(t):
                     return re.sub(r"^(the|a|an)\s+", "", t).strip()
 
-                # User ki actual query jisme "the" aur saare words shamil hain
                 search_query_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", clean_query)).strip()
                 all_query_words = search_query_full.split()
                 
-                # 🔥 FIX 1: Sirf CORE words nikalenge. Language/Quality wale words ko rank score me use hi nahi karna!
+                # Use FULL Query (including "the") for Core Matching so it doesn't fail on db_full
                 search_core_words = [w for w in all_query_words if w not in meta_keywords and not re.match(r"^(19|20)\d{2}$", w)]
                 if not search_core_words: 
-                    search_core_words = all_query_words # Agar galti se sirf "hindi" likha toh fallback
+                    search_core_words = all_query_words 
                 
-                search_core_string = " ".join(search_core_words)
-                sq_flex = strip_articles(search_core_string)
-                
+                sq_flex = strip_articles(" ".join(search_core_words))
                 db_flex = strip_articles(db_full)
                 db_flex_padded = f" {db_flex} "
+                
+                meta_words = [w for w in all_query_words if w not in search_core_words]
 
                 # =========================================================
-                # 🏆 TIER 1: CORE WORDS ONLY (Languages get 0 points)
+                # 🏆 TIER 1: CORE WORDS ONLY (Matched against db_full)
                 # =========================================================
                 if search_core_words:
                     core_matched = 0
                     for w in search_core_words:
                         if len(w) > 3:
                             root_w = w[:-1] 
-                            if root_w in db_flex: core_matched += 1
+                            if root_w in db_full: core_matched += 1
                         else:
-                            if f" {w} " in db_flex_padded: core_matched += 1
+                            if f" {w} " in db_full_padded: core_matched += 1
                     
                     score += (core_matched * 10000000) 
                     score -= ((len(search_core_words) - core_matched) * 5000000) 
@@ -672,11 +679,10 @@ class MediaDB:
                 # =========================================================
                 # 🏆 TIER 2: ABSOLUTE EXACT QUERY BOOST (Solves "The Batman")
                 # =========================================================
-                # Agar user ne special "the" ya poora exact naam likha hai, toh usko extra 20 Lakh points milenge
                 if db_full == search_query_full:
-                    score += 2000000
+                    score += 2500000
                 elif db_full.startswith(search_query_full + " "):
-                    score += 1500000
+                    score += 2000000
 
                 # =========================================================
                 # 🏆 TIER 3: EXACT PREFIX & MOVIE CHECKER
@@ -689,14 +695,25 @@ class MediaDB:
                     remainder = db_flex[len(sq_flex):].strip()
                     next_word = remainder.split()[0] if remainder else ""
                     if re.match(meta_regex, next_word):
-                        score += 500000  # Exact movie (Year/Quality attached)
+                        score += 800000  # Exact movie
                     else:
-                        score += 100000  # Spin-off (Caped/Returns attached)
-                elif f" {sq_flex} " in f" {db_flex} ":
+                        score += 500000  # Spin-off
+                elif f" {sq_flex} " in db_flex_padded:
                     score += 50000
 
                 # =========================================================
-                # 🏆 TIER 4: TIE-BREAKERS (Size & Length)
+                # 🏆 TIER 4: META WORDS SCORING (Language/Quality)
+                # =========================================================
+                if meta_words:
+                    meta_matched = 0
+                    for w in meta_words:
+                        if w in full_text_to_search: meta_matched += 1
+                    
+                    score += (meta_matched * 10000) 
+                    score -= ((len(meta_words) - meta_matched) * 500)
+
+                # =========================================================
+                # 🏆 TIER 5: TIE-BREAKERS (Size & Length)
                 # =========================================================
                 raw_size = x.get('file_size') or 0
                 size_mb = raw_size / (1024 * 1024)

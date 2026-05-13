@@ -460,7 +460,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (STOP-WORD ANNIHILATOR FIX)
+    # ⚡ ATLAS FUZZY SEARCH (SCALED DOWN POINTS SYSTEM)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -482,29 +482,23 @@ class MediaDB:
         query_words = clean_query.split()
         normalized_words = [DESI_SPELLING_MAP.get(w, w) for w in query_words]
         
-        # 🚨 NEW: KACHRA WORDS LIST
         stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to"}
+        atlas_search_query = " ".join([w for w in normalized_words if w not in stop_words]) or clean_query
+
         meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series", "remastered", "esub", "hq"}
         
-        search_query_full = " ".join(normalized_words) or clean_query
+        search_query_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", clean_query)).strip()
         all_query_words = search_query_full.split()
         
-        # Core words jinhe DB me search marna hai (Bina stop words aur meta ke)
-        search_core_words = [w for w in all_query_words if w not in meta_keywords and w not in stop_words and not re.match(r"^(19|20)\d{2}$", w)]
+        search_core_words = [w for w in all_query_words if w not in meta_keywords and not re.match(r"^(19|20)\d{2}$", w)]
         if not search_core_words: 
             search_core_words = all_query_words
-
-        # Jin individual words se Database Fetch karega (is list me se The, Is, Of hata diya gaya hai)
-        meaningful_fetch_words = [w for w in all_query_words if w not in stop_words]
-        if not meaningful_fetch_words:
-            meaningful_fetch_words = all_query_words
 
         files_map = {} 
 
         try:
             should_clauses = []
             
-            # Phrase me pura naam "The Batman" bhejenge taaki Exact Match ka fayda mile
             if len(all_query_words) > 1:
                 should_clauses.append({
                     "phrase": {
@@ -515,8 +509,7 @@ class MediaDB:
                     }
                 })
 
-            # Word by word DB Search (Yahan se 'the', 'of' words block kar diye gaye hain)
-            for word in meaningful_fetch_words:
+            for word in all_query_words:
                 is_core = word in search_core_words
                 boost_val = 100 if is_core else 2 
                 
@@ -591,7 +584,7 @@ class MediaDB:
             try:
                 fallback_match = {}
                 fallback_or_clauses = []
-                for tw in meaningful_fetch_words:
+                for tw in all_query_words:
                     safe_tw = rf"\b{re.escape(tw)}\b"
                     fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})
                     fallback_or_clauses.append({"file_name": {"$regex": safe_tw, "$options": "i"}})
@@ -644,7 +637,7 @@ class MediaDB:
 
         files = list(files_map.values())
 
-        # 4. 🔥 FINAL SMART RANKER 
+        # 4. 🔥 FINAL SMART RANKER (SCALED DOWN POINTS)
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
                 score = x.get('score', 0)
@@ -665,13 +658,10 @@ class MediaDB:
 
                 sq_full_words = search_query_full.split()
                 
-                # TIER 1: Core words (Bina kachra aur meta ke)
-                # Note: Yahan se "the" aur "of" hataya gaya hai taaki "Lord of the rings" me 'of' ki wajah se -50 Lakh ka penalty na aaye.
                 search_core_rank_words = [w for w in sq_full_words if w not in meta_keywords and w not in stop_words and not re.match(r"^(19|20)\d{2}$", w)]
                 if not search_core_rank_words: 
                     search_core_rank_words = sq_full_words 
                 
-                # TIER 3 (Exact check) ke liye full string lenge jisme sirf meta hata hua hai
                 sq_exact_words = [w for w in sq_full_words if w not in meta_keywords and not re.match(r"^(19|20)\d{2}$", w)]
                 if not sq_exact_words: sq_exact_words = sq_full_words
                 
@@ -693,16 +683,16 @@ class MediaDB:
                         else:
                             if f" {w} " in db_full_padded: core_matched += 1
                     
-                    score += (core_matched * 10000000) 
-                    score -= ((len(search_core_rank_words) - core_matched) * 5000000) 
+                    score += (core_matched * 10000) 
+                    score -= ((len(search_core_rank_words) - core_matched) * 5000) 
 
                 # =========================================================
                 # 🏆 TIER 2: ABSOLUTE EXACT QUERY BOOST
                 # =========================================================
                 if db_full == search_query_full:
-                    score += 2500000
+                    score += 2500
                 elif db_full.startswith(search_query_full + " "):
-                    score += 2000000
+                    score += 2000
 
                 # =========================================================
                 # 🏆 TIER 3: EXACT PREFIX & SEQUEL CHECKER
@@ -710,16 +700,16 @@ class MediaDB:
                 meta_regex = r"^(19\d{2}|20\d{2}|\d{1,3}|i|ii|iii|iv|v|vi|vii|viii|ix|x|part\d+|vol\d+|s\d+|e\d+|hindi|tamil|telugu|malayalam|kannada|english|1080p|720p|480p|4k|bluray|hdrip|cam|esub)$"
 
                 if db_flex == sq_flex:
-                    score += 1000000
+                    score += 1000
                 elif db_flex.startswith(sq_flex + " "):
                     remainder = db_flex[len(sq_flex):].strip()
                     next_word = remainder.split()[0] if remainder else ""
                     if re.match(meta_regex, next_word):
-                        score += 800000 
+                        score += 800 
                     else:
-                        score += 500000 
+                        score += 500 
                 elif f" {sq_flex} " in db_flex_padded:
-                    score += 50000
+                    score += 50
 
                 # =========================================================
                 # 🏆 TIER 4: META WORDS SCORING
@@ -729,8 +719,8 @@ class MediaDB:
                     for w in meta_words:
                         if w in full_text_to_search: meta_matched += 1
                     
-                    score += (meta_matched * 10000) 
-                    score -= ((len(meta_words) - meta_matched) * 500)
+                    score += (meta_matched * 10) 
+                    score -= (len(meta_words) - meta_matched)
 
                 # =========================================================
                 # 🏆 TIER 5: TIE-BREAKERS
@@ -738,11 +728,11 @@ class MediaDB:
                 raw_size = x.get('file_size') or 0
                 size_mb = raw_size / (1024 * 1024)
                 if size_mb > 0 and size_mb < 20: 
-                    score -= 10000 
+                    score -= 10 
                     
                 name_len = x.get('name_length') or len(db_full)
                 if name_len > 0:
-                    score += (1000 / (name_len + 1))
+                    score += (10 / (name_len + 1))
                     
                 return score
 

@@ -352,10 +352,7 @@ class MediaDB:
             punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)
             clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
             all_search_words = set(clean_master_text.split())
-            
-            # ✅ FIX APPLIED: Space after the replacement quote and comma added perfectly
             display_words = set(re.sub(r"[^\w\s&]", " ", final_display_name.lower()).split())
-            
             spam_words = {"nf", "esub", "esubs", "hc", "x264", "x265", "10bit", "org", "rip", "webdl", "web", "dl", "download", "join", "mkv", "mp4", "avi", "hevc", "crav", "ddp", "aac", "ott", "hdrip", "bluray", "print", "audio", "dual", "multi", "subs", "sub", "telegram", "channel", "movies", "movie", "series", "hd", "hub", "link", "watch", "online", "free", "admin", "upload", "uploaded"}
             final_unique_words = (all_search_words - display_words) - spam_words
             master_search_text = " ".join(final_unique_words)
@@ -463,7 +460,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (THE MASTER ENGINE v3)
+    # ⚡ ATLAS FUZZY SEARCH (THE ULTIMATE TIERED HIERARCHY ENGINE)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -485,7 +482,6 @@ class MediaDB:
         query_words = clean_query.split()
         normalized_words = [DESI_SPELLING_MAP.get(w, w) for w in query_words]
         
-        # 🚨 KACHRA WORDS LIST
         stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to"}
         meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series", "remastered", "esub", "hq"}
         
@@ -494,50 +490,57 @@ class MediaDB:
         
         all_query_words = search_query_full.split()
         
-        # Core words jinhe DB me search marna hai (Bina stop words aur meta ke)
-        search_core_words = [w for w in all_query_words if w not in meta_keywords and not re.match(r"^(19|20)\d{2}$", w)]
+        search_core_words = [w for w in all_query_words if w not in meta_keywords and w not in stop_words and not re.match(r"^(19|20)\d{2}$", w)]
         if not search_core_words: 
             search_core_words = all_query_words
 
-        # Jin individual words se Database Fetch karega (is list me se The, Is, Of hata diya gaya hai)
-        meaningful_fetch_words = [w for w in all_query_words if w not in stop_words]
-        if not meaningful_fetch_words:
-            meaningful_fetch_words = all_query_words
+        # Number expansion logic for DB fetching (E.g. '2' -> '2 02 s2 s02 e2 part2')
+        def get_expanded_query(w):
+            if w.isdigit(): 
+                return f"{w} 0{w} s{w} s0{w} e{w} e0{w} pt{w} part{w} vol{w}"
+            return w
 
         files_map = {} 
 
         try:
             should_clauses = []
             
-            # Phrase me pura naam bhejenge taaki Exact Match ka fayda mile
+            # 🔥 DB TIER 0: Full Exact Phrase match 
             if len(all_query_words) > 1:
                 should_clauses.append({
                     "phrase": {
                         "query": search_query_full,
                         "path": "file_name",
                         "slop": 10, 
-                        "score": {"boost": {"value": 500}}
+                        "score": {"boost": {"value": 10000}}
                     }
                 })
 
-            # Word by word DB Search (Yahan se 'the', 'of' words block kar diye gaye hain)
+            # 🔥 DB TIER 1: Match ALL typed words (e.g., KGF + 2 + Hindi)
+            if len(all_query_words) > 1:
+                must_all = [{"text": {"query": get_expanded_query(w), "path": ["file_name", "search_text"]}} for w in all_query_words if w not in stop_words]
+                if must_all:
+                    should_clauses.append({"compound": {"must": must_all, "score": {"boost": {"value": 8000}}}})
+
+            # 🔥 DB TIER 2: Match ALL Core words (e.g., KGF + 2)
+            if len(search_core_words) > 1 and len(search_core_words) != len(all_query_words):
+                must_core = [{"text": {"query": get_expanded_query(w), "path": ["file_name", "search_text"]}} for w in search_core_words]
+                if must_core:
+                    should_clauses.append({"compound": {"must": must_core, "score": {"boost": {"value": 5000}}}})
+
+            # 🔥 DB TIER 3: Individual Words Fallback (e.g., Only KGF or Only 2)
+            meaningful_fetch_words = [w for w in all_query_words if w not in stop_words]
+            if not meaningful_fetch_words: meaningful_fetch_words = all_query_words
+
             for word in meaningful_fetch_words:
                 is_core = word in search_core_words
                 boost_val = 100 if is_core else 2 
                 
-                if any(char.isdigit() for char in word): edits = 0
-                elif len(word) <= 3: edits = 0 
-                elif len(word) <= 5: edits = 1 
-                else: edits = 2 
+                expanded_w = get_expanded_query(word)
                 
-                clause_fname = {"text": {"query": word, "path": "file_name", "score": {"boost": {"value": boost_val}}}}
-                clause_stext = {"text": {"query": word, "path": "search_text", "score": {"boost": {"value": boost_val}}}}
+                clause_fname = {"text": {"query": expanded_w, "path": "file_name", "score": {"boost": {"value": boost_val}}}}
+                clause_stext = {"text": {"query": expanded_w, "path": "search_text", "score": {"boost": {"value": boost_val}}}}
                 
-                if edits > 0:
-                    fuzzy_logic = {"maxEdits": edits, "prefixLength": 1, "maxExpansions": 50}
-                    clause_fname["text"]["fuzzy"] = fuzzy_logic
-                    clause_stext["text"]["fuzzy"] = fuzzy_logic
-                    
                 should_clauses.append(clause_fname)
                 should_clauses.append(clause_stext)
 
@@ -595,13 +598,24 @@ class MediaDB:
             # 3. 🛡️ FALLBACK REGEX ENGINE
             try:
                 fallback_match = {}
-                fallback_or_clauses = []
-                for tw in meaningful_fetch_words:
-                    safe_tw = rf"\b{re.escape(tw)}\b"
-                    fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})
-                    fallback_or_clauses.append({"file_name": {"$regex": safe_tw, "$options": "i"}})
+                fallback_and_clauses = []
+                
+                # Regex me bhi saare words ka hona zaruri banayenge (AND logic)
+                for w in search_core_words:
+                    if w.isdigit():
+                        safe_w = rf"\b(0*{w}|s0*{w}|e0*{w}|part\s*0*{w}|vol\s*0*{w}|pt\s*0*{w})\b"
+                    else:
+                        safe_w = rf"\b{re.escape(w)}\b"
                     
-                if fallback_or_clauses: fallback_match["$or"] = fallback_or_clauses
+                    fallback_and_clauses.append({
+                        "$or": [
+                            {"search_text": {"$regex": safe_w, "$options": "i"}}, 
+                            {"file_name": {"$regex": safe_w, "$options": "i"}}
+                        ]
+                    })
+                    
+                if fallback_and_clauses: 
+                    fallback_match["$and"] = fallback_match.get("$and", []) + fallback_and_clauses
                 
                 if file_type and file_type != "none": fallback_match["file_type"] = "video" if file_type.lower() == "video" else "document"
                 if lang and lang != "none":
@@ -649,7 +663,7 @@ class MediaDB:
 
         files = list(files_map.values())
 
-        # 4. 🔥 FINAL SMART RANKER (SCALED DOWN POINTS)
+        # 4. 🔥 FINAL SMART RANKER (THE ULTIMATE HIERARCHY)
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
                 score = x.get('score', 0)
@@ -670,7 +684,6 @@ class MediaDB:
 
                 sq_full_words = search_query_full.split()
                 
-                # Ranker se pehle Stop-words aur Meta nikalna hai (Kyunki points sirf main words ke hain)
                 search_core_rank_words = [w for w in sq_full_words if w not in meta_keywords and w not in stop_words and not re.match(r"^(19|20)\d{2}$", w)]
                 if not search_core_rank_words: 
                     search_core_rank_words = sq_full_words 
@@ -685,16 +698,23 @@ class MediaDB:
                 meta_words = [w for w in sq_full_words if w not in search_core_rank_words and w not in stop_words]
 
                 # =========================================================
-                # 🏆 TIER 1: CORE WORD MATCHING
+                # 🏆 TIER 1: CORE WORD MATCHING (Hierarchical System)
                 # =========================================================
                 if search_core_rank_words:
                     core_matched = 0
                     for w in search_core_rank_words:
                         if len(w) > 3:
                             root_w = w[:-1] 
-                            if root_w in db_full: core_matched += 1
+                            if root_w in full_text_to_search: core_matched += 1
                         else:
-                            if f" {w} " in db_full_padded: core_matched += 1
+                            # Number Expansion Fix for Python Ranker (Checks S02, Part 2 etc)
+                            if w.isdigit():
+                                pattern = rf"\b(0*{w}|s0*{w}|e0*{w}|part\s*0*{w}|vol\s*0*{w}|pt\s*0*{w})\b"
+                                if re.search(pattern, full_text_to_search, re.IGNORECASE):
+                                    core_matched += 1
+                            else:
+                                if f" {w} " in f" {full_text_to_search} ":
+                                    core_matched += 1
                     
                     score += (core_matched * 10000) 
                     score -= ((len(search_core_rank_words) - core_matched) * 5000) 

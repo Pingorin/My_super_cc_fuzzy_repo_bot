@@ -460,7 +460,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (THE ULTIMATE BULLETPROOF RANKER v2)
+    # ⚡ ATLAS FUZZY SEARCH (THE ULTIMATE SEQUEL FIX)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -486,7 +486,18 @@ class MediaDB:
         atlas_search_query = " ".join([w for w in normalized_words if w not in stop_words]) or clean_query
 
         meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series", "remastered", "esub", "hq"}
+        words_list = clean_query.split()
         
+        while words_list and (words_list[-1] in meta_keywords or re.match(r"^(19|20)\d{2}$", words_list[-1])):
+            words_list.pop()
+        
+        core_title = " ".join(words_list) if words_list else clean_query
+
+        search_core = core_title
+        if search_core.startswith("the "): search_core = search_core[4:]
+        elif search_core.startswith("a "): search_core = search_core[2:]
+        elif search_core.startswith("an "): search_core = search_core[3:]
+
         files_map = {} 
 
         try:
@@ -628,7 +639,7 @@ class MediaDB:
 
         files = list(files_map.values())
 
-        # 4. 🔥 FINAL SMART RANKER (THE TRUE CORE FIX)
+        # 4. 🔥 FINAL SMART RANKER (THE SEQUEL FIX)
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
                 score = x.get('score', 0)
@@ -650,7 +661,6 @@ class MediaDB:
                 search_query_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", clean_query)).strip()
                 all_query_words = search_query_full.split()
                 
-                # Use FULL Query (including "the") for Core Matching so it doesn't fail on db_full
                 search_core_words = [w for w in all_query_words if w not in meta_keywords and not re.match(r"^(19|20)\d{2}$", w)]
                 if not search_core_words: 
                     search_core_words = all_query_words 
@@ -662,7 +672,7 @@ class MediaDB:
                 meta_words = [w for w in all_query_words if w not in search_core_words]
 
                 # =========================================================
-                # 🏆 TIER 1: CORE WORDS ONLY (Matched against db_full)
+                # 🏆 TIER 1: CORE WORDS ONLY
                 # =========================================================
                 if search_core_words:
                     core_matched = 0
@@ -677,7 +687,7 @@ class MediaDB:
                     score -= ((len(search_core_words) - core_matched) * 5000000) 
 
                 # =========================================================
-                # 🏆 TIER 2: ABSOLUTE EXACT QUERY BOOST (Solves "The Batman")
+                # 🏆 TIER 2: ABSOLUTE EXACT QUERY BOOST
                 # =========================================================
                 if db_full == search_query_full:
                     score += 2500000
@@ -685,9 +695,10 @@ class MediaDB:
                     score += 2000000
 
                 # =========================================================
-                # 🏆 TIER 3: EXACT PREFIX & MOVIE CHECKER
+                # 🏆 TIER 3: EXACT PREFIX & SEQUEL CHECKER (🚨 THE FIX 🚨)
                 # =========================================================
-                meta_regex = r"^(19\d{2}|20\d{2}|s\d+|e\d+|hindi|tamil|telugu|malayalam|kannada|english|1080p|720p|480p|4k|bluray|hdrip|cam|esub)$"
+                # Yahan humne 1, 2, 3... aur i, ii, iii... add kar diya hai
+                meta_regex = r"^(19\d{2}|20\d{2}|\d{1,3}|i|ii|iii|iv|v|vi|vii|viii|ix|x|part\d+|vol\d+|s\d+|e\d+|hindi|tamil|telugu|malayalam|kannada|english|1080p|720p|480p|4k|bluray|hdrip|cam|esub)$"
 
                 if db_flex == sq_flex:
                     score += 1000000
@@ -695,9 +706,9 @@ class MediaDB:
                     remainder = db_flex[len(sq_flex):].strip()
                     next_word = remainder.split()[0] if remainder else ""
                     if re.match(meta_regex, next_word):
-                        score += 800000  # Exact movie
+                        score += 800000  # Exact movie (Year/Quality OR SEQUEL NUMBER attached)
                     else:
-                        score += 500000  # Spin-off
+                        score += 500000  # Spin-off (Lockdown/Caped attached)
                 elif f" {sq_flex} " in db_flex_padded:
                     score += 50000
 

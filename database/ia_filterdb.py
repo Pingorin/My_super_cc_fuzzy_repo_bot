@@ -4,6 +4,7 @@ import datetime
 import uuid
 import html  
 import asyncio
+import difflib
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError
 from pymongo import ReturnDocument, UpdateOne 
@@ -460,10 +461,14 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (PURE MONGODB ATLAS FUZZY FIX)
+    # ⚡ TRIPLE ENGINE FUZZY SEARCH (ATLAS + REGEX + PYTHON AI)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
-        if not query or not query.strip(): return []
+        logger.info(f"\n" + "="*50)
+        logger.info(f"🔍 NEW SEARCH REQUEST: '{query}'")
+        
+        if not query or not query.strip(): 
+            return []
 
         raw_query = query.strip().lower()
         raw_query = re.sub(r"[^\w\s]", " ", raw_query) 
@@ -493,6 +498,8 @@ class MediaDB:
         search_core_words = [w for w in all_query_words if w not in meta_keywords and w not in stop_words and not re.match(r"^(19|20)\d{2}$", w)]
         if not search_core_words: 
             search_core_words = all_query_words
+            
+        logger.info(f"🧠 Processed Words: {all_query_words} | Core Words: {search_core_words}")
 
         def get_expanded_query(w):
             if w.isdigit(): 
@@ -502,6 +509,7 @@ class MediaDB:
         files_map = {} 
 
         try:
+            logger.info("⚡ Attempting Atlas Native Search...")
             should_clauses = []
             
             if len(all_query_words) > 1:
@@ -531,25 +539,24 @@ class MediaDB:
                 is_core = word in search_core_words
                 boost_val = 100 if is_core else 2 
                 
-                expanded_w = get_expanded_query(word)
+                clause_fname = {"text": {"query": word, "path": "file_name", "score": {"boost": {"value": boost_val}}}}
+                clause_stext = {"text": {"query": word, "path": "search_text", "score": {"boost": {"value": boost_val}}}}
                 
-                clause_fname = {"text": {"query": expanded_w, "path": "file_name", "score": {"boost": {"value": boost_val}}}}
-                clause_stext = {"text": {"query": expanded_w, "path": "search_text", "score": {"boost": {"value": boost_val}}}}
-                
-                # 🔥 THE FIX: Aapka Original MongoDB Fuzzy Logic
                 if not any(char.isdigit() for char in word):
-                    if len(word) <= 3:
-                        edits = 0
-                    elif len(word) <= 5:
-                        edits = 1
-                    else:
-                        edits = 2
+                    if len(word) <= 3: edits = 0
+                    elif len(word) <= 5: edits = 1
+                    else: edits = 2
                         
                     if edits > 0:
-                        fuzzy_logic = {"maxEdits": edits, "prefixLength": 1, "maxExpansions": 50}
+                        fuzzy_logic = {"maxEdits": edits, "maxExpansions": 50}
                         clause_fname["text"]["fuzzy"] = fuzzy_logic
                         clause_stext["text"]["fuzzy"] = fuzzy_logic
                 
+                if word.isdigit():
+                    expanded_w = get_expanded_query(word)
+                    clause_fname["text"]["query"] = expanded_w
+                    clause_stext["text"]["query"] = expanded_w
+                    
                 should_clauses.append(clause_fname)
                 should_clauses.append(clause_stext)
 
@@ -586,8 +593,13 @@ class MediaDB:
             pipeline.append({"$limit": 300}) 
             
             async def fetch_db(col, pipe):
-                try: return await col.aggregate(pipe).to_list(length=300)
-                except: return []
+                try: 
+                    res = await col.aggregate(pipe).to_list(length=300)
+                    logger.info(f"✅ DB Collection '{col.name}' returned {len(res)} results.")
+                    return res
+                except Exception as db_err:
+                    logger.error(f"❌ Error in DB '{col.name}': {db_err}")
+                    return []
             
             tasks = [fetch_db(self.search_col1, pipeline)]
             if self.has_db2: tasks.append(fetch_db(self.search_col2, pipeline))
@@ -597,9 +609,12 @@ class MediaDB:
             for res in all_res:
                 for f in res: files_map[f['link_id']] = f
             
-            if not files_map: raise Exception("Fallback")
-        except:
-            # 🛡️ FALLBACK REGEX ENGINE
+            if not files_map: 
+                logger.warning("⚠️ Atlas Search returned 0 results! Triggering Regex Fallback...")
+                raise Exception("Fallback Triggered")
+                
+        except Exception as e:
+            logger.info("🛡️ Switching to Broad Regex Fallback Engine...")
             try:
                 fallback_match = {}
                 fallback_and_clauses = []
@@ -607,6 +622,11 @@ class MediaDB:
                 for w in search_core_words:
                     if w.isdigit():
                         safe_w = rf"\b(0*{w}|s0*{w}|e0*{w}|part\s*0*{w}|vol\s*0*{w}|pt\s*0*{w})\b"
+                    elif len(w) > 3 and w.isalnum():
+                        # 🔥 ENGINE 2 FIX: Make Regex act like Fuzzy Search! 
+                        # 'hrvest' -> 'h.*r.*v.*e.*s.*t' (It will easily find 'harvest' in DB)
+                        chars = list(re.escape(w))
+                        safe_w = ".*?".join(chars)
                     else:
                         safe_w = rf"\b{re.escape(w)}\b"
                     
@@ -638,8 +658,13 @@ class MediaDB:
                 fallback_pipeline.append({"$limit": 200})
                 
                 async def fetch_fallback(col, pipe):
-                    try: return await col.aggregate(pipe).to_list(length=200)
-                    except: return []
+                    try: 
+                        res = await col.aggregate(pipe).to_list(length=200)
+                        logger.info(f"✅ Fallback DB '{col.name}' returned {len(res)} results.")
+                        return res
+                    except Exception as fb_err:
+                        logger.error(f"❌ Fallback Error in DB '{col.name}': {fb_err}")
+                        return []
                         
                 fb_tasks = [fetch_fallback(self.search_col1, fallback_pipeline)]
                 if self.has_db2: fb_tasks.append(fetch_fallback(self.search_col2, fallback_pipeline))
@@ -648,16 +673,17 @@ class MediaDB:
                 fb_res = await asyncio.gather(*fb_tasks)
                 for res in fb_res:
                     for f in res: files_map[f['link_id']] = f
-            except: pass
+            except Exception as e_fb: 
+                logger.error(f"☠️ Regex Fallback Failed: {e_fb}")
 
         files = list(files_map.values())
+        logger.info(f"📊 Total Raw Files fetched from DB before sorting: {len(files)}")
 
-        # 4. 🔥 FINAL SMART RANKER (RESPECTS ATLAS FUZZY)
+        # ================= ENGINE 3: PYTHON AI RANKER =================
         if files and (sort == "relevance" or not sort):
+            logger.info("🏆 Initializing Smart Ranker...")
             def smart_sort(x):
-                # Atlas ki mehnat (Fuzzy search score) ko point de rahe hain
-                atlas_score = x.get('score', 0)
-                score = atlas_score * 50 
+                score = 0
                 
                 raw_fname = str(x.get('file_name', '')).lower()
                 db_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
@@ -688,15 +714,24 @@ class MediaDB:
                 
                 meta_words = [w for w in sq_full_words if w not in search_core_rank_words and w not in stop_words]
 
-                # =========================================================
-                # 🏆 TIER 1: CORE WORD MATCHING (MONGODB TRUST LOGIC)
-                # =========================================================
+                # 🏆 TIER 1: CORE WORD MATCHING
                 if search_core_rank_words:
                     exact_core_matched = 0
+                    fuzzy_core_matched = 0
                     for w in search_core_rank_words:
                         if len(w) > 3:
                             if w in full_text_to_search or w[:-1] in full_text_to_search:
                                 exact_core_matched += 1
+                            else:
+                                # 🔥 FIX 3: Ranker ab Typo/Spelling Mistakes ko bhi points dega!
+                                matched_fuzzy = False
+                                for db_w in full_text_to_search.split():
+                                    # 70% se zyada match hua to spelling mistake maan lega
+                                    if difflib.SequenceMatcher(None, w, db_w).ratio() >= 0.70:
+                                        matched_fuzzy = True
+                                        break
+                                if matched_fuzzy:
+                                    fuzzy_core_matched += 1
                         else:
                             if w.isdigit():
                                 pattern = rf"\b(0*{w}|s0*{w}|e0*{w}|part\s*0*{w}|vol\s*0*{w}|pt\s*0*{w})\b"
@@ -706,29 +741,20 @@ class MediaDB:
                                 if f" {w} " in f" {full_text_to_search} ":
                                     exact_core_matched += 1
                     
-                    score += (exact_core_matched * 10000) 
+                    score += (exact_core_matched * 10000)
+                    score += (fuzzy_core_matched * 8000)
                     
-                    # 🔥 THE FIX: Agar word exact match nahi hua (Hrvest), par file Database se aayi hai
-                    # Iska matlab Atlas ne Fuzzy Search se spelling theek kar li hai!
-                    # Unhe penalty dene ki jagah 8,000 "Fuzzy Points" dekar Rank 1 par rakho!
-                    fuzzy_matched = len(search_core_rank_words) - exact_core_matched
-                    if fuzzy_matched > 0:
-                        if atlas_score > 0:
-                            score += (fuzzy_matched * 8000)
-                        else:
-                            score -= (fuzzy_matched * 5000)
+                    # Sirf un words ka penalty katega jo file me bilkul bhi nahi hain
+                    missed_words = len(search_core_rank_words) - exact_core_matched - fuzzy_core_matched
+                    score -= (missed_words * 5000)
 
-                # =========================================================
                 # 🏆 TIER 2: ABSOLUTE EXACT QUERY BOOST
-                # =========================================================
                 if db_full == search_query_full:
                     score += 2500
                 elif db_full.startswith(search_query_full + " "):
                     score += 2000
 
-                # =========================================================
                 # 🏆 TIER 3: EXACT PREFIX & SEQUEL CHECKER
-                # =========================================================
                 meta_regex = r"^(19\d{2}|20\d{2}|\d{1,3}|i|ii|iii|iv|v|vi|vii|viii|ix|x|part\d+|vol\d+|s\d+|e\d+|hindi|tamil|telugu|malayalam|kannada|english|1080p|720p|480p|4k|bluray|hdrip|cam|esub)$"
 
                 if db_flex == sq_flex:
@@ -743,9 +769,7 @@ class MediaDB:
                 elif f" {sq_flex} " in db_flex_padded:
                     score += 50
 
-                # =========================================================
                 # 🏆 TIER 4: META WORDS SCORING
-                # =========================================================
                 if meta_words:
                     meta_matched = 0
                     for w in meta_words:
@@ -754,9 +778,7 @@ class MediaDB:
                     score += (meta_matched * 10) 
                     score -= (len(meta_words) - meta_matched)
 
-                # =========================================================
                 # 🏆 TIER 5: TIE-BREAKERS
-                # =========================================================
                 raw_size = x.get('file_size') or 0
                 size_mb = raw_size / (1024 * 1024)
                 if size_mb > 0 and size_mb < 20: 
@@ -770,7 +792,9 @@ class MediaDB:
 
             files.sort(key=smart_sort, reverse=True)
 
-        return files[:100]
+        final_result = files[:100]
+        logger.info(f"🎉 Sending Top {len(final_result)} movies to user.\n" + "="*50)
+        return final_result
 
     async def total_files_count(self): 
         count = await self.data_col1.count_documents({})

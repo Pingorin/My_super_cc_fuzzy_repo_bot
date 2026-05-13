@@ -463,7 +463,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (CORE vs META TIERING LOGIC)
+    # ⚡ ATLAS FUZZY SEARCH (CORE vs META TIERING + EXACT TITLE LOGIC)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -662,12 +662,11 @@ class MediaDB:
                 db_flex = remove_articles(clean_fname)
                 db_flex_padded = f" {db_flex} "
 
-                # 🚀 THE ULTIMATE CORE vs META FIX
                 search_core_words = search_flex.split()
                 all_query_words = atlas_search_query.split()
                 meta_words = [w for w in all_query_words if w not in search_core_words]
 
-                # A) CORE WORDS SCORING (Movie Name is KING: 1,000,000 Points per word)
+                # A) CORE WORDS SCORING (Movie Name is KING)
                 if len(search_core_words) > 0:
                     core_matched = 0
                     for w in search_core_words:
@@ -677,25 +676,30 @@ class MediaDB:
                         else:
                             if f" {w} " in db_flex_padded: core_matched += 1
                     
-                    score += (core_matched * 10000000) # 1 Crore Points per match!
-                    # FATAL PENALTY: Agar movie ka naam hi match nahi hua, toh seedha Gutter me!
+                    score += (core_matched * 10000000) 
                     score -= ((len(search_core_words) - core_matched) * 5000000) 
 
-                # B) META WORDS SCORING (Language/Quality is PAWN: 10,000 Points per word)
+                # B) META WORDS SCORING (Language/Quality is PAWN)
                 if len(meta_words) > 0:
                     meta_matched = 0
                     for w in meta_words:
                         if w in db_flex: meta_matched += 1
                     
-                    score += (meta_matched * 10000) # Sirf 10 hazar points
-                    # No heavy penalty if language is missing, just a tiny minus so exact matches stay slightly above
+                    score += (meta_matched * 10000) 
                     score -= ((len(meta_words) - meta_matched) * 500)
 
-                # 👑 EXACT MATCH BOOST (To tie-break within the same point tier)
+                # 👑 C) EXACT MOVIE DETECTOR (The Missing Piece)
                 if db_flex == search_flex:
-                    score += 100000 
+                    score += 500000 
                 elif db_flex.startswith(search_flex + " "):
-                    score += 50000
+                    remainder = db_flex[len(search_flex):].strip()
+                    next_word = remainder.split()[0] if remainder else ""
+                    
+                    # Agar movie naam ke theek baad Year, Quality ya Season aaye -> MATLAB YAHI ASLI MOVIE HAI
+                    if re.match(r"^(19|20)\d{2}$", next_word) or next_word in meta_keywords or re.match(r"^s\d+$", next_word):
+                        score += 500000  # Massive tie-breaker boost for EXACT movie
+                    else:
+                        score += 100000  # Smaller boost for Spin-offs (e.g. Batman Caped Crusader)
 
                 # Crash-Proof Size Penalty
                 raw_size = x.get('file_size') or 0

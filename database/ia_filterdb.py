@@ -4,7 +4,6 @@ import datetime
 import uuid
 import html  
 import asyncio
-import difflib
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError
 from pymongo import ReturnDocument, UpdateOne 
@@ -461,7 +460,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (THE PERFECT FUZZY MATCH ENGINE)
+    # ⚡ ATLAS FUZZY SEARCH (PURE MONGODB ATLAS FUZZY FIX)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -532,21 +531,25 @@ class MediaDB:
                 is_core = word in search_core_words
                 boost_val = 100 if is_core else 2 
                 
-                if any(char.isdigit() for char in word): edits = 0
-                elif len(word) <= 3: edits = 0 
-                elif len(word) <= 5: edits = 1 
-                else: edits = 2 
-
                 expanded_w = get_expanded_query(word)
                 
                 clause_fname = {"text": {"query": expanded_w, "path": "file_name", "score": {"boost": {"value": boost_val}}}}
                 clause_stext = {"text": {"query": expanded_w, "path": "search_text", "score": {"boost": {"value": boost_val}}}}
                 
-                if edits > 0:
-                    fuzzy_logic = {"maxEdits": edits, "prefixLength": 1, "maxExpansions": 50}
-                    clause_fname["text"]["fuzzy"] = fuzzy_logic
-                    clause_stext["text"]["fuzzy"] = fuzzy_logic
-                    
+                # 🔥 THE FIX: Aapka Original MongoDB Fuzzy Logic
+                if not any(char.isdigit() for char in word):
+                    if len(word) <= 3:
+                        edits = 0
+                    elif len(word) <= 5:
+                        edits = 1
+                    else:
+                        edits = 2
+                        
+                    if edits > 0:
+                        fuzzy_logic = {"maxEdits": edits, "prefixLength": 1, "maxExpansions": 50}
+                        clause_fname["text"]["fuzzy"] = fuzzy_logic
+                        clause_stext["text"]["fuzzy"] = fuzzy_logic
+                
                 should_clauses.append(clause_fname)
                 should_clauses.append(clause_stext)
 
@@ -580,11 +583,6 @@ class MediaDB:
                 }
             })
 
-            if sort == "new": pipeline.append({"$sort": {"_id": -1}}) 
-            elif sort == "old": pipeline.append({"$sort": {"_id": 1}}) 
-            elif sort == "large": pipeline.append({"$sort": {"file_size": -1}}) 
-            elif sort == "small": pipeline.append({"$sort": {"file_size": 1}}) 
-
             pipeline.append({"$limit": 300}) 
             
             async def fetch_db(col, pipe):
@@ -601,7 +599,7 @@ class MediaDB:
             
             if not files_map: raise Exception("Fallback")
         except:
-            # 3. 🛡️ FALLBACK REGEX ENGINE
+            # 🛡️ FALLBACK REGEX ENGINE
             try:
                 fallback_match = {}
                 fallback_and_clauses = []
@@ -628,14 +626,6 @@ class MediaDB:
                     fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": pattern, "$options": "i"}}]}]
                 if quality and quality != "none":
                     fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"quality": quality}, {"file_name": {"$regex": quality, "$options": "i"}}]}]
-                if year and year != "none":
-                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
-                if size_range and size_range != "none":
-                    MB_500, GB_1, GB_2 = 500*1024*1024, 1024*1024*1024, 2*1024*1024*1024
-                    if size_range == "min500": fallback_match["file_size"] = {"$lt": MB_500}
-                    elif size_range == "500-1gb": fallback_match["file_size"] = {"$gte": MB_500, "$lt": GB_1}
-                    elif size_range == "1gb-2gb": fallback_match["file_size"] = {"$gte": GB_1, "$lt": GB_2}
-                    elif size_range == "max2gb": fallback_match["file_size"] = {"$gte": GB_2}
 
                 fallback_pipeline = [
                     {"$match": fallback_match},
@@ -645,12 +635,6 @@ class MediaDB:
                         "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}
                     }}
                 ]
-                
-                if sort == "new": fallback_pipeline.append({"$sort": {"_id": -1}})
-                elif sort == "old": fallback_pipeline.append({"$sort": {"_id": 1}})
-                elif sort == "large": fallback_pipeline.append({"$sort": {"file_size": -1}})
-                elif sort == "small": fallback_pipeline.append({"$sort": {"file_size": 1}})
-
                 fallback_pipeline.append({"$limit": 200})
                 
                 async def fetch_fallback(col, pipe):
@@ -668,10 +652,12 @@ class MediaDB:
 
         files = list(files_map.values())
 
-        # 4. 🔥 FINAL SMART RANKER (WITH NATIVE FUZZY INTELLIGENCE)
+        # 4. 🔥 FINAL SMART RANKER (RESPECTS ATLAS FUZZY)
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
-                score = 0
+                # Atlas ki mehnat (Fuzzy search score) ko point de rahe hain
+                atlas_score = x.get('score', 0)
+                score = atlas_score * 50 
                 
                 raw_fname = str(x.get('file_name', '')).lower()
                 db_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
@@ -703,7 +689,7 @@ class MediaDB:
                 meta_words = [w for w in sq_full_words if w not in search_core_rank_words and w not in stop_words]
 
                 # =========================================================
-                # 🏆 TIER 1: CORE WORD MATCHING
+                # 🏆 TIER 1: CORE WORD MATCHING (MONGODB TRUST LOGIC)
                 # =========================================================
                 if search_core_rank_words:
                     exact_core_matched = 0
@@ -711,15 +697,6 @@ class MediaDB:
                         if len(w) > 3:
                             if w in full_text_to_search or w[:-1] in full_text_to_search:
                                 exact_core_matched += 1
-                            else:
-                                # 🔥 NATIVE FUZZY: Agar exact na mile, par difflib check me 72%+ match ho
-                                matched_fuzzy = False
-                                for db_w in db_full.split():
-                                    if difflib.SequenceMatcher(None, w, db_w).ratio() >= 0.72:
-                                        matched_fuzzy = True
-                                        break
-                                if matched_fuzzy:
-                                    exact_core_matched += 1
                         else:
                             if w.isdigit():
                                 pattern = rf"\b(0*{w}|s0*{w}|e0*{w}|part\s*0*{w}|vol\s*0*{w}|pt\s*0*{w})\b"
@@ -730,7 +707,16 @@ class MediaDB:
                                     exact_core_matched += 1
                     
                     score += (exact_core_matched * 10000) 
-                    score -= ((len(search_core_rank_words) - exact_core_matched) * 5000) 
+                    
+                    # 🔥 THE FIX: Agar word exact match nahi hua (Hrvest), par file Database se aayi hai
+                    # Iska matlab Atlas ne Fuzzy Search se spelling theek kar li hai!
+                    # Unhe penalty dene ki jagah 8,000 "Fuzzy Points" dekar Rank 1 par rakho!
+                    fuzzy_matched = len(search_core_rank_words) - exact_core_matched
+                    if fuzzy_matched > 0:
+                        if atlas_score > 0:
+                            score += (fuzzy_matched * 8000)
+                        else:
+                            score -= (fuzzy_matched * 5000)
 
                 # =========================================================
                 # 🏆 TIER 2: ABSOLUTE EXACT QUERY BOOST

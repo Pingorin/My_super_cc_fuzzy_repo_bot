@@ -460,7 +460,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (THE ULTIMATE BULLETPROOF RANKER)
+    # ⚡ ATLAS FUZZY SEARCH (ZERO-META SCORING + ABSOLUTE EXACT BOOST)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -485,20 +485,8 @@ class MediaDB:
         stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to"}
         atlas_search_query = " ".join([w for w in normalized_words if w not in stop_words]) or clean_query
 
-        # 👑 THE "KING vs PAWN" STRIPPER IS BACK!
         meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series", "remastered", "esub", "hq"}
-        words_list = clean_query.split()
         
-        while words_list and (words_list[-1] in meta_keywords or re.match(r"^(19|20)\d{2}$", words_list[-1])):
-            words_list.pop()
-        
-        core_title = " ".join(words_list) if words_list else clean_query
-
-        search_core = core_title
-        if search_core.startswith("the "): search_core = search_core[4:]
-        elif search_core.startswith("a "): search_core = search_core[2:]
-        elif search_core.startswith("an "): search_core = search_core[3:]
-
         files_map = {} 
 
         try:
@@ -640,7 +628,7 @@ class MediaDB:
 
         files = list(files_map.values())
 
-        # 4. 🔥 FINAL SMART RANKER (THE BULLETPROOF SYSTEM)
+        # 4. 🔥 FINAL SMART RANKER (ZERO-META SCORING & THE "THE" FACTOR)
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
                 score = x.get('score', 0)
@@ -648,27 +636,26 @@ class MediaDB:
                 raw_fname = str(x.get('file_name', '')).lower()
                 db_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
                 
-                db_search_text = str(x.get('search_text', '')).lower()
-                db_langs = " ".join([str(l).lower() for l in x.get('languages', [])])
-                db_quals = " ".join([str(q).lower() for q in x.get('quality', [])])
-                db_year = " ".join([str(y).lower() for y in x.get('year', [])])
-                
-                full_text_to_search = f"{db_full} {db_search_text} {db_langs} {db_quals} {db_year}"
-                
                 def strip_articles(t):
                     return re.sub(r"^(the|a|an)\s+", "", t).strip()
 
+                # User ki actual query jisme "the" aur saare words shamil hain
+                search_query_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", clean_query)).strip()
+                all_query_words = search_query_full.split()
+                
+                # 🔥 FIX 1: Sirf CORE words nikalenge. Language/Quality wale words ko rank score me use hi nahi karna!
+                search_core_words = [w for w in all_query_words if w not in meta_keywords and not re.match(r"^(19|20)\d{2}$", w)]
+                if not search_core_words: 
+                    search_core_words = all_query_words # Agar galti se sirf "hindi" likha toh fallback
+                
+                search_core_string = " ".join(search_core_words)
+                sq_flex = strip_articles(search_core_string)
+                
                 db_flex = strip_articles(db_full)
-                sq_flex = search_core 
-
-                meta_regex = r"^(19\d{2}|20\d{2}|s\d+|e\d+|hindi|tamil|telugu|malayalam|kannada|english|1080p|720p|480p|4k|bluray|hdrip|cam|esub)$"
-
-                search_core_words = sq_flex.split()
-                all_query_words = atlas_search_query.split()
-                meta_words = [w for w in all_query_words if w not in search_core_words]
+                db_flex_padded = f" {db_flex} "
 
                 # =========================================================
-                # 🏆 TIER 1: CORE WORDS SCORING (1 Crore Points Per Word)
+                # 🏆 TIER 1: CORE WORDS ONLY (Languages get 0 points)
                 # =========================================================
                 if search_core_words:
                     core_matched = 0
@@ -677,45 +664,36 @@ class MediaDB:
                             root_w = w[:-1] 
                             if root_w in db_flex: core_matched += 1
                         else:
-                            if f" {w} " in f" {db_flex} ": core_matched += 1
+                            if f" {w} " in db_flex_padded: core_matched += 1
                     
                     score += (core_matched * 10000000) 
                     score -= ((len(search_core_words) - core_matched) * 5000000) 
 
                 # =========================================================
-                # 🏆 TIER 2: META WORDS SCORING (10,000 Points Per Word)
+                # 🏆 TIER 2: ABSOLUTE EXACT QUERY BOOST (Solves "The Batman")
                 # =========================================================
-                if meta_words:
-                    meta_matched = 0
-                    for w in meta_words:
-                        if w in full_text_to_search: meta_matched += 1
-                    
-                    score += (meta_matched * 10000) 
-                    score -= ((len(meta_words) - meta_matched) * 500)
+                # Agar user ne special "the" ya poora exact naam likha hai, toh usko extra 20 Lakh points milenge
+                if db_full == search_query_full:
+                    score += 2000000
+                elif db_full.startswith(search_query_full + " "):
+                    score += 1500000
 
                 # =========================================================
-                # 🏆 TIER 3: EXACT PREFIX & MOVIE CHECKER (Bonus Points)
+                # 🏆 TIER 3: EXACT PREFIX & MOVIE CHECKER
                 # =========================================================
-                # A) Perfect Match
-                if db_flex == sq_flex or db_full == sq_flex:
+                meta_regex = r"^(19\d{2}|20\d{2}|s\d+|e\d+|hindi|tamil|telugu|malayalam|kannada|english|1080p|720p|480p|4k|bluray|hdrip|cam|esub)$"
+
+                if db_flex == sq_flex:
                     score += 1000000
-                else:
-                    # B) Strict Prefix Match (Batman > The Batman)
-                    if db_full.startswith(sq_flex + " "):
-                        score += 300000 
-                    
-                    # C) Exact Movie Check (Batman 1989 > Batman Caped Crusader)
-                    if db_flex.startswith(sq_flex + " "):
-                        remainder = db_flex[len(sq_flex):].strip()
-                        next_word = remainder.split()[0] if remainder else ""
-                        if re.match(meta_regex, next_word):
-                            score += 500000  # Exact movie (Year/Quality attached)
-                        else:
-                            score += 100000  # Spin-off (Caped/Returns attached)
-                            
-                    # D) Middle Match
-                    elif f" {sq_flex} " in f" {db_flex} ":
-                        score += 50000
+                elif db_flex.startswith(sq_flex + " "):
+                    remainder = db_flex[len(sq_flex):].strip()
+                    next_word = remainder.split()[0] if remainder else ""
+                    if re.match(meta_regex, next_word):
+                        score += 500000  # Exact movie (Year/Quality attached)
+                    else:
+                        score += 100000  # Spin-off (Caped/Returns attached)
+                elif f" {sq_flex} " in f" {db_flex} ":
+                    score += 50000
 
                 # =========================================================
                 # 🏆 TIER 4: TIE-BREAKERS (Size & Length)

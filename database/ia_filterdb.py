@@ -35,7 +35,6 @@ LANG_MAP = {
 
 class MediaDB:
     def __init__(self, uri1, uri2, uri3, database_name):
-        # 🟢 PRIMARY DATABASE (DB 1 - The Master)
         self._client1 = AsyncIOMotorClient(uri1)
         self.db1 = self._client1[database_name] 
         self.data_col1 = self.db1.files_data   
@@ -46,7 +45,6 @@ class MediaDB:
         self.temp_searches = self.db1.temp_searches
         self.bot_settings = self.db1.bot_settings 
 
-        # 🔵 SECONDARY DATABASE (DB 2)
         self.has_db2 = bool(uri2 and len(uri2) > 10)
         if self.has_db2:
             self._client2 = AsyncIOMotorClient(uri2)
@@ -56,7 +54,6 @@ class MediaDB:
         else:
             self.db2 = None
 
-        # 🟣 TERTIARY DATABASE (DB 3 - New Storage)
         self.has_db3 = bool(uri3 and len(uri3) > 10)
         if self.has_db3:
             self._client3 = AsyncIOMotorClient(uri3)
@@ -463,7 +460,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (CORE vs META TIERING + EXACT TITLE LOGIC)
+    # ⚡ ATLAS FUZZY SEARCH (THE ULTIMATE BULLETPROOF RANKER)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -488,10 +485,13 @@ class MediaDB:
         stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to"}
         atlas_search_query = " ".join([w for w in normalized_words if w not in stop_words]) or clean_query
 
+        # 👑 THE "KING vs PAWN" STRIPPER IS BACK!
         meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series", "remastered", "esub", "hq"}
         words_list = clean_query.split()
+        
         while words_list and (words_list[-1] in meta_keywords or re.match(r"^(19|20)\d{2}$", words_list[-1])):
             words_list.pop()
+        
         core_title = " ".join(words_list) if words_list else clean_query
 
         search_core = core_title
@@ -640,73 +640,95 @@ class MediaDB:
 
         files = list(files_map.values())
 
-        # 4. 🔥 FINAL SMART RANKER (CORE vs META TIERING)
+        # 4. 🔥 FINAL SMART RANKER (THE BULLETPROOF SYSTEM)
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
                 score = x.get('score', 0)
                 
-                name_len = x.get('name_length') or 0
-                if name_len > 0:
-                    score += (100 / (name_len + 1)) 
-
                 raw_fname = str(x.get('file_name', '')).lower()
-                clean_fname = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
+                db_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
                 
-                def remove_articles(text):
-                    if text.startswith("the "): return text[4:]
-                    if text.startswith("a "): return text[2:]
-                    if text.startswith("an "): return text[3:]
-                    return text
+                db_search_text = str(x.get('search_text', '')).lower()
+                db_langs = " ".join([str(l).lower() for l in x.get('languages', [])])
+                db_quals = " ".join([str(q).lower() for q in x.get('quality', [])])
+                db_year = " ".join([str(y).lower() for y in x.get('year', [])])
+                
+                full_text_to_search = f"{db_full} {db_search_text} {db_langs} {db_quals} {db_year}"
+                
+                def strip_articles(t):
+                    return re.sub(r"^(the|a|an)\s+", "", t).strip()
 
-                search_flex = remove_articles(core_title)
-                db_flex = remove_articles(clean_fname)
-                db_flex_padded = f" {db_flex} "
+                db_flex = strip_articles(db_full)
+                sq_flex = search_core 
 
-                search_core_words = search_flex.split()
+                meta_regex = r"^(19\d{2}|20\d{2}|s\d+|e\d+|hindi|tamil|telugu|malayalam|kannada|english|1080p|720p|480p|4k|bluray|hdrip|cam|esub)$"
+
+                search_core_words = sq_flex.split()
                 all_query_words = atlas_search_query.split()
                 meta_words = [w for w in all_query_words if w not in search_core_words]
 
-                # A) CORE WORDS SCORING (Movie Name is KING)
-                if len(search_core_words) > 0:
+                # =========================================================
+                # 🏆 TIER 1: CORE WORDS SCORING (1 Crore Points Per Word)
+                # =========================================================
+                if search_core_words:
                     core_matched = 0
                     for w in search_core_words:
                         if len(w) > 3:
                             root_w = w[:-1] 
                             if root_w in db_flex: core_matched += 1
                         else:
-                            if f" {w} " in db_flex_padded: core_matched += 1
+                            if f" {w} " in f" {db_flex} ": core_matched += 1
                     
                     score += (core_matched * 10000000) 
                     score -= ((len(search_core_words) - core_matched) * 5000000) 
 
-                # B) META WORDS SCORING (Language/Quality is PAWN)
-                if len(meta_words) > 0:
+                # =========================================================
+                # 🏆 TIER 2: META WORDS SCORING (10,000 Points Per Word)
+                # =========================================================
+                if meta_words:
                     meta_matched = 0
                     for w in meta_words:
-                        if w in db_flex: meta_matched += 1
+                        if w in full_text_to_search: meta_matched += 1
                     
                     score += (meta_matched * 10000) 
                     score -= ((len(meta_words) - meta_matched) * 500)
 
-                # 👑 C) EXACT MOVIE DETECTOR (The Missing Piece)
-                if db_flex == search_flex:
-                    score += 500000 
-                elif db_flex.startswith(search_flex + " "):
-                    remainder = db_flex[len(search_flex):].strip()
-                    next_word = remainder.split()[0] if remainder else ""
+                # =========================================================
+                # 🏆 TIER 3: EXACT PREFIX & MOVIE CHECKER (Bonus Points)
+                # =========================================================
+                # A) Perfect Match
+                if db_flex == sq_flex or db_full == sq_flex:
+                    score += 1000000
+                else:
+                    # B) Strict Prefix Match (Batman > The Batman)
+                    if db_full.startswith(sq_flex + " "):
+                        score += 300000 
                     
-                    # Agar movie naam ke theek baad Year, Quality ya Season aaye -> MATLAB YAHI ASLI MOVIE HAI
-                    if re.match(r"^(19|20)\d{2}$", next_word) or next_word in meta_keywords or re.match(r"^s\d+$", next_word):
-                        score += 500000  # Massive tie-breaker boost for EXACT movie
-                    else:
-                        score += 100000  # Smaller boost for Spin-offs (e.g. Batman Caped Crusader)
+                    # C) Exact Movie Check (Batman 1989 > Batman Caped Crusader)
+                    if db_flex.startswith(sq_flex + " "):
+                        remainder = db_flex[len(sq_flex):].strip()
+                        next_word = remainder.split()[0] if remainder else ""
+                        if re.match(meta_regex, next_word):
+                            score += 500000  # Exact movie (Year/Quality attached)
+                        else:
+                            score += 100000  # Spin-off (Caped/Returns attached)
+                            
+                    # D) Middle Match
+                    elif f" {sq_flex} " in f" {db_flex} ":
+                        score += 50000
 
-                # Crash-Proof Size Penalty
+                # =========================================================
+                # 🏆 TIER 4: TIE-BREAKERS (Size & Length)
+                # =========================================================
                 raw_size = x.get('file_size') or 0
                 size_mb = raw_size / (1024 * 1024)
                 if size_mb > 0 and size_mb < 20: 
-                    score -= 500
-                
+                    score -= 10000 
+                    
+                name_len = x.get('name_length') or len(db_full)
+                if name_len > 0:
+                    score += (1000 / (name_len + 1))
+                    
                 return score
 
             files.sort(key=smart_sort, reverse=True)

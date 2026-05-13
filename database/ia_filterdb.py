@@ -463,7 +463,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (ULTIMATE EXACT & MULTI-WORD RANKER)
+    # ⚡ ATLAS FUZZY SEARCH (ULTIMATE EXACT & MATCH-COUNT TIERING)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -505,14 +505,13 @@ class MediaDB:
             should_clauses = []
             atlas_words = atlas_search_query.split()
             
-            # 🔥 NEW FIX: MULTI-WORD PHRASE BOOST (Force Atlas to prioritize full phrase match)
             if len(atlas_words) > 1:
                 should_clauses.append({
                     "phrase": {
                         "query": atlas_search_query,
                         "path": "file_name",
-                        "slop": 5, 
-                        "score": {"boost": {"value": 50}}
+                        "slop": 10, 
+                        "score": {"boost": {"value": 500}}
                     }
                 })
 
@@ -568,10 +567,10 @@ class MediaDB:
             elif sort == "large": pipeline.append({"$sort": {"file_size": -1}}) 
             elif sort == "small": pipeline.append({"$sort": {"file_size": 1}}) 
 
-            pipeline.append({"$limit": 100}) 
+            pipeline.append({"$limit": 300}) 
             
             async def fetch_db(col, pipe):
-                try: return await col.aggregate(pipe).to_list(length=100)
+                try: return await col.aggregate(pipe).to_list(length=300)
                 except: return []
             
             tasks = [fetch_db(self.search_col1, pipeline)]
@@ -584,7 +583,7 @@ class MediaDB:
             
             if not files_map: raise Exception("Fallback")
         except:
-            # 3. 🛡️ FALLBACK REGEX ENGINE (Limit increased to 100 for better multi-word net)
+            # 3. 🛡️ FALLBACK REGEX ENGINE
             try:
                 fallback_match = {}
                 fallback_or_clauses = []
@@ -624,10 +623,10 @@ class MediaDB:
                 elif sort == "large": fallback_pipeline.append({"$sort": {"file_size": -1}})
                 elif sort == "small": fallback_pipeline.append({"$sort": {"file_size": 1}})
 
-                fallback_pipeline.append({"$limit": 100})
+                fallback_pipeline.append({"$limit": 200})
                 
                 async def fetch_fallback(col, pipe):
-                    try: return await col.aggregate(pipe).to_list(length=100)
+                    try: return await col.aggregate(pipe).to_list(length=200)
                     except: return []
                         
                 fb_tasks = [fetch_fallback(self.search_col1, fallback_pipeline)]
@@ -641,13 +640,13 @@ class MediaDB:
 
         files = list(files_map.values())
 
-        # 4. 🔥 FINAL SMART RANKER (Universal)
+        # 4. 🔥 FINAL SMART RANKER (MATCH-COUNT TIERING)
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
                 score = x.get('score', 0)
                 
                 name_len = x.get('name_length') or 0
-                if name_len > 0 and score == 0:
+                if name_len > 0:
                     score += (100 / (name_len + 1)) 
 
                 raw_fname = str(x.get('file_name', '')).lower()
@@ -664,49 +663,51 @@ class MediaDB:
                 
                 db_strict = clean_fname
                 db_flex = remove_articles(clean_fname)
+                db_flex_padded = f" {db_flex} "
 
-                # 👑 1. PREFIX AND EXACT MATCH LOGIC
+                # 🚀 1. ULTIMATE WORD-COUNT TIERING (Aapki Requirement: 5 match > 4 match > 3 match...)
+                search_words_list = search_flex.split()
+                matched_words = 0
+                
+                if len(search_words_list) > 0:
+                    for w in search_words_list:
+                        if len(w) > 3:
+                            root_w = w[:-1] # Remove last char for variations (wala -> wal)
+                            if root_w in db_flex: matched_words += 1
+                        else:
+                            if f" {w} " in db_flex_padded: matched_words += 1
+                    
+                    # 1,000,000 (10 Lakh) Points PER MATCHED WORD
+                    # Isse sabse zyada words match hone wali file HAMESHA top par rahegi!
+                    score += (matched_words * 1000000)
+
+                # 👑 2. EXACT PHRASE MATCHING (Ek hi tier ke andar tie-breaker ke liye)
                 if db_strict == search_strict:
-                    score += 2000 
+                    score += 100000 
                 elif db_strict.startswith(search_strict + " "):
                     remainder = db_strict[len(search_strict):].strip()
                     next_word = remainder.split()[0] if remainder else ""
                     if re.match(r"^(19|20)\d{2}$", next_word) or next_word in meta_keywords or re.match(r"^s\d+$", next_word):
-                        score += 1000  
+                        score += 80000  
                     else:
-                        score += 800   
+                        score += 60000   
                         
                 elif db_flex.startswith(search_flex + " "):
                     remainder = db_flex[len(search_flex):].strip()
                     next_word = remainder.split()[0] if remainder else ""
                     if re.match(r"^(19|20)\d{2}$", next_word) or next_word in meta_keywords or re.match(r"^s\d+$", next_word):
-                        score += 500
+                        score += 40000
                     else:
-                        score += 300
+                        score += 30000
                         
-                elif f" {search_flex} " in f" {db_flex} ":
-                    score += 100
-                
-                # 🔥 2. NEW FIX: MULTI-WORD PRESENCE BOOST (Solves "Police Wala" and "Batman Begins" single-word clash)
-                search_words_list = search_flex.split()
-                if len(search_words_list) > 1:
-                    matched_count = 0
-                    for w in search_words_list:
-                        # Use root of word (wala -> wal) to match fuzzy filenames
-                        root_w = w[:len(w)-1] if len(w) > 3 else w
-                        if root_w in db_flex:
-                            matched_count += 1
-                            
-                    if matched_count == len(search_words_list):
-                        score += 250  # Massive Boost if ALL words found
-                    else:
-                        score += (matched_count * 15) # Small boost for partial words
+                elif f" {search_flex} " in db_flex_padded:
+                    score += 20000
 
                 # Crash-Proof Size Penalty
                 raw_size = x.get('file_size') or 0
                 size_mb = raw_size / (1024 * 1024)
                 if size_mb > 0 and size_mb < 20: 
-                    score -= 50
+                    score -= 500
                 
                 return score
 

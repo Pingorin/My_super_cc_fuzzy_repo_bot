@@ -460,7 +460,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (THE RETURN OF THE FUZZY ENGINE)
+    # ⚡ ATLAS FUZZY SEARCH (THE ULTIMATE TIERED HIERARCHY ENGINE)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -494,6 +494,7 @@ class MediaDB:
         if not search_core_words: 
             search_core_words = all_query_words
 
+        # Number expansion logic for DB fetching (E.g. '2' -> '2 02 s2 s02 e2 part2')
         def get_expanded_query(w):
             if w.isdigit(): 
                 return f"{w} 0{w} s{w} s0{w} e{w} e0{w} pt{w} part{w} vol{w}"
@@ -504,6 +505,7 @@ class MediaDB:
         try:
             should_clauses = []
             
+            # 🔥 DB TIER 0: Full Exact Phrase match 
             if len(all_query_words) > 1:
                 should_clauses.append({
                     "phrase": {
@@ -514,16 +516,19 @@ class MediaDB:
                     }
                 })
 
+            # 🔥 DB TIER 1: Match ALL typed words (e.g., KGF + 2 + Hindi)
             if len(all_query_words) > 1:
                 must_all = [{"text": {"query": get_expanded_query(w), "path": ["file_name", "search_text"]}} for w in all_query_words if w not in stop_words]
                 if must_all:
                     should_clauses.append({"compound": {"must": must_all, "score": {"boost": {"value": 8000}}}})
 
+            # 🔥 DB TIER 2: Match ALL Core words (e.g., KGF + 2)
             if len(search_core_words) > 1 and len(search_core_words) != len(all_query_words):
                 must_core = [{"text": {"query": get_expanded_query(w), "path": ["file_name", "search_text"]}} for w in search_core_words]
                 if must_core:
                     should_clauses.append({"compound": {"must": must_core, "score": {"boost": {"value": 5000}}}})
 
+            # 🔥 DB TIER 3: Individual Words Fallback (e.g., Only KGF or Only 2)
             meaningful_fetch_words = [w for w in all_query_words if w not in stop_words]
             if not meaningful_fetch_words: meaningful_fetch_words = all_query_words
 
@@ -531,22 +536,11 @@ class MediaDB:
                 is_core = word in search_core_words
                 boost_val = 100 if is_core else 2 
                 
-                # 🔥 YAHI THA WO JADOO JO GALTI SE DELETE HO GAYA THA!
-                if any(char.isdigit() for char in word): edits = 0
-                elif len(word) <= 3: edits = 0 
-                elif len(word) <= 5: edits = 1 
-                else: edits = 2 
-
                 expanded_w = get_expanded_query(word)
                 
                 clause_fname = {"text": {"query": expanded_w, "path": "file_name", "score": {"boost": {"value": boost_val}}}}
                 clause_stext = {"text": {"query": expanded_w, "path": "search_text", "score": {"boost": {"value": boost_val}}}}
                 
-                if edits > 0:
-                    fuzzy_logic = {"maxEdits": edits, "prefixLength": 1, "maxExpansions": 50}
-                    clause_fname["text"]["fuzzy"] = fuzzy_logic
-                    clause_stext["text"]["fuzzy"] = fuzzy_logic
-                    
                 should_clauses.append(clause_fname)
                 should_clauses.append(clause_stext)
 
@@ -606,6 +600,7 @@ class MediaDB:
                 fallback_match = {}
                 fallback_and_clauses = []
                 
+                # Regex me bhi saare words ka hona zaruri banayenge (AND logic)
                 for w in search_core_words:
                     if w.isdigit():
                         safe_w = rf"\b(0*{w}|s0*{w}|e0*{w}|part\s*0*{w}|vol\s*0*{w}|pt\s*0*{w})\b"
@@ -668,12 +663,10 @@ class MediaDB:
 
         files = list(files_map.values())
 
-        # 4. 🔥 FINAL SMART RANKER (THE ATLAS TRUST FIX)
+        # 4. 🔥 FINAL SMART RANKER (THE ULTIMATE HIERARCHY)
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
-                # Pehle Atlas Score ko thodi respect do (Fuzzy me kaam aayega)
-                atlas_score = x.get('score', 0)
-                score = atlas_score * 50 
+                score = x.get('score', 0)
                 
                 raw_fname = str(x.get('file_name', '')).lower()
                 db_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
@@ -705,32 +698,26 @@ class MediaDB:
                 meta_words = [w for w in sq_full_words if w not in search_core_rank_words and w not in stop_words]
 
                 # =========================================================
-                # 🏆 TIER 1: CORE WORD MATCHING (FUZZY TRUST)
+                # 🏆 TIER 1: CORE WORD MATCHING (Hierarchical System)
                 # =========================================================
                 if search_core_rank_words:
-                    exact_core_matched = 0
+                    core_matched = 0
                     for w in search_core_rank_words:
                         if len(w) > 3:
-                            if w in full_text_to_search or w[:-1] in full_text_to_search:
-                                exact_core_matched += 1
+                            root_w = w[:-1] 
+                            if root_w in full_text_to_search: core_matched += 1
                         else:
+                            # Number Expansion Fix for Python Ranker (Checks S02, Part 2 etc)
                             if w.isdigit():
                                 pattern = rf"\b(0*{w}|s0*{w}|e0*{w}|part\s*0*{w}|vol\s*0*{w}|pt\s*0*{w})\b"
                                 if re.search(pattern, full_text_to_search, re.IGNORECASE):
-                                    exact_core_matched += 1
+                                    core_matched += 1
                             else:
                                 if f" {w} " in f" {full_text_to_search} ":
-                                    exact_core_matched += 1
+                                    core_matched += 1
                     
-                    # Agar bilkul exact word mila toh full 10,000 points
-                    score += (exact_core_matched * 10000) 
-                    
-                    # 🔥 THE FIX: Agar word exact match nahi hua (Hrvest), par file Database se aayi hai,
-                    # Iska matlab Atlas ne Fuzzy Search se 'Harvest' dhoondh nikala hai!
-                    # Toh unhe penalty mat do, unhe 8,000 "Fuzzy Points" dekar Rank 1 par rakho!
-                    fuzzy_matched = len(search_core_rank_words) - exact_core_matched
-                    if atlas_score > 0 and fuzzy_matched > 0:
-                        score += (fuzzy_matched * 8000) 
+                    score += (core_matched * 10000) 
+                    score -= ((len(search_core_rank_words) - core_matched) * 5000) 
 
                 # =========================================================
                 # 🏆 TIER 2: ABSOLUTE EXACT QUERY BOOST

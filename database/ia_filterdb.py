@@ -4,6 +4,7 @@ import datetime
 import uuid
 import html  
 import asyncio
+import difflib
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import BulkWriteError
 from pymongo import ReturnDocument, UpdateOne 
@@ -460,7 +461,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (THE RETURN OF THE FUZZY ENGINE)
+    # ⚡ ATLAS FUZZY SEARCH (THE PERFECT FUZZY MATCH ENGINE)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -531,7 +532,6 @@ class MediaDB:
                 is_core = word in search_core_words
                 boost_val = 100 if is_core else 2 
                 
-                # 🔥 YAHI THA WO JADOO JO GALTI SE DELETE HO GAYA THA!
                 if any(char.isdigit() for char in word): edits = 0
                 elif len(word) <= 3: edits = 0 
                 elif len(word) <= 5: edits = 1 
@@ -668,12 +668,10 @@ class MediaDB:
 
         files = list(files_map.values())
 
-        # 4. 🔥 FINAL SMART RANKER (THE ATLAS TRUST FIX)
+        # 4. 🔥 FINAL SMART RANKER (WITH NATIVE FUZZY INTELLIGENCE)
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
-                # Pehle Atlas Score ko thodi respect do (Fuzzy me kaam aayega)
-                atlas_score = x.get('score', 0)
-                score = atlas_score * 50 
+                score = 0
                 
                 raw_fname = str(x.get('file_name', '')).lower()
                 db_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
@@ -705,7 +703,7 @@ class MediaDB:
                 meta_words = [w for w in sq_full_words if w not in search_core_rank_words and w not in stop_words]
 
                 # =========================================================
-                # 🏆 TIER 1: CORE WORD MATCHING (FUZZY TRUST)
+                # 🏆 TIER 1: CORE WORD MATCHING
                 # =========================================================
                 if search_core_rank_words:
                     exact_core_matched = 0
@@ -713,6 +711,15 @@ class MediaDB:
                         if len(w) > 3:
                             if w in full_text_to_search or w[:-1] in full_text_to_search:
                                 exact_core_matched += 1
+                            else:
+                                # 🔥 NATIVE FUZZY: Agar exact na mile, par difflib check me 72%+ match ho
+                                matched_fuzzy = False
+                                for db_w in db_full.split():
+                                    if difflib.SequenceMatcher(None, w, db_w).ratio() >= 0.72:
+                                        matched_fuzzy = True
+                                        break
+                                if matched_fuzzy:
+                                    exact_core_matched += 1
                         else:
                             if w.isdigit():
                                 pattern = rf"\b(0*{w}|s0*{w}|e0*{w}|part\s*0*{w}|vol\s*0*{w}|pt\s*0*{w})\b"
@@ -722,15 +729,8 @@ class MediaDB:
                                 if f" {w} " in f" {full_text_to_search} ":
                                     exact_core_matched += 1
                     
-                    # Agar bilkul exact word mila toh full 10,000 points
                     score += (exact_core_matched * 10000) 
-                    
-                    # 🔥 THE FIX: Agar word exact match nahi hua (Hrvest), par file Database se aayi hai,
-                    # Iska matlab Atlas ne Fuzzy Search se 'Harvest' dhoondh nikala hai!
-                    # Toh unhe penalty mat do, unhe 8,000 "Fuzzy Points" dekar Rank 1 par rakho!
-                    fuzzy_matched = len(search_core_rank_words) - exact_core_matched
-                    if atlas_score > 0 and fuzzy_matched > 0:
-                        score += (fuzzy_matched * 8000) 
+                    score -= ((len(search_core_rank_words) - exact_core_matched) * 5000) 
 
                 # =========================================================
                 # 🏆 TIER 2: ABSOLUTE EXACT QUERY BOOST

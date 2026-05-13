@@ -460,7 +460,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (THE ATLAS TRUST & NO-PENALTY FIX)
+    # ⚡ ATLAS FUZZY SEARCH (THE RETURN OF THE FUZZY ENGINE)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -531,6 +531,12 @@ class MediaDB:
                 is_core = word in search_core_words
                 boost_val = 100 if is_core else 2 
                 
+                # 🔥 YAHI THA WO JADOO JO GALTI SE DELETE HO GAYA THA!
+                if any(char.isdigit() for char in word): edits = 0
+                elif len(word) <= 3: edits = 0 
+                elif len(word) <= 5: edits = 1 
+                else: edits = 2 
+
                 expanded_w = get_expanded_query(word)
                 
                 clause_fname = {"text": {"query": expanded_w, "path": "file_name", "score": {"boost": {"value": boost_val}}}}
@@ -662,10 +668,10 @@ class MediaDB:
 
         files = list(files_map.values())
 
-        # 4. 🔥 FINAL SMART RANKER (THE ATLAS TRUST & NO-PENALTY FIX)
+        # 4. 🔥 FINAL SMART RANKER (THE ATLAS TRUST FIX)
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
-                # 🔥 YAHAN ATLAS KI MEHNAT KO PEHLE POINTS MILTE HAIN
+                # Pehle Atlas Score ko thodi respect do (Fuzzy me kaam aayega)
                 atlas_score = x.get('score', 0)
                 score = atlas_score * 50 
                 
@@ -716,14 +722,14 @@ class MediaDB:
                                 if f" {w} " in f" {full_text_to_search} ":
                                     exact_core_matched += 1
                     
-                    # Exact Match Gets Full 10000 points
+                    # Agar bilkul exact word mila toh full 10,000 points
                     score += (exact_core_matched * 10000) 
                     
-                    # 🔥 THE FIX: Agar word exact nahi mila, par file DB se aayi hai,
-                    # Toh Atlas ne usko Fuzzy match kiya hoga (jaise Hrvest -> Harvest).
-                    # Penalty DENE KE BAJAYE usko Fuzzy Points (8000) do!
+                    # 🔥 THE FIX: Agar word exact match nahi hua (Hrvest), par file Database se aayi hai,
+                    # Iska matlab Atlas ne Fuzzy Search se 'Harvest' dhoondh nikala hai!
+                    # Toh unhe penalty mat do, unhe 8,000 "Fuzzy Points" dekar Rank 1 par rakho!
                     fuzzy_matched = len(search_core_rank_words) - exact_core_matched
-                    if atlas_score > 0:
+                    if atlas_score > 0 and fuzzy_matched > 0:
                         score += (fuzzy_matched * 8000) 
 
                 # =========================================================

@@ -463,7 +463,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (ULTIMATE EXACT & MATCH-COUNT TIERING)
+    # ⚡ ATLAS FUZZY SEARCH (CORE vs META TIERING LOGIC)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -640,7 +640,7 @@ class MediaDB:
 
         files = list(files_map.values())
 
-        # 4. 🔥 FINAL SMART RANKER (MATCH-COUNT TIERING)
+        # 4. 🔥 FINAL SMART RANKER (CORE vs META TIERING)
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
                 score = x.get('score', 0)
@@ -658,50 +658,44 @@ class MediaDB:
                     if text.startswith("an "): return text[3:]
                     return text
 
-                search_strict = core_title
                 search_flex = remove_articles(core_title)
-                
-                db_strict = clean_fname
                 db_flex = remove_articles(clean_fname)
                 db_flex_padded = f" {db_flex} "
 
-                # 🚀 1. ULTIMATE WORD-COUNT TIERING (Aapki Requirement: 5 match > 4 match > 3 match...)
-                search_words_list = search_flex.split()
-                matched_words = 0
-                
-                if len(search_words_list) > 0:
-                    for w in search_words_list:
-                        if len(w) > 3:
-                            root_w = w[:-1] # Remove last char for variations (wala -> wal)
-                            if root_w in db_flex: matched_words += 1
-                        else:
-                            if f" {w} " in db_flex_padded: matched_words += 1
-                    
-                    # 1,000,000 (10 Lakh) Points PER MATCHED WORD
-                    # Isse sabse zyada words match hone wali file HAMESHA top par rahegi!
-                    score += (matched_words * 1000000)
+                # 🚀 THE ULTIMATE CORE vs META FIX
+                search_core_words = search_flex.split()
+                all_query_words = atlas_search_query.split()
+                meta_words = [w for w in all_query_words if w not in search_core_words]
 
-                # 👑 2. EXACT PHRASE MATCHING (Ek hi tier ke andar tie-breaker ke liye)
-                if db_strict == search_strict:
+                # A) CORE WORDS SCORING (Movie Name is KING: 1,000,000 Points per word)
+                if len(search_core_words) > 0:
+                    core_matched = 0
+                    for w in search_core_words:
+                        if len(w) > 3:
+                            root_w = w[:-1] 
+                            if root_w in db_flex: core_matched += 1
+                        else:
+                            if f" {w} " in db_flex_padded: core_matched += 1
+                    
+                    score += (core_matched * 10000000) # 1 Crore Points per match!
+                    # FATAL PENALTY: Agar movie ka naam hi match nahi hua, toh seedha Gutter me!
+                    score -= ((len(search_core_words) - core_matched) * 5000000) 
+
+                # B) META WORDS SCORING (Language/Quality is PAWN: 10,000 Points per word)
+                if len(meta_words) > 0:
+                    meta_matched = 0
+                    for w in meta_words:
+                        if w in db_flex: meta_matched += 1
+                    
+                    score += (meta_matched * 10000) # Sirf 10 hazar points
+                    # No heavy penalty if language is missing, just a tiny minus so exact matches stay slightly above
+                    score -= ((len(meta_words) - meta_matched) * 500)
+
+                # 👑 EXACT MATCH BOOST (To tie-break within the same point tier)
+                if db_flex == search_flex:
                     score += 100000 
-                elif db_strict.startswith(search_strict + " "):
-                    remainder = db_strict[len(search_strict):].strip()
-                    next_word = remainder.split()[0] if remainder else ""
-                    if re.match(r"^(19|20)\d{2}$", next_word) or next_word in meta_keywords or re.match(r"^s\d+$", next_word):
-                        score += 80000  
-                    else:
-                        score += 60000   
-                        
                 elif db_flex.startswith(search_flex + " "):
-                    remainder = db_flex[len(search_flex):].strip()
-                    next_word = remainder.split()[0] if remainder else ""
-                    if re.match(r"^(19|20)\d{2}$", next_word) or next_word in meta_keywords or re.match(r"^s\d+$", next_word):
-                        score += 40000
-                    else:
-                        score += 30000
-                        
-                elif f" {search_flex} " in db_flex_padded:
-                    score += 20000
+                    score += 50000
 
                 # Crash-Proof Size Penalty
                 raw_size = x.get('file_size') or 0

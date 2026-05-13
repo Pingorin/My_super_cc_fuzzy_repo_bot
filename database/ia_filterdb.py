@@ -352,7 +352,10 @@ class MediaDB:
             punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)
             clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
             all_search_words = set(clean_master_text.split())
+            
+            # ✅ FIX APPLIED: Space after the replacement quote and comma added perfectly
             display_words = set(re.sub(r"[^\w\s&]", " ", final_display_name.lower()).split())
+            
             spam_words = {"nf", "esub", "esubs", "hc", "x264", "x265", "10bit", "org", "rip", "webdl", "web", "dl", "download", "join", "mkv", "mp4", "avi", "hevc", "crav", "ddp", "aac", "ott", "hdrip", "bluray", "print", "audio", "dual", "multi", "subs", "sub", "telegram", "channel", "movies", "movie", "series", "hd", "hub", "link", "watch", "online", "free", "admin", "upload", "uploaded"}
             final_unique_words = (all_search_words - display_words) - spam_words
             master_search_text = " ".join(final_unique_words)
@@ -460,7 +463,7 @@ class MediaDB:
             return False
 
     # ==================================================================
-    # ⚡ ATLAS FUZZY SEARCH (SCALED DOWN POINTS SYSTEM)
+    # ⚡ ATLAS FUZZY SEARCH (THE MASTER ENGINE v3)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         if not query or not query.strip(): return []
@@ -482,23 +485,31 @@ class MediaDB:
         query_words = clean_query.split()
         normalized_words = [DESI_SPELLING_MAP.get(w, w) for w in query_words]
         
+        # 🚨 KACHRA WORDS LIST
         stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to"}
-        atlas_search_query = " ".join([w for w in normalized_words if w not in stop_words]) or clean_query
-
         meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series", "remastered", "esub", "hq"}
         
-        search_query_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", clean_query)).strip()
+        search_query_full = re.sub(r"\s+", " ", " ".join(normalized_words)).strip()
+        if not search_query_full: search_query_full = clean_query
+        
         all_query_words = search_query_full.split()
         
+        # Core words jinhe DB me search marna hai (Bina stop words aur meta ke)
         search_core_words = [w for w in all_query_words if w not in meta_keywords and not re.match(r"^(19|20)\d{2}$", w)]
         if not search_core_words: 
             search_core_words = all_query_words
+
+        # Jin individual words se Database Fetch karega (is list me se The, Is, Of hata diya gaya hai)
+        meaningful_fetch_words = [w for w in all_query_words if w not in stop_words]
+        if not meaningful_fetch_words:
+            meaningful_fetch_words = all_query_words
 
         files_map = {} 
 
         try:
             should_clauses = []
             
+            # Phrase me pura naam bhejenge taaki Exact Match ka fayda mile
             if len(all_query_words) > 1:
                 should_clauses.append({
                     "phrase": {
@@ -509,7 +520,8 @@ class MediaDB:
                     }
                 })
 
-            for word in all_query_words:
+            # Word by word DB Search (Yahan se 'the', 'of' words block kar diye gaye hain)
+            for word in meaningful_fetch_words:
                 is_core = word in search_core_words
                 boost_val = 100 if is_core else 2 
                 
@@ -584,7 +596,7 @@ class MediaDB:
             try:
                 fallback_match = {}
                 fallback_or_clauses = []
-                for tw in all_query_words:
+                for tw in meaningful_fetch_words:
                     safe_tw = rf"\b{re.escape(tw)}\b"
                     fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})
                     fallback_or_clauses.append({"file_name": {"$regex": safe_tw, "$options": "i"}})
@@ -658,6 +670,7 @@ class MediaDB:
 
                 sq_full_words = search_query_full.split()
                 
+                # Ranker se pehle Stop-words aur Meta nikalna hai (Kyunki points sirf main words ke hain)
                 search_core_rank_words = [w for w in sq_full_words if w not in meta_keywords and w not in stop_words and not re.match(r"^(19|20)\d{2}$", w)]
                 if not search_core_rank_words: 
                     search_core_rank_words = sq_full_words 

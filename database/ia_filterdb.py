@@ -288,7 +288,8 @@ class MediaDB:
                 clean_cap_line, score_cap = best_cap_line, max_score
             
             score_fname = len(re.findall(meta_regex, raw_fname))
-            final_display_name = clean_fname if (score_cap == 0 and score_fname > 0) else (clean_cap_line if clean_cap_line and len(clean_cap_line) > 3 else clean_fname)
+            if clean_cap_line and len(clean_cap_line) > 3:
+                final_display_name = clean_fname if (score_cap == 0 and score_fname > 0) else (clean_cap_line if clean_cap_line and len(clean_cap_line) > 3 else clean_fname)
             final_display_name = final_display_name or "Unknown File"
 
             untrimmed_raw_text = f"{raw_fname} {raw_cap}"
@@ -322,7 +323,6 @@ class MediaDB:
             meta_injection = " ".join(parsed_meta['quality'] + parsed_meta['year'] + parsed_meta['languages'])
             raw_master_text = f"{clean_hidden_data} {spaceless_name} {' '.join(list(set(variations)))} {meta_injection}".lower()
             
-            # 🔥 Fully restored explicit lines for punctuation and word separation
             punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)
             clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
             
@@ -346,9 +346,18 @@ class MediaDB:
             elif process_type == "update":
                 db_num = ex_info['db']
                 link_id = ex_info['link_id']
-                if (len(final_display_name) + len(master_search_text)) > old_text_lengths.get(link_id, 0):
-                    update_ops_data[db_num].append(UpdateOne({'_id': link_id}, {'$set': {'msg_id': message.id, 'chat_id': message.chat.id, 'file_id': media.file_id, 'file_type': file_type}}))
-                    search_update = {'file_name': final_display_name, 'file_size': media.file_size, 'search_text': master_search_text, 'chat_id': message.chat.id, 'file_type': file_type, 'quality': parsed_meta['quality'], 'languages': parsed_meta['languages'], 'year': parsed_meta['year']}
+                new_text_length = len(final_display_name) + len(master_search_text)
+                old_text_length = old_text_lengths.get(link_id, 0)
+                if new_text_length > old_text_length:
+                    data_update = {'msg_id': message.id, 'chat_id': message.chat.id, 'file_id': media.file_id, 'file_type': file_type}
+                    search_update = {
+                        'file_name': final_display_name, 'file_size': media.file_size, 'search_text': master_search_text, 
+                        'chat_id': message.chat.id, 'file_type': file_type
+                    }
+                    search_update['quality'] = parsed_meta['quality'] if parsed_meta['quality'] else []
+                    search_update['languages'] = parsed_meta['languages'] if parsed_meta['languages'] else []
+                    search_update['year'] = parsed_meta['year'] if parsed_meta['year'] else []
+                    update_ops_data[db_num].append(UpdateOne({'_id': link_id}, {'$set': data_update}))
                     update_ops_search[db_num].append(UpdateOne({'link_id': link_id}, {'$set': search_update}))
 
         saved_count = 0
@@ -360,12 +369,11 @@ class MediaDB:
             if data_docs:
                 try: await active_data_col.insert_many(data_docs, ordered=False); saved_count = len(data_docs)
                 except BulkWriteError as bwe: saved_count = bwe.details['nInserted']
-                except: pass 
+                except Exception: pass 
             if search_docs:
                 try: await active_search_col.insert_many(search_docs, ordered=False)
-                except: pass
+                except Exception: pass
                 
-        # 🔥 Fully restored explicit bulk writes block
         if update_ops_data[1]:
             try: await self.data_col1.bulk_write(update_ops_data[1], ordered=False)
             except Exception: pass
@@ -412,10 +420,10 @@ class MediaDB:
                 res3 = await self.data_col3.update_one({'file_id': old_file_id}, {'$set': {'file_id': new_file_id}})
                 if res3.modified_count > 0: return True
             return False
-        except: return False
+        except Exception: return False
 
     # ==================================================================
-    # ⚡ ATLAS SEARCH (THE ULTIMATE ENGINE - FULLY RESTORED)
+    # ⚡ ATLAS SEARCH (THE ULTIMATE ENGINE - RESTORED)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         logger.info(f"🔍 SEARCH INITIATED: '{query}'")
@@ -455,35 +463,14 @@ class MediaDB:
         files_map = {} 
 
         # ====================================================================================
-        # 🟢 STEP 1: ATLAS SEARCH (ADVANCED TIER 0-3 ENGINE RESTORED)
+        # 🟢 STEP 1: ATLAS SEARCH ENGINE (PRIMARY)
         # ====================================================================================
         try:
             should_clauses = []
             
-            # 🔥 DB TIER 0: Full Exact Phrase match 
             if len(all_query_words) > 1:
-                should_clauses.append({
-                    "phrase": {
-                        "query": search_query_full,
-                        "path": "file_name",
-                        "slop": 10, 
-                        "score": {"boost": {"value": 10000}}
-                    }
-                })
+                should_clauses.append({"phrase": {"query": search_query_full, "path": "file_name", "slop": 10, "score": {"boost": {"value": 10000}}}})
 
-            # 🔥 DB TIER 1: Match ALL typed words
-            if len(all_query_words) > 1:
-                must_all = [{"text": {"query": get_expanded_query(w), "path": ["file_name", "search_text"]}} for w in all_query_words if w not in stop_words]
-                if must_all:
-                    should_clauses.append({"compound": {"must": must_all, "score": {"boost": {"value": 8000}}}})
-
-            # 🔥 DB TIER 2: Match ALL Core words
-            if len(search_core_words) > 1 and len(search_core_words) != len(all_query_words):
-                must_core = [{"text": {"query": get_expanded_query(w), "path": ["file_name", "search_text"]}} for w in search_core_words]
-                if must_core:
-                    should_clauses.append({"compound": {"must": must_core, "score": {"boost": {"value": 5000}}}})
-
-            # 🔥 DB TIER 3: Individual Words Fallback & Fuzzy
             meaningful_fetch_words = [w for w in all_query_words if w not in stop_words]
             if not meaningful_fetch_words: meaningful_fetch_words = all_query_words
 
@@ -491,10 +478,8 @@ class MediaDB:
                 is_core = word in search_core_words
                 boost_val = 100 if is_core else 2 
                 
-                expanded_w = get_expanded_query(word)
-                
-                clause_fname = {"text": {"query": expanded_w, "path": "file_name", "score": {"boost": {"value": boost_val}}}}
-                clause_stext = {"text": {"query": expanded_w, "path": "search_text", "score": {"boost": {"value": boost_val}}}}
+                clause_fname = {"text": {"query": word, "path": "file_name", "score": {"boost": {"value": boost_val}}}}
+                clause_stext = {"text": {"query": word, "path": "search_text", "score": {"boost": {"value": boost_val}}}}
                 
                 if not any(char.isdigit() for char in word):
                     edits = 0 if len(word) <= 3 else (1 if len(word) <= 5 else 2)
@@ -503,6 +488,11 @@ class MediaDB:
                         clause_fname["text"]["fuzzy"] = fuzzy_logic
                         clause_stext["text"]["fuzzy"] = fuzzy_logic
                 
+                if word.isdigit():
+                    expanded_w = get_expanded_query(word)
+                    clause_fname["text"]["query"] = expanded_w
+                    clause_stext["text"]["query"] = expanded_w
+                    
                 should_clauses.append(clause_fname)
                 should_clauses.append(clause_stext)
 
@@ -522,8 +512,6 @@ class MediaDB:
 
             pipeline = [search_stage]
             if match_filters: pipeline.append({"$match": match_filters})
-            
-            # 🔥 No "source": 1 in project
             pipeline.append({"$project": {"file_name": 1, "search_text": 1, "quality": 1, "languages": 1, "year": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1, "score": {"$meta": "searchScore"}, "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}}})
             
             if sort == "new": pipeline.append({"$sort": {"_id": -1}}) 
@@ -565,7 +553,6 @@ class MediaDB:
                 if lang and lang != "none": fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": LANG_MAP.get(lang, lang), "$options": "i"}}]}]
                 if quality and quality != "none": fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"quality": quality}, {"file_name": {"$regex": quality, "$options": "i"}}]}]
                 
-                # 🔥 RESTORED: Year filter for fallback
                 if year and year != "none":
                     fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
 
@@ -599,112 +586,49 @@ class MediaDB:
             except Exception: pass
 
         # ====================================================================================
-        # 🟡 STEP 3: PYTHON RANKER (THE SMART PREFIX & METADATA COMBINER RESTORED)
+        # 🟡 STEP 3: PYTHON RANKER (THE CLEAN NEW ENGINE)
         # ====================================================================================
         files = list(files_map.values())
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
+                # 🔥 Massive Boost to native Atlas fuzzy matching
                 atlas_score = x.get('score', 0)
-                score = atlas_score * 10000  
+                score = atlas_score * 10000 
 
                 raw_fname = str(x.get('file_name', '')).lower()
                 db_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
-                db_full_padded = f" {db_full} "
-                
                 db_search_text = str(x.get('search_text', '')).lower()
-                db_langs = " ".join([str(l).lower() for l in x.get('languages', [])])
-                db_quals = " ".join([str(q).lower() for q in x.get('quality', [])])
-                db_year = " ".join([str(y).lower() for y in x.get('year', [])])
                 
-                full_text_to_search = f"{db_full} {db_search_text} {db_langs} {db_quals} {db_year}"
+                db_words = set(db_full.split())
+                query_words_set = set(search_core_words)
                 
-                def strip_articles(t):
-                    return re.sub(r"^(the|a|an)\s+", "", t).strip()
-
-                sq_full_words = search_query_full.split()
+                # 🏆 TIER 1: Exact Core Word matching
+                for w in search_core_words:
+                    if w in db_full: 
+                        score += 20000 
+                        query_words_set.add(w)
+                    elif w in db_search_text: 
+                        score += 10000 
+                        query_words_set.add(w)
                 
-                search_core_rank_words = [w for w in sq_full_words if w not in meta_keywords and w not in stop_words and not re.match(r"^(19|20)\d{2}$", w)]
-                if not search_core_rank_words: 
-                    search_core_rank_words = sq_full_words 
+                # 🏆 TIER 2: Extra Word Penalty
+                for db_w in db_words:
+                    if db_w not in query_words_set and db_w not in meta_keywords and not re.match(r"^(19|20)\d{2}$", db_w) and db_w not in stop_words:
+                        if re.match(r"^\d+$", db_w):
+                            num = int(db_w)
+                            if num == 1: score -= 200     
+                            elif num == 2: score -= 1000  
+                            elif num == 3: score -= 1500  
+                            else: score -= 2000
+                        else: 
+                            score -= 3000 
+
+                # 🏆 TIER 3: Exact String match
+                if db_full.startswith(search_query_full): score += 5000
                 
-                sq_exact_words = [w for w in sq_full_words if w not in meta_keywords and not re.match(r"^(19|20)\d{2}$", w)]
-                if not sq_exact_words: sq_exact_words = sq_full_words
+                # Tie-breaker length
+                score += (100 / (len(db_full) + 1))
                 
-                sq_flex = strip_articles(" ".join(sq_exact_words))
-                db_flex = strip_articles(db_full)
-                db_flex_padded = f" {db_flex} "
-                
-                meta_words = [w for w in sq_full_words if w not in search_core_rank_words and w not in stop_words]
-
-                # =========================================================
-                # 🏆 TIER 1: CORE WORD MATCHING
-                # =========================================================
-                if search_core_rank_words:
-                    core_matched = 0
-                    for w in search_core_rank_words:
-                        if len(w) > 3:
-                            root_w = w[:-1] 
-                            if root_w in full_text_to_search: core_matched += 1
-                        else:
-                            if w.isdigit():
-                                pattern = rf"\b(0*{w}|s0*{w}|e0*{w}|part\s*0*{w}|vol\s*0*{w}|pt\s*0*{w})\b"
-                                if re.search(pattern, full_text_to_search, re.IGNORECASE):
-                                    core_matched += 1
-                            else:
-                                if f" {w} " in f" {full_text_to_search} ":
-                                    core_matched += 1
-                    
-                    score += (core_matched * 10000) 
-                    score -= ((len(search_core_rank_words) - core_matched) * 5000) 
-
-                # =========================================================
-                # 🏆 TIER 2: ABSOLUTE EXACT QUERY BOOST
-                # =========================================================
-                if db_full == search_query_full:
-                    score += 2500
-                elif db_full.startswith(search_query_full + " "):
-                    score += 2000
-
-                # =========================================================
-                # 🏆 TIER 3: EXACT PREFIX & SEQUEL CHECKER
-                # =========================================================
-                meta_regex = r"^(19\d{2}|20\d{2}|\d{1,3}|i|ii|iii|iv|v|vi|vii|viii|ix|x|part\d+|vol\d+|s\d+|e\d+|hindi|tamil|telugu|malayalam|kannada|english|1080p|720p|480p|4k|bluray|hdrip|cam|esub)$"
-
-                if db_flex == sq_flex:
-                    score += 1000
-                elif db_flex.startswith(sq_flex + " "):
-                    remainder = db_flex[len(sq_flex):].strip()
-                    next_word = remainder.split()[0] if remainder else ""
-                    if re.match(meta_regex, next_word):
-                        score += 800 
-                    else:
-                        score += 500 
-                elif f" {sq_flex} " in db_flex_padded:
-                    score += 50
-
-                # =========================================================
-                # 🏆 TIER 4: META WORDS SCORING
-                # =========================================================
-                if meta_words:
-                    meta_matched = 0
-                    for w in meta_words:
-                        if w in full_text_to_search: meta_matched += 1
-                    
-                    score += (meta_matched * 10) 
-                    score -= (len(meta_words) - meta_matched)
-
-                # =========================================================
-                # 🏆 TIER 5: TIE-BREAKERS
-                # =========================================================
-                raw_size = x.get('file_size') or 0
-                size_mb = raw_size / (1024 * 1024)
-                if size_mb > 0 and size_mb < 20: 
-                    score -= 10 
-                    
-                name_len = x.get('name_length') or len(db_full)
-                if name_len > 0:
-                    score += (10 / (name_len + 1))
-                    
                 return score
 
             files.sort(key=smart_sort, reverse=True)

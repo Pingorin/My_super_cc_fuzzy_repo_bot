@@ -256,7 +256,8 @@ class MediaDB:
             if end_sequence: start_sequence = end_sequence - count + 1
         
         data_docs, search_docs = [], []
-        update_ops_data, update_ops_search = {1: [], 2: [], 3: []}, {1: [], 2: [], 3: []}
+        update_ops_data = {1: [], 2: [], 3: []}
+        update_ops_search = {1: [], 2: [], 3: []}
         current_id = start_sequence
         
         all_processing_items = [("new", m, msg, None) for m, msg in new_items] + [("update", m, msg, ex) for m, msg, ex in update_items]
@@ -321,7 +322,7 @@ class MediaDB:
             meta_injection = " ".join(parsed_meta['quality'] + parsed_meta['year'] + parsed_meta['languages'])
             raw_master_text = f"{clean_hidden_data} {spaceless_name} {' '.join(list(set(variations)))} {meta_injection}".lower()
             
-            # 🔥 RESTORED: Explicit Punctuation Stripping & Display Words Logic
+            # 🔥 Fully restored explicit lines for punctuation and word separation
             punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)
             clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
             
@@ -364,6 +365,7 @@ class MediaDB:
                 try: await active_search_col.insert_many(search_docs, ordered=False)
                 except: pass
                 
+        # 🔥 Fully restored explicit bulk writes block
         if update_ops_data[1]:
             try: await self.data_col1.bulk_write(update_ops_data[1], ordered=False)
             except Exception: pass
@@ -413,7 +415,7 @@ class MediaDB:
         except: return False
 
     # ==================================================================
-    # ⚡ ATLAS SEARCH (THE ULTIMATE ENGINE - RESTORED)
+    # ⚡ ATLAS SEARCH (THE ULTIMATE ENGINE - FULLY RESTORED)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         logger.info(f"🔍 SEARCH INITIATED: '{query}'")
@@ -520,6 +522,8 @@ class MediaDB:
 
             pipeline = [search_stage]
             if match_filters: pipeline.append({"$match": match_filters})
+            
+            # 🔥 No "source": 1 in project
             pipeline.append({"$project": {"file_name": 1, "search_text": 1, "quality": 1, "languages": 1, "year": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1, "score": {"$meta": "searchScore"}, "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}}})
             
             if sort == "new": pipeline.append({"$sort": {"_id": -1}}) 

@@ -320,10 +320,17 @@ class MediaDB:
             
             meta_injection = " ".join(parsed_meta['quality'] + parsed_meta['year'] + parsed_meta['languages'])
             raw_master_text = f"{clean_hidden_data} {spaceless_name} {' '.join(list(set(variations)))} {meta_injection}".lower()
-            clean_master_text = re.sub(r"\s+", " ", re.sub(r"[^\w\s&]", " ", raw_master_text)).strip()
+            
+            # 🔥 RESTORED: Explicit Punctuation Stripping & Display Words Logic
+            punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)
+            clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
+            
+            all_search_words = set(clean_master_text.split())
+            display_words = set(re.sub(r"[^\w\s&]", " ", final_display_name.lower()).split())
             
             spam_words = {"nf", "esub", "esubs", "hc", "x264", "x265", "10bit", "org", "rip", "webdl", "web", "dl", "download", "join", "mkv", "mp4", "avi", "hevc", "crav", "ddp", "aac", "ott", "hdrip", "bluray", "print", "audio", "dual", "multi", "subs", "sub", "telegram", "channel", "movies", "movie", "series", "hd", "hub", "link", "watch", "online", "free", "admin", "upload", "uploaded"}
-            final_unique_words = (set(clean_master_text.split()) - set(re.sub(r"[^\w\s&]", " ", final_display_name.lower()).split())) - spam_words
+            
+            final_unique_words = (all_search_words - display_words) - spam_words
             master_search_text = " ".join(final_unique_words)
             file_type = "video" if message.video else "document"
 
@@ -504,8 +511,6 @@ class MediaDB:
             if lang and lang != "none": match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": LANG_MAP.get(lang, lang), "$options": "i"}}]}]
             if quality and quality != "none": match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"quality": quality}, {"file_name": {"$regex": quality, "$options": "i"}}]}]
             if year and year != "none": match_filters["$and"] = match_filters.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
-            
-            # 🔥 RESTORED: Size Range Filters for Atlas
             if size_range and size_range != "none":
                 MB_500, GB_1, GB_2 = 500*1024*1024, 1024*1024*1024, 2*1024*1024*1024
                 if size_range == "min500": match_filters["file_size"] = {"$lt": MB_500}
@@ -517,7 +522,6 @@ class MediaDB:
             if match_filters: pipeline.append({"$match": match_filters})
             pipeline.append({"$project": {"file_name": 1, "search_text": 1, "quality": 1, "languages": 1, "year": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1, "score": {"$meta": "searchScore"}, "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}}})
             
-            # 🔥 RESTORED: Database Level Sorting for Atlas
             if sort == "new": pipeline.append({"$sort": {"_id": -1}}) 
             elif sort == "old": pipeline.append({"$sort": {"_id": 1}}) 
             elif sort == "large": pipeline.append({"$sort": {"file_size": -1}}) 
@@ -557,7 +561,10 @@ class MediaDB:
                 if lang and lang != "none": fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": LANG_MAP.get(lang, lang), "$options": "i"}}]}]
                 if quality and quality != "none": fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"quality": quality}, {"file_name": {"$regex": quality, "$options": "i"}}]}]
                 
-                # 🔥 RESTORED: Size Range Filters for Fallback
+                # 🔥 RESTORED: Year filter for fallback
+                if year and year != "none":
+                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
+
                 if size_range and size_range != "none":
                     MB_500, GB_1, GB_2 = 500*1024*1024, 1024*1024*1024, 2*1024*1024*1024
                     if size_range == "min500": fallback_match["file_size"] = {"$lt": MB_500}
@@ -567,7 +574,6 @@ class MediaDB:
                 
                 fallback_pipeline = [{"$match": fallback_match}, {"$project": {"file_name": 1, "search_text": 1, "quality": 1, "languages": 1, "year": 1, "link_id": 1, "chat_id": 1, "file_type": 1, "file_size": 1, "name_length": {"$strLenCP": {"$ifNull": ["$file_name", ""]}}}}]
                 
-                # 🔥 RESTORED: Database Level Sorting for Fallback
                 if sort == "new": fallback_pipeline.append({"$sort": {"_id": -1}})
                 elif sort == "old": fallback_pipeline.append({"$sort": {"_id": 1}})
                 elif sort == "large": fallback_pipeline.append({"$sort": {"file_size": -1}})
@@ -595,7 +601,7 @@ class MediaDB:
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
                 atlas_score = x.get('score', 0)
-                score = atlas_score * 10000  # Massive Boost to native Atlas fuzzy matching
+                score = atlas_score * 10000  
 
                 raw_fname = str(x.get('file_name', '')).lower()
                 db_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()

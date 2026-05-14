@@ -460,7 +460,8 @@ class MediaDB:
                 if not any(char.isdigit() for char in word):
                     edits = 0 if len(word) <= 3 else (1 if len(word) <= 5 else 2)
                     if edits > 0:
-                        fuzzy_logic = {"maxEdits": edits, "prefixLength": 0, "maxExpansions": 100}
+                        # 🔥 FIX 1: prefixLength 1 kar diya, ab "Hrvest" Priest ko nahi dhoondhega
+                        fuzzy_logic = {"maxEdits": edits, "prefixLength": 1, "maxExpansions": 100}
                         clause_fname["text"]["fuzzy"] = fuzzy_logic
                         clause_stext["text"]["fuzzy"] = fuzzy_logic
                 
@@ -497,17 +498,13 @@ class MediaDB:
             for res in all_res:
                 for f in res: files_map[f['link_id']] = f
             
-            # 🔥 CRITICAL: Agar Atlas ne 0 results diye, toh Exception raise karo taaki Fallback chal jaye
             if not files_map: 
                 raise Exception("Atlas Search returned 0 results. Forcing Fallback.")
                 
-            logger.info("✅ Atlas Search executed successfully.")
-
         # ====================================================================================
         # 🔴 STEP 2: REGEX FALLBACK ENGINE (ONLY RUNS IF ATLAS FAILS OR RETURNS 0 RESULTS)
         # ====================================================================================
         except Exception as e:
-            logger.warning(f"⚠️ Fallback Triggered: {e}")
             try:
                 fallback_match = {}
                 fallback_and_clauses = []
@@ -537,13 +534,14 @@ class MediaDB:
             except: pass
 
         # ====================================================================================
-        # 🟡 STEP 3: PYTHON RANKER (EXACT TITLE DOMINANCE)
+        # 🟡 STEP 3: PYTHON RANKER (EXACT TITLE & SEQUEL DOMINANCE)
         # ====================================================================================
         files = list(files_map.values())
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
+                # 🔥 FIX 2: Atlas ke genuine score ko priority (No free 8000 points)
                 atlas_score = x.get('score', 0)
-                score = atlas_score * 10 
+                score = atlas_score * 1000 
 
                 raw_fname = str(x.get('file_name', '')).lower()
                 db_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
@@ -552,17 +550,28 @@ class MediaDB:
                 db_words = set(db_full.split())
                 query_words_set = set(search_core_words)
                 
+                # 🏆 TIER 1: Core Word matching
                 for w in search_core_words:
                     if w in db_full: score += 20000 
                     elif w in db_search_text: score += 10000 
                 
-                # Penalty logic to push "Lockdown" down when searching "Police Story"
+                # 🏆 TIER 2: Extra Word Penalty
                 for db_w in db_words:
                     if db_w not in query_words_set and db_w not in meta_keywords and not re.match(r"^(19|20)\d{2}$", db_w) and db_w not in stop_words:
-                        if re.match(r"^\d+$", db_w): score -= 1000 
-                        else: score -= 3000 
+                        if re.match(r"^\d+$", db_w):
+                            num = int(db_w)
+                            # 🔥 FIX 3: Sequel Logic - Chapter 1 hamesha Chapter 2 ke upar!
+                            if num == 1: score -= 200     
+                            elif num == 2: score -= 1000  
+                            elif num == 3: score -= 1500  
+                            else: score -= 2000
+                        else: 
+                            score -= 3000 
 
+                # 🏆 TIER 3: Exact String match
                 if db_full.startswith(search_query_full): score += 5000
+                
+                # Tie-breaker length
                 score += (100 / (len(db_full) + 1))
                 
                 return score

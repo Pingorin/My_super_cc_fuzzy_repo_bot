@@ -274,24 +274,6 @@ class MediaDB:
                 "year": list(set(meta_name.get('year', []) + meta_cap.get('year', [])))
             }
             
-            clean_fname = self.clean_text(raw_fname)
-            meta_regex = r"(?i)(1080p|720p|480p|4k|2160p|s\d+|e\d+|\b19\d{2}\b|\b20\d{2}\b|hindi|tamil|telugu|dual)"
-            
-            clean_cap_line, score_cap = "", 0
-            if raw_cap:
-                best_cap_line, max_score = "", -1
-                for line in html.unescape(raw_cap).split('\n'):
-                    raw_score = len(re.findall(meta_regex, line))
-                    cleaned_line = self.clean_text(line)
-                    if raw_score > max_score and len(cleaned_line) > 3:
-                        max_score, best_cap_line = raw_score, cleaned_line
-                clean_cap_line, score_cap = best_cap_line, max_score
-            
-            score_fname = len(re.findall(meta_regex, raw_fname))
-            if clean_cap_line and len(clean_cap_line) > 3:
-                final_display_name = clean_fname if (score_cap == 0 and score_fname > 0) else (clean_cap_line if clean_cap_line and len(clean_cap_line) > 3 else clean_fname)
-            final_display_name = final_display_name or "Unknown File"
-
             untrimmed_raw_text = f"{raw_fname} {raw_cap}"
             untrimmed_raw_text = re.sub(r"(?i)\bS(\d+)\s*E(\d+)\b", r"S\1 E\2", untrimmed_raw_text)
             untrimmed_raw_text = re.sub(r"(?i)\bS(\d+)\s*(?:-|to)\s*(?:S)?(\d+)\b", lambda m: " ".join([f"S{str(i).zfill(2)}" for i in range(int(m.group(1)), int(m.group(2)) + 1)]), untrimmed_raw_text)
@@ -299,8 +281,45 @@ class MediaDB:
             untrimmed_raw_text = re.sub(r"(?i)\b(\d{1,2})\s*x\s*(\d{1,4})\b", r"S\1 E\2", untrimmed_raw_text)
             untrimmed_raw_text = re.sub(r"(?i)\b(?:season|s)\s*(\d+)\b", r"S\1", untrimmed_raw_text)
             untrimmed_raw_text = re.sub(r"(?i)\b(?:episode|ep|e)\s*(\d+)\b", r"E\1", untrimmed_raw_text)
+            
             seasons = re.findall(r"(?i)\bS(\d+)\b", untrimmed_raw_text)
             episodes = re.findall(r"(?i)\bE(\d+)\b", untrimmed_raw_text)
+
+            # 🔥 Fix 1: Extension-cut + Name Length Comparison Logic
+            clean_fname = self.clean_text(raw_fname)
+            clean_full_cap = self.clean_text(raw_cap) if raw_cap else ""
+            
+            if len(clean_full_cap) > len(clean_fname):
+                final_display_name = clean_full_cap
+            else:
+                final_display_name = clean_fname
+                
+            final_display_name = final_display_name or "Unknown File"
+
+            # 🔥 Fix 2: THE DATA RESCUE (AUTO-REPAIR) BLOCK
+            for s in set(seasons):
+                s_tag = f"S{str(int(s)).zfill(2)}"
+                if s_tag.lower() not in final_display_name.lower() and f"s{int(s)}" not in final_display_name.lower():
+                    final_display_name += f" {s_tag}"
+                    
+            for e in set(episodes):
+                e_tag = f"E{str(int(e)).zfill(2)}"
+                if e_tag.lower() not in final_display_name.lower() and f"e{int(e)}" not in final_display_name.lower():
+                    final_display_name += f" {e_tag}"
+                    
+            for y in parsed_meta.get('year', []):
+                if str(y) not in final_display_name: 
+                    final_display_name += f" {y}"
+                    
+            for q in parsed_meta.get('quality', []):
+                if q.lower() not in final_display_name.lower(): 
+                    final_display_name += f" {q}"
+                    
+            for l in parsed_meta.get('languages', []):
+                if l.lower() not in final_display_name.lower(): 
+                    final_display_name += f" {l}"
+
+            final_display_name = re.sub(r"\s+", " ", final_display_name).strip()
             
             variations = []
             orig_raw = (media.file_name or "").lower()
@@ -312,7 +331,6 @@ class MediaDB:
                 for v in re.findall(rf"(?i){tag}(?:ume)?\s*(\d+)", orig_raw): variations.append(f"{tag}{v}")
             
             spaceless_name = re.sub(r"[^\w]", "", final_display_name).lower()
-            clean_full_cap = self.clean_text(raw_cap)
             raw_hidden_data = f"{clean_fname} {clean_full_cap}"
             promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
             clean_hidden_data = re.sub(promo_patterns, " ", re.sub(r"<[^>]+>", " ", raw_hidden_data), flags=re.IGNORECASE)
@@ -323,6 +341,7 @@ class MediaDB:
             meta_injection = " ".join(parsed_meta['quality'] + parsed_meta['year'] + parsed_meta['languages'])
             raw_master_text = f"{clean_hidden_data} {spaceless_name} {' '.join(list(set(variations)))} {meta_injection}".lower()
             
+            # 🔥 Fix 3: Explicit Punctuation Stripping Lines
             punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)
             clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
             
@@ -343,11 +362,15 @@ class MediaDB:
                 if parsed_meta['year']: search_doc['year'] = parsed_meta['year']
                 search_docs.append(search_doc)
                 current_id += 1
+                
+            # 🔥 Fix 4: Explicit Update Block
             elif process_type == "update":
                 db_num = ex_info['db']
                 link_id = ex_info['link_id']
+                
                 new_text_length = len(final_display_name) + len(master_search_text)
                 old_text_length = old_text_lengths.get(link_id, 0)
+                
                 if new_text_length > old_text_length:
                     data_update = {'msg_id': message.id, 'chat_id': message.chat.id, 'file_id': media.file_id, 'file_type': file_type}
                     search_update = {
@@ -357,6 +380,7 @@ class MediaDB:
                     search_update['quality'] = parsed_meta['quality'] if parsed_meta['quality'] else []
                     search_update['languages'] = parsed_meta['languages'] if parsed_meta['languages'] else []
                     search_update['year'] = parsed_meta['year'] if parsed_meta['year'] else []
+                    
                     update_ops_data[db_num].append(UpdateOne({'_id': link_id}, {'$set': data_update}))
                     update_ops_search[db_num].append(UpdateOne({'link_id': link_id}, {'$set': search_update}))
 
@@ -374,6 +398,7 @@ class MediaDB:
                 try: await active_search_col.insert_many(search_docs, ordered=False)
                 except Exception: pass
                 
+        # 🔥 Fix 5: Explicit Bulk Writes
         if update_ops_data[1]:
             try: await self.data_col1.bulk_write(update_ops_data[1], ordered=False)
             except Exception: pass
@@ -463,7 +488,7 @@ class MediaDB:
         files_map = {} 
 
         # ====================================================================================
-        # 🟢 STEP 1: ATLAS SEARCH ENGINE (PRIMARY)
+        # 🟢 STEP 1: ATLAS SEARCH ENGINE
         # ====================================================================================
         try:
             should_clauses = []

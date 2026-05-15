@@ -466,7 +466,8 @@ class MediaDB:
         query_words = clean_query.split()
         normalized_words = [DESI_MAP.get(w, w) for w in query_words]
         
-        stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to"}
+        # 🔥 Added Hindi stop words to prevent random fuzzy matches
+        stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to", "ha", "haan", "na", "nahi", "ni", "ki", "ka", "ke", "hai", "hain", "tha", "thi", "se", "ko"}
         meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series", "remastered", "esub", "hq"}
         
         search_query_full = re.sub(r"\s+", " ", " ".join(normalized_words)).strip()
@@ -483,7 +484,7 @@ class MediaDB:
         files_map = {} 
 
         # ====================================================================================
-        # 🟢 STEP 1: ATLAS SEARCH ENGINE (UPGRADED WITH META PATHS)
+        # 🟢 STEP 1: ATLAS SEARCH ENGINE (WITH META PATHS)
         # ====================================================================================
         try:
             should_clauses = []
@@ -623,7 +624,7 @@ class MediaDB:
             except Exception: pass
 
         # ====================================================================================
-        # 🟡 STEP 3: PYTHON RANKER (THE CLEAN NEW ENGINE)
+        # 🟡 STEP 3: PYTHON RANKER (THE CROREPATI ENGINE)
         # ====================================================================================
         files = list(files_map.values())
         if files and (sort == "relevance" or not sort):
@@ -704,21 +705,21 @@ class MediaDB:
                 # 🏆 TIER 3: ABSOLUTE EXACT MATCH (The Batman vs Batman FIX)
                 # =========================================================
                 if db_full == search_query_full:
-                    score += 5000000  
+                    score += 150000000  
                 elif db_full.startswith(search_query_full + " "):
-                    score += 3000000  
+                    score += 120000000  
                 elif f" {search_query_full} " in db_full_padded:
-                    score += 2000000  
+                    score += 90000000   
 
                 # =========================================================
                 # 🏆 TIER 4: FLEX MATCH (Stop words ignore karke fallback)
                 # =========================================================
                 elif db_flex == sq_flex:
-                    score += 800000
+                    score += 80000000
                 elif db_flex.startswith(sq_flex + " "):
-                    score += 500000
+                    score += 50000000
                 elif f" {sq_flex} " in db_flex_padded:
-                    score += 200000
+                    score += 20000000
 
                 # =========================================================
                 # 🏆 TIER 5: MOVIE vs SERIES CHECKER
@@ -731,9 +732,9 @@ class MediaDB:
                     series_indicator = r"^(s\d+|e\d+|season|episode)$"
                     
                     if re.match(movie_indicator, next_word):
-                        score += 300000 
+                        score += 5000000 
                     elif re.match(series_indicator, next_word):
-                        score -= 100000 
+                        score -= 1000000 
 
                 # =========================================================
                 # 🏆 TIER 6: META WORDS SCORING
@@ -743,8 +744,8 @@ class MediaDB:
                     for w in meta_words:
                         if w in full_text_to_search: meta_matched += 1
                     
-                    score += (meta_matched * 1000) 
-                    score -= (len(meta_words) - meta_matched)
+                    score += (meta_matched * 10000000) 
+                    score -= ((len(meta_words) - meta_matched) * 2000000)
 
                 # =========================================================
                 # 🏆 TIER 7: TIE-BREAKERS

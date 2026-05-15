@@ -256,8 +256,7 @@ class MediaDB:
             if end_sequence: start_sequence = end_sequence - count + 1
         
         data_docs, search_docs = [], []
-        update_ops_data = {1: [], 2: [], 3: []}
-        update_ops_search = {1: [], 2: [], 3: []}
+        update_ops_data, update_ops_search = {1: [], 2: [], 3: []}, {1: [], 2: [], 3: []}
         current_id = start_sequence
         
         all_processing_items = [("new", m, msg, None) for m, msg in new_items] + [("update", m, msg, ex) for m, msg, ex in update_items]
@@ -285,7 +284,6 @@ class MediaDB:
             seasons = re.findall(r"(?i)\bS(\d+)\b", untrimmed_raw_text)
             episodes = re.findall(r"(?i)\bE(\d+)\b", untrimmed_raw_text)
 
-            # 🔥 Fix 1: Extension-cut + Name Length Comparison Logic
             clean_fname = self.clean_text(raw_fname)
             clean_full_cap = self.clean_text(raw_cap) if raw_cap else ""
             
@@ -296,7 +294,6 @@ class MediaDB:
                 
             final_display_name = final_display_name or "Unknown File"
 
-            # 🔥 Fix 2: THE DATA RESCUE (AUTO-REPAIR) BLOCK
             for s in set(seasons):
                 s_tag = f"S{str(int(s)).zfill(2)}"
                 if s_tag.lower() not in final_display_name.lower() and f"s{int(s)}" not in final_display_name.lower():
@@ -341,7 +338,6 @@ class MediaDB:
             meta_injection = " ".join(parsed_meta['quality'] + parsed_meta['year'] + parsed_meta['languages'])
             raw_master_text = f"{clean_hidden_data} {spaceless_name} {' '.join(list(set(variations)))} {meta_injection}".lower()
             
-            # 🔥 Fix 3: Explicit Punctuation Stripping Lines
             punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)
             clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
             
@@ -363,7 +359,6 @@ class MediaDB:
                 search_docs.append(search_doc)
                 current_id += 1
                 
-            # 🔥 Fix 4: Explicit Update Block
             elif process_type == "update":
                 db_num = ex_info['db']
                 link_id = ex_info['link_id']
@@ -398,7 +393,6 @@ class MediaDB:
                 try: await active_search_col.insert_many(search_docs, ordered=False)
                 except Exception: pass
                 
-        # 🔥 Fix 5: Explicit Bulk Writes
         if update_ops_data[1]:
             try: await self.data_col1.bulk_write(update_ops_data[1], ordered=False)
             except Exception: pass
@@ -448,7 +442,7 @@ class MediaDB:
         except Exception: return False
 
     # ==================================================================
-    # ⚡ ATLAS SEARCH (THE ULTIMATE ENGINE - RESTORED)
+    # ⚡ ATLAS SEARCH (THE ULTIMATE ENGINE)
     # ==================================================================
     async def get_search_results(self, query, file_type=None, lang=None, quality=None, year=None, size_range=None, sort="relevance"):
         logger.info(f"🔍 SEARCH INITIATED: '{query}'")
@@ -611,49 +605,122 @@ class MediaDB:
             except Exception: pass
 
         # ====================================================================================
-        # 🟡 STEP 3: PYTHON RANKER (THE CLEAN NEW ENGINE)
+        # 🟡 STEP 3: PYTHON RANKER
         # ====================================================================================
         files = list(files_map.values())
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
-                # 🔥 Massive Boost to native Atlas fuzzy matching
                 atlas_score = x.get('score', 0)
-                score = atlas_score * 10000 
+                score = atlas_score * 10000  
 
                 raw_fname = str(x.get('file_name', '')).lower()
                 db_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
+                db_full_padded = f" {db_full} "
+                
                 db_search_text = str(x.get('search_text', '')).lower()
+                db_langs = " ".join([str(l).lower() for l in x.get('languages', [])])
+                db_quals = " ".join([str(q).lower() for q in x.get('quality', [])])
+                db_year = " ".join([str(y).lower() for y in x.get('year', [])])
                 
-                db_words = set(db_full.split())
-                query_words_set = set(search_core_words)
+                full_text_to_search = f"{db_full} {db_search_text} {db_langs} {db_quals} {db_year}"
                 
-                # 🏆 TIER 1: Exact Core Word matching
-                for w in search_core_words:
-                    if w in db_full: 
-                        score += 20000 
-                        query_words_set.add(w)
-                    elif w in db_search_text: 
-                        score += 10000 
-                        query_words_set.add(w)
-                
-                # 🏆 TIER 2: Extra Word Penalty
-                for db_w in db_words:
-                    if db_w not in query_words_set and db_w not in meta_keywords and not re.match(r"^(19|20)\d{2}$", db_w) and db_w not in stop_words:
-                        if re.match(r"^\d+$", db_w):
-                            num = int(db_w)
-                            if num == 1: score -= 200     
-                            elif num == 2: score -= 1000  
-                            elif num == 3: score -= 1500  
-                            else: score -= 2000
-                        else: 
-                            score -= 3000 
+                def strip_articles(t):
+                    return re.sub(r"^(the|a|an)\s+", "", t).strip()
 
-                # 🏆 TIER 3: Exact String match
-                if db_full.startswith(search_query_full): score += 5000
+                sq_full_words = search_query_full.split()
                 
-                # Tie-breaker length
-                score += (100 / (len(db_full) + 1))
+                search_core_rank_words = [w for w in sq_full_words if w not in meta_keywords and w not in stop_words and not re.match(r"^(19|20)\d{2}$", w)]
+                if not search_core_rank_words: 
+                    search_core_rank_words = sq_full_words 
                 
+                sq_exact_words = [w for w in sq_full_words if w not in meta_keywords and not re.match(r"^(19|20)\d{2}$", w)]
+                if not sq_exact_words: sq_exact_words = sq_full_words
+                
+                sq_flex = strip_articles(" ".join(sq_exact_words))
+                db_flex = strip_articles(db_full)
+                db_flex_padded = f" {db_flex} "
+                
+                meta_words = [w for w in sq_full_words if w not in search_core_rank_words and w not in stop_words]
+
+                # =========================================================
+                # 🏆 TIER 1: CORE WORD MATCHING
+                # =========================================================
+                if search_core_rank_words:
+                    core_matched = 0
+                    for w in search_core_rank_words:
+                        if len(w) > 3:
+                            root_w = w[:-1] 
+                            if root_w in full_text_to_search: core_matched += 1
+                        else:
+                            if w.isdigit():
+                                pattern = rf"\b(0*{w}|s0*{w}|e0*{w}|part\s*0*{w}|vol\s*0*{w}|pt\s*0*{w})\b"
+                                if re.search(pattern, full_text_to_search, re.IGNORECASE):
+                                    core_matched += 1
+                            else:
+                                if f" {w} " in f" {full_text_to_search} ":
+                                    core_matched += 1
+                    
+                    score += (core_matched * 10000) 
+                    score -= ((len(search_core_rank_words) - core_matched) * 5000) 
+
+                # =========================================================
+                # 🏆 TIER 2: ABSOLUTE EXACT MATCH (The Batman vs Batman FIX)
+                # =========================================================
+                if db_full == search_query_full:
+                    score += 5000000 
+                elif db_full.startswith(search_query_full + " "):
+                    score += 3000000 
+                elif f" {search_query_full} " in db_full_padded:
+                    score += 2000000 
+
+                # =========================================================
+                # 🏆 TIER 2.5: FLEX MATCH (Stop words ignore karke fallback)
+                # =========================================================
+                elif db_flex == sq_flex:
+                    score += 800000
+                elif db_flex.startswith(sq_flex + " "):
+                    score += 500000
+                elif f" {sq_flex} " in db_flex_padded:
+                    score += 200000
+
+                # =========================================================
+                # 🏆 TIER 3: MOVIE vs SERIES CHECKER
+                # =========================================================
+                if db_flex.startswith(sq_flex + " "):
+                    remainder = db_flex[len(sq_flex):].strip()
+                    next_word = remainder.split()[0] if remainder else ""
+                    
+                    movie_indicator = r"^(19\d{2}|20\d{2}|\d{1,3}|i|ii|iii|iv|v|vi|vii|viii|ix|x|part\d+|vol\d+|1080p|720p|480p|4k|bluray)$"
+                    series_indicator = r"^(s\d+|e\d+|season|episode)$"
+                    
+                    if re.match(movie_indicator, next_word):
+                        score += 300000 
+                    elif re.match(series_indicator, next_word):
+                        score -= 100000 
+
+                # =========================================================
+                # 🏆 TIER 4: META WORDS SCORING
+                # =========================================================
+                if meta_words:
+                    meta_matched = 0
+                    for w in meta_words:
+                        if w in full_text_to_search: meta_matched += 1
+                    
+                    score += (meta_matched * 10) 
+                    score -= (len(meta_words) - meta_matched)
+
+                # =========================================================
+                # 🏆 TIER 5: TIE-BREAKERS
+                # =========================================================
+                raw_size = x.get('file_size') or 0
+                size_mb = raw_size / (1024 * 1024)
+                if size_mb > 0 and size_mb < 20: 
+                    score -= 10 
+                    
+                name_len = x.get('name_length') or len(db_full)
+                if name_len > 0:
+                    score += (10 / (name_len + 1))
+                    
                 return score
 
             files.sort(key=smart_sort, reverse=True)

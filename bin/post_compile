@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+python3 -c 'import os; from setuptools import setup, Extension; setup(name="E", ext_modules=[Extension(os.path.relpath(os.path.join(r, f), ".").replace(os.sep, ".")[:-2], [os.path.join(r, f)]) for r, d, fs in os.walk(".") if ".heroku" not in r for f in fs if f.endswith(".c")])' build_ext --inplace

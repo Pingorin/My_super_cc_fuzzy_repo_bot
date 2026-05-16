@@ -328,6 +328,7 @@ class MediaDB:
             for tag in ["part", "vol", "chapter", "ch"]:
                 for v in re.findall(rf"(?i){tag}(?:ume)?\s*(\d+)", orig_raw): variations.append(f"{tag}{v}")
             
+            spaceless_name = re.sub(r"[^\w]", "", final_display_name).lower()
             raw_hidden_data = f"{clean_fname} {clean_full_cap}"
             promo_patterns = r"@|t\.me/|https?://|www\.\w+|\w+\.(?:com|in|vip|org|net|me|xyz|site|cc|to|club|tech|link|app|click|store|hd)\b"
             clean_hidden_data = re.sub(promo_patterns, " ", re.sub(r"<[^>]+>", " ", raw_hidden_data), flags=re.IGNORECASE)
@@ -336,9 +337,7 @@ class MediaDB:
             for roman, digit in roman_map.items(): clean_hidden_data = re.sub(rf"(?i)(?<=\s)\b{roman}\b", digit, clean_hidden_data)
             
             meta_injection = " ".join(parsed_meta['quality'] + parsed_meta['year'] + parsed_meta['languages'])
-            
-            # 🔥 FIX: Spaceless_name udaya gaya! DB ekdum saaf rahegi.
-            raw_master_text = f"{clean_hidden_data} {' '.join(list(set(variations)))} {meta_injection}".lower()
+            raw_master_text = f"{clean_hidden_data} {spaceless_name} {' '.join(list(set(variations)))} {meta_injection}".lower()
             
             punctuation_stripped_text = re.sub(r"[^\w\s&]", " ", raw_master_text)
             clean_master_text = re.sub(r"\s+", " ", punctuation_stripped_text).strip()
@@ -467,6 +466,7 @@ class MediaDB:
         query_words = clean_query.split()
         normalized_words = [DESI_MAP.get(w, w) for w in query_words]
         
+        # 🔥 Added Hindi stop words to prevent random fuzzy matches
         stop_words = {"the", "a", "an", "is", "of", "and", "in", "on", "for", "with", "to", "ha", "haan", "na", "nahi", "ni", "ki", "ka", "ke", "hai", "hain", "tha", "thi", "se", "ko"}
         meta_keywords = {"hindi", "tamil", "telugu", "malayalam", "kannada", "bengali", "punjabi", "marathi", "gujarati", "urdu", "english", "1080p", "720p", "480p", "360p", "2160p", "4k", "bluray", "hdrip", "webrip", "cam", "dvdrip", "dual", "multi", "audio", "mkv", "mp4", "movie", "full", "hd", "print", "download", "series", "remastered", "esub", "hq"}
         
@@ -624,11 +624,12 @@ class MediaDB:
             except Exception: pass
 
         # ====================================================================================
-        # 🟡 STEP 3: PYTHON RANKER (THE DYNAMIC SPACELESS ENGINE)
+        # 🟡 STEP 3: PYTHON RANKER (SCALED LAKHS & THOUSANDS)
         # ====================================================================================
         files = list(files_map.values())
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
+                # 🔥 FIX 1: Atlas Score Hijack Neutralized! 
                 atlas_score = x.get('score', 0)
                 score = (atlas_score / 100000) 
 
@@ -642,9 +643,6 @@ class MediaDB:
                 db_year = " ".join([str(y).lower() for y in x.get('year', [])])
                 
                 full_text_to_search = f"{db_full} {db_search_text} {db_langs} {db_quals} {db_year}"
-                
-                # 🔥 FIX: DB text ka spaceless version search ke liye!
-                full_text_spaceless = full_text_to_search.replace(" ", "")
                 
                 def strip_articles(t):
                     return re.sub(r"^(the|a|an)\s+", "", t).strip()
@@ -666,19 +664,9 @@ class MediaDB:
                 db_words = set(db_full.split())
                 query_words_set = set()
 
-                title_words = [w for w in search_core_rank_words if not re.match(r"^(s\d+|e\d+|s\d+e\d+)$", w)]
-                core_title_query = " ".join(title_words)
+                # 🔥 NAYA LOGIC: Asli movie ka naam (Bina 720p/Hindi ke) Prefix Match ke liye!
+                core_title_query = " ".join(search_core_rank_words)
                 core_title_flex = strip_articles(core_title_query)
-                
-                core_title_flex_clean = re.sub(r"\b(\w+)(?:s|es)\b", r"\1", core_title_flex)
-                db_flex_clean = re.sub(r"\b(\w+)(?:s|es)\b", r"\1", db_flex)
-                db_flex_padded_clean = f" {db_flex_clean} "
-                sq_flex_clean = re.sub(r"\b(\w+)(?:s|es)\b", r"\1", sq_flex)
-
-                # 🔥 FIX: Prefix check ke liye dono ka Spaceless Engine tayyar
-                db_flex_spaceless = db_flex_clean.replace(" ", "")
-                sq_flex_spaceless = sq_flex_clean.replace(" ", "")
-                core_title_flex_spaceless = core_title_flex_clean.replace(" ", "")
 
                 # =========================================================
                 # 🏆 TIER 1: THE KING MAKER (WORD MATCH PRIORITY)
@@ -686,20 +674,23 @@ class MediaDB:
                 core_matched = 0
                 if search_core_rank_words:
                     for w in search_core_rank_words:
-                        if w.isdigit():
-                            pattern = rf"\b(0*{w}|s0*{w}|e0*{w}|part\s*0*{w}|vol\s*0*{w}|pt\s*0*{w})\b"
-                            if re.search(pattern, full_text_to_search, re.IGNORECASE):
+                        if len(w) > 3:
+                            root_w = w[:-1] 
+                            if root_w in full_text_to_search: 
                                 core_matched += 1
                                 query_words_set.add(w)
                         else:
-                            root = w[:-1] if len(w) > 3 and w.endswith('s') else w
-                            pattern = rf"\b{re.escape(root)}(?:s|es)?\b"
-                            # 🔥 NAYA: "spiderman" jaise bina space wale words ko pakdega!
-                            if re.search(pattern, full_text_to_search, re.IGNORECASE) or (len(root) >= 3 and root in full_text_spaceless):
-                                core_matched += 1
-                                query_words_set.add(w)
+                            if w.isdigit():
+                                pattern = rf"\b(0*{w}|s0*{w}|e0*{w}|part\s*0*{w}|vol\s*0*{w}|pt\s*0*{w})\b"
+                                if re.search(pattern, full_text_to_search, re.IGNORECASE):
+                                    core_matched += 1
+                                    query_words_set.add(w)
+                            else:
+                                if f" {w} " in f" {full_text_to_search} ":
+                                    core_matched += 1
+                                    query_words_set.add(w)
                     
-                    score += (core_matched * 100000) 
+                    score += (core_matched * 100000) # 1 Lakh Points per matched word
 
                 # =========================================================
                 # 🏆 TIER 2: EXTRA WORD PENALTY (Kachra Safai)
@@ -718,29 +709,29 @@ class MediaDB:
                 # =========================================================
                 # 🏆 TIER 3: ABSOLUTE EXACT FULL MATCH
                 # =========================================================
-                if db_flex_clean == sq_flex_clean or (sq_flex_spaceless and db_flex_spaceless == sq_flex_spaceless):
+                if db_full == search_query_full:
                     score += 200000  
-                elif db_flex_clean.startswith(sq_flex_clean + " ") or (sq_flex_spaceless and db_flex_spaceless.startswith(sq_flex_spaceless)):
+                elif db_full.startswith(search_query_full + " "):
                     score += 150000  
-                elif f" {sq_flex_clean} " in db_flex_padded_clean or (len(sq_flex_spaceless) >= 4 and sq_flex_spaceless in db_flex_spaceless):
+                elif f" {search_query_full} " in db_full_padded:
                     score += 30000   
 
                 # =========================================================
                 # 🏆 TIER 4: THE CORE TITLE PREFIX MATCH (THE JUSTICE FIX)
                 # =========================================================
-                if core_title_flex_clean: 
-                    if db_flex_clean == core_title_flex_clean or (core_title_flex_spaceless and db_flex_spaceless == core_title_flex_spaceless):
+                if core_title_flex: 
+                    if db_flex == core_title_flex:
                         score += 100000  
-                    elif db_flex_clean.startswith(core_title_flex_clean + " ") or (core_title_flex_spaceless and db_flex_spaceless.startswith(core_title_flex_spaceless)):
+                    elif db_flex.startswith(core_title_flex + " "):
                         score += 80000   
-                    elif f" {core_title_flex_clean} " in db_flex_padded_clean or (len(core_title_flex_spaceless) >= 4 and core_title_flex_spaceless in db_flex_spaceless):
+                    elif f" {core_title_flex} " in db_flex_padded:
                         score += 20000   
 
                 # =========================================================
                 # 🏆 TIER 5: MOVIE vs SERIES CHECKER
                 # =========================================================
-                if core_title_flex_clean and db_flex_clean.startswith(core_title_flex_clean + " "):
-                    remainder = db_flex_clean[len(core_title_flex_clean):].strip()
+                if core_title_flex and db_flex.startswith(core_title_flex + " "):
+                    remainder = db_flex[len(core_title_flex):].strip()
                     next_word = remainder.split()[0] if remainder else ""
                     
                     movie_indicator = r"^(19\d{2}|20\d{2}|\d{1,3}|i|ii|iii|iv|v|vi|vii|viii|ix|x|part\d+|vol\d+|1080p|720p|480p|4k|bluray)$"
@@ -759,6 +750,7 @@ class MediaDB:
                     for w in meta_words:
                         if w in full_text_to_search: meta_matched += 1
                     
+                    # 🔥 FIX: Meta match ko 20,000 points diye hain!
                     score += (meta_matched * 20000) 
                     score -= ((len(meta_words) - meta_matched) * 5000)
 

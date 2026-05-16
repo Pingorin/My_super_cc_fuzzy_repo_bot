@@ -13,7 +13,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           # -L lagaya hai redirect follow karne ke liye, aur User-Agent lagaya hai taaki browser jaisa lage
-          curl -L -H "Authorization: Bearer $HF_TOKEN" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" https://sona55-auto_filter_cc_bot.hf.space
+          curl -L -H "Authorization: Bearer $HF_TOKEN" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" https://sona55-My_Fuzzy_c_bot.hf.space
           
           # Dusre bot ke liye (Naam update karna mat bhoolna)
-          curl -L -H "Authorization: Bearer $HF_TOKEN" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" https://sona55-auto_filter_cc_222_bot.hf.space
+          curl -L -H "Authorization: Bearer $HF_TOKEN" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" https://sona55-secound_bot.hf.space

@@ -16,7 +16,7 @@ FILE_STORE_BOT = os.environ.get("FILE_STORE_BOT", "")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "9e1353ccc623e71f80262309cda5cdfb") # Default Test Key
 
 # --- DATABASE SETTINGS ---
-DATABASE_URI = os.environ.get("DATABASE_URI", "mongodb+srv://Candy4:Candy4@cluster0.lbkn6jy.mongodb.net/?retryWrites=true&w=majority&minPoolSize=1&maxPoolSize=20")
+DATABASE_URI = os.environ.get("DATABASE_URI", "mongodb+srv://Doll5:Doll5@cluster0.lbkn6jy.mongodb.net/?retryWrites=true&w=majority&minPoolSize=1&maxPoolSize=20")
 
 # 🔥 NEW: MULTI-DATABASE ARCHITECTURE SETTINGS 🔥
 # Jab DB 1 full ho jaye, toh host (Render/Heroku) ke variables me inki link daal dena

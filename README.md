@@ -1,8 +1,8 @@
 ---
 title: Telegram Fuzzy AutoFilter Bot
 emoji: 🤖
-colorFrom: Red
-colorTo: Orange 
+colorFrom: blue
+colorTo: purple
 sdk: docker
 app_file: Bot.py
 pinned: false

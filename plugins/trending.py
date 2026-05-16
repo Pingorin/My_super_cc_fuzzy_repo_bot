@@ -3,18 +3,17 @@ import time
 import logging
 import os
 import asyncio 
+import uuid # 🔥 NAYA IMPORT: UUID ke liye
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import MessageNotModified # 🔥 NAYA IMPORT: Error ignore karne ke liye
+from pyrogram.errors import MessageNotModified 
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-# ✅ Import arrange_buttons from utils to ensure correct order
 from utils import (
     btn_parser, temp, get_filter_buttons, get_pagination_row, 
     format_text_results, format_detailed_results, arrange_buttons
 )
 
-# ✅ CONFIG: Import API Key
 try:
     from info import TMDB_API_KEY
 except ImportError:
@@ -27,6 +26,9 @@ TRENDING_CACHE = {
     'last_updated': 0,
     'data': []
 }
+
+# 🔥 NAYA CACHE: UUID se Movie Name map karne ke liye
+TRENDING_TITLE_CACHE = {}
 
 CACHE_DURATION = 3600 
 
@@ -112,7 +114,13 @@ async def trending_menu_handler(client, query):
     for i, item in enumerate(current_items):
         rank = start + i + 1
         btn_text = f"{rank}. {item['title']} ({item['year']})"
-        buttons.append([InlineKeyboardButton(btn_text, callback_data=f"search#{item['title']}")])
+        
+        # 🔥 THE UUID MASTERSTROKE: Lamba naam cache me, chhoti ID button me!
+        uid = str(uuid.uuid4())[:8] # Sirf 8 character ki ID (e.g., 'a1b2c3d4')
+        TRENDING_TITLE_CACHE[uid] = item['title'] # Pura naam memory me save kar liya
+        
+        # Callback me 'tsearch' (trending search) bhej rahe hain
+        buttons.append([InlineKeyboardButton(btn_text, callback_data=f"tsearch#{uid}")])
         
     nav_row = []
     if page > 0: 
@@ -130,11 +138,10 @@ async def trending_menu_handler(client, query):
     else:
         buttons.append([InlineKeyboardButton("❌ Close", callback_data="close_data")])
     
-    # 🔥 FIX: Error handling for same-button clicks
     try:
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
     except MessageNotModified:
-        pass # Chupchap ignore karo agar message same hai
+        pass 
     except Exception as e:
         logger.error(f"Trending UI Error: {e}")
 
@@ -153,15 +160,24 @@ async def back_to_search_handler(client, query):
 
 
 # ==============================================================================
-# 🔎 SEARCH HANDLER (AUTO DETECT MODE & SHOW FILTERS)
+# 🔎 SEARCH HANDLER (UUID DECODE & AUTO DETECT)
 # ==============================================================================
 
-@Client.on_callback_query(filters.regex(r"^search#"))
+# 🔥 FIX: Ab ye normal 'search#' aur naye 'tsearch#' dono ko pakdega
+@Client.on_callback_query(filters.regex(r"^(search|tsearch)#"))
 async def search_from_trending(client, query, forced_query=None):
     if forced_query:
         movie_name = forced_query
     else:
-        movie_name = query.data.split("#")[1]
+        cb_data = query.data.split("#")
+        # Agar button se UUID aaya hai, toh usko wapas Movie Name me badal do
+        if cb_data[0] == "tsearch":
+            uid = cb_data[1]
+            movie_name = TRENDING_TITLE_CACHE.get(uid)
+            if not movie_name:
+                return await query.answer("⚠️ Session Expired! Kripya Trending List wapas open karein.", show_alert=True)
+        else:
+            movie_name = cb_data[1]
         
     chat_id = query.message.chat.id
     user_id = query.from_user.id
@@ -193,15 +209,9 @@ async def search_from_trending(client, query, forced_query=None):
     
     filter_buttons = get_filter_buttons(search_id, files, active_sort="relevance")
 
-    # 🔥 FIX: Global Try-Except block for all Edit Message methods
     try:
-        # ------------------------------------------------------------------
-        # ✅ FIX: Button Order Logic
-        # ------------------------------------------------------------------
         if mode == 'button':
             buttons = btn_parser(files, chat_id, search_id, 0, limit, movie_name)
-            
-            # 🔥 USE arrange_buttons FUNCTION (Ensures correct order)
             buttons = arrange_buttons(buttons, files, limit, filter_buttons, howto_btn, free_prem_btn, search_id)
             
             msg_text = f"⚡ **Results for:** `{movie_name}`\nfound {len(files)} files."
@@ -218,13 +228,9 @@ async def search_from_trending(client, query, forced_query=None):
                 for row in filter_buttons: btn.append(row)
             if howto_btn: btn.append(howto_btn)
             
-            # 1. Add Send All / Premium
             btn.append(free_prem_btn)
-            
-            # 2. Add Trending Button
             btn.append([InlineKeyboardButton("🔥 Today Popular Movies", callback_data=f"trend_list#0#{search_id}")])
             
-            # 3. Add Pagination (Last)
             pagination = get_pagination_row(search_id, 0, limit, len(files), active_sort="relevance")
             if pagination: btn.append(pagination)
             
@@ -236,6 +242,6 @@ async def search_from_trending(client, query, forced_query=None):
             await query.message.edit_text(f"⚡ **Results for:** `{movie_name}`", reply_markup=InlineKeyboardMarkup(buttons))
             
     except MessageNotModified:
-        pass # Same message pe double click kiya, error ignore!
+        pass 
     except Exception as e:
         logger.error(f"Search UI Edit Error: {e}")

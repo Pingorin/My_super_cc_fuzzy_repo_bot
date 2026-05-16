@@ -1,8 +1,8 @@
 name: Sync to Hugging Face hub
-
 on:
   push:
-    branches: [main] # Agar aapki branch ka naam 'master' hai toh isko 'master' kar dein
+    branches: [main]
+  # Ye line allow karti hai ki aap manual bhi sync chala sakein
   workflow_dispatch:
 
 jobs:
@@ -16,4 +16,4 @@ jobs:
       - name: Push to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push --force https://Sona55:$HF_TOKEN@huggingface.co/spaces/Sona55/My-sup-c-Bot main
+        run: git push --force https://Sona55:$HF_TOKEN@huggingface.co/spaces/Sona55/auto_fter_cc_bot

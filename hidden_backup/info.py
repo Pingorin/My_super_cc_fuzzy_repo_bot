@@ -7,7 +7,7 @@ id_pattern = re.compile(r'^-?\d+$')
 # --- MANDATORY VARIABLES ---
 API_ID = int(os.environ.get("API_ID", "20638104")) 
 API_HASH = os.environ.get("API_HASH", "6c884690ca85d39a4c5ad7c15b194e42")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8527539919:AAFFu37tTXtn7PQS0ioJj4lVlEVgQT3Cr5A")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8489353109:AAHvYjHhed4a_eHkmruzeJTmIa9oU5EsINc")
 
 # 🔥 NAYA FEATURE: Redirect Search Results to Another Bot (Bot B)
 # Yahan Bot B (File Store Bot) ka username daalein bina '@' lagaye. E.g., "MyMovieFileBot"
@@ -16,7 +16,7 @@ FILE_STORE_BOT = os.environ.get("FILE_STORE_BOT", "")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "9e1353ccc623e71f80262309cda5cdfb") # Default Test Key
 
 # --- DATABASE SETTINGS ---
-DATABASE_URI = os.environ.get("DATABASE_URI", "mongodb+srv://Mikuu7:Mikuu7@cluster0.umgzcsc.mongodb.net/?retryWrites=true&w=majority&minPoolSize=1&maxPoolSize=20")
+DATABASE_URI = os.environ.get("DATABASE_URI", "mongodb+srv://Angel5:Angel5@cluster0.57php1j.mongodb.net/?retryWrites=true&w=majority&minPoolSize=1&maxPoolSize=20")
 
 # 🔥 NEW: MULTI-DATABASE ARCHITECTURE SETTINGS 🔥
 # Jab DB 1 full ho jaye, toh host (Render/Heroku) ke variables me inki link daal dena

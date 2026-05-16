@@ -624,13 +624,13 @@ class MediaDB:
             except Exception: pass
 
         # ====================================================================================
-        # 🟡 STEP 3: PYTHON RANKER (THE CROREPATI ENGINE)
+        # 🟡 STEP 3: PYTHON RANKER (SCALED LAKHS & THOUSANDS)
         # ====================================================================================
         files = list(files_map.values())
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
                 atlas_score = x.get('score', 0)
-                score = atlas_score * 10000  
+                score = atlas_score * 10  # Base atlas score
 
                 raw_fname = str(x.get('file_name', '')).lower()
                 db_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
@@ -685,7 +685,7 @@ class MediaDB:
                                     core_matched += 1
                                     query_words_set.add(w)
                     
-                    score += (core_matched * 100000000) 
+                    score += (core_matched * 100000) # 1 Lakh Points per matched word
 
                 # =========================================================
                 # 🏆 TIER 2: EXTRA WORD PENALTY (Kachra Safai)
@@ -694,37 +694,38 @@ class MediaDB:
                     if db_w not in query_words_set and db_w not in meta_keywords and not re.match(r"^(19|20)\d{2}$", db_w) and db_w not in stop_words:
                         if re.match(r"^\d+$", db_w):
                             num = int(db_w)
-                            if num == 1: score -= 200     
-                            elif num == 2: score -= 1000  
-                            elif num == 3: score -= 1500  
-                            else: score -= 2000
+                            if num == 1: score -= 2     
+                            elif num == 2: score -= 10  
+                            elif num == 3: score -= 15  
+                            else: score -= 20
                         else: 
-                            score -= 3000 
+                            score -= 30 
 
                 # =========================================================
-                # 🏆 TIER 3: ABSOLUTE EXACT MATCH (The Batman vs Batman FIX)
+                # 🏆 TIER 3: ABSOLUTE EXACT FULL MATCH
                 # =========================================================
                 if db_full == search_query_full:
-                    score += 150000000  
+                    score += 80000  
                 elif db_full.startswith(search_query_full + " "):
-                    score += 120000000  
+                    score += 60000  
                 elif f" {search_query_full} " in db_full_padded:
-                    score += 90000000   
+                    score += 30000   
 
                 # =========================================================
-                # 🏆 TIER 4: FLEX MATCH (Stop words ignore karke fallback)
+                # 🏆 TIER 4: TITLE PREFIX MATCH (THE ULTIMATE FIX FOR JUSTICE)
                 # =========================================================
-                elif db_flex == sq_flex:
-                    score += 80000000
-                elif db_flex.startswith(sq_flex + " "):
-                    score += 50000000
-                elif f" {sq_flex} " in db_flex_padded:
-                    score += 20000000
+                if sq_flex:
+                    if db_flex == sq_flex:
+                        score += 50000  
+                    elif db_flex.startswith(sq_flex + " "):
+                        score += 40000  
+                    elif f" {sq_flex} " in db_flex_padded:
+                        score += 20000   
 
                 # =========================================================
                 # 🏆 TIER 5: MOVIE vs SERIES CHECKER
                 # =========================================================
-                if db_flex.startswith(sq_flex + " "):
+                if sq_flex and db_flex.startswith(sq_flex + " "):
                     remainder = db_flex[len(sq_flex):].strip()
                     next_word = remainder.split()[0] if remainder else ""
                     
@@ -732,20 +733,20 @@ class MediaDB:
                     series_indicator = r"^(s\d+|e\d+|season|episode)$"
                     
                     if re.match(movie_indicator, next_word):
-                        score += 5000000 
+                        score += 5000 
                     elif re.match(series_indicator, next_word):
-                        score -= 1000000 
+                        score -= 5000 
 
                 # =========================================================
-                # 🏆 TIER 6: META WORDS SCORING
+                # 🏆 TIER 6: META WORDS SCORING (Jaise 720p)
                 # =========================================================
                 if meta_words:
                     meta_matched = 0
                     for w in meta_words:
                         if w in full_text_to_search: meta_matched += 1
                     
-                    score += (meta_matched * 10000000) 
-                    score -= ((len(meta_words) - meta_matched) * 2000000)
+                    score += (meta_matched * 2000) 
+                    score -= ((len(meta_words) - meta_matched) * 500)
 
                 # =========================================================
                 # 🏆 TIER 7: TIE-BREAKERS
@@ -753,7 +754,7 @@ class MediaDB:
                 raw_size = x.get('file_size') or 0
                 size_mb = raw_size / (1024 * 1024)
                 if size_mb > 0 and size_mb < 20: 
-                    score -= 10 
+                    score -= 1 
                     
                 name_len = x.get('name_length') or len(db_full)
                 if name_len > 0:

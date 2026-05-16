@@ -629,8 +629,9 @@ class MediaDB:
         files = list(files_map.values())
         if files and (sort == "relevance" or not sort):
             def smart_sort(x):
+                # 🔥 FIX 1: Atlas Score Hijack Neutralized! 
                 atlas_score = x.get('score', 0)
-                score = atlas_score * 10  # Base atlas score
+                score = (atlas_score / 100000) 
 
                 raw_fname = str(x.get('file_name', '')).lower()
                 db_full = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", raw_fname)).strip()
@@ -662,6 +663,10 @@ class MediaDB:
                 meta_words = [w for w in sq_full_words if w not in search_core_rank_words and w not in stop_words]
                 db_words = set(db_full.split())
                 query_words_set = set()
+
+                # 🔥 NAYA LOGIC: Asli movie ka naam (Bina 720p/Hindi ke) Prefix Match ke liye!
+                core_title_query = " ".join(search_core_rank_words)
+                core_title_flex = strip_articles(core_title_query)
 
                 # =========================================================
                 # 🏆 TIER 1: THE KING MAKER (WORD MATCH PRIORITY)
@@ -705,28 +710,28 @@ class MediaDB:
                 # 🏆 TIER 3: ABSOLUTE EXACT FULL MATCH
                 # =========================================================
                 if db_full == search_query_full:
-                    score += 80000  
+                    score += 200000  
                 elif db_full.startswith(search_query_full + " "):
-                    score += 60000  
+                    score += 150000  
                 elif f" {search_query_full} " in db_full_padded:
                     score += 30000   
 
                 # =========================================================
-                # 🏆 TIER 4: TITLE PREFIX MATCH (THE ULTIMATE FIX FOR JUSTICE)
+                # 🏆 TIER 4: THE CORE TITLE PREFIX MATCH (THE JUSTICE FIX)
                 # =========================================================
-                if sq_flex:
-                    if db_flex == sq_flex:
-                        score += 50000  
-                    elif db_flex.startswith(sq_flex + " "):
-                        score += 40000  
-                    elif f" {sq_flex} " in db_flex_padded:
+                if core_title_flex: 
+                    if db_flex == core_title_flex:
+                        score += 100000  
+                    elif db_flex.startswith(core_title_flex + " "):
+                        score += 80000   
+                    elif f" {core_title_flex} " in db_flex_padded:
                         score += 20000   
 
                 # =========================================================
                 # 🏆 TIER 5: MOVIE vs SERIES CHECKER
                 # =========================================================
-                if sq_flex and db_flex.startswith(sq_flex + " "):
-                    remainder = db_flex[len(sq_flex):].strip()
+                if core_title_flex and db_flex.startswith(core_title_flex + " "):
+                    remainder = db_flex[len(core_title_flex):].strip()
                     next_word = remainder.split()[0] if remainder else ""
                     
                     movie_indicator = r"^(19\d{2}|20\d{2}|\d{1,3}|i|ii|iii|iv|v|vi|vii|viii|ix|x|part\d+|vol\d+|1080p|720p|480p|4k|bluray)$"
@@ -745,8 +750,9 @@ class MediaDB:
                     for w in meta_words:
                         if w in full_text_to_search: meta_matched += 1
                     
-                    score += (meta_matched * 2000) 
-                    score -= ((len(meta_words) - meta_matched) * 500)
+                    # 🔥 FIX: Meta match ko 20,000 points diye hain!
+                    score += (meta_matched * 20000) 
+                    score -= ((len(meta_words) - meta_matched) * 5000)
 
                 # =========================================================
                 # 🏆 TIER 7: TIE-BREAKERS

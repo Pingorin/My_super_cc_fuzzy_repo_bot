@@ -664,9 +664,15 @@ class MediaDB:
                 db_words = set(db_full.split())
                 query_words_set = set()
 
-                # 🔥 NAYA LOGIC: Asli movie ka naam (Bina 720p/Hindi ke) Prefix Match ke liye!
-                core_title_query = " ".join(search_core_rank_words)
+                # 🔥 FIX: Prefix checking ke liye S/E tags hatao aur Day/Days (s/es) barabar karo
+                title_words = [w for w in search_core_rank_words if not re.match(r"^(s\d+|e\d+|s\d+e\d+)$", w)]
+                core_title_query = " ".join(title_words)
                 core_title_flex = strip_articles(core_title_query)
+                
+                core_title_flex_clean = re.sub(r"\b(\w+)(?:s|es)\b", r"\1", core_title_flex)
+                db_flex_clean = re.sub(r"\b(\w+)(?:s|es)\b", r"\1", db_flex)
+                db_flex_padded_clean = f" {db_flex_clean} "
+                sq_flex_clean = re.sub(r"\b(\w+)(?:s|es)\b", r"\1", sq_flex)
 
                 # =========================================================
                 # 🏆 TIER 1: THE KING MAKER (WORD MATCH PRIORITY)
@@ -674,23 +680,20 @@ class MediaDB:
                 core_matched = 0
                 if search_core_rank_words:
                     for w in search_core_rank_words:
-                        if len(w) > 3:
-                            root_w = w[:-1] 
-                            if root_w in full_text_to_search: 
+                        if w.isdigit():
+                            pattern = rf"\b(0*{w}|s0*{w}|e0*{w}|part\s*0*{w}|vol\s*0*{w}|pt\s*0*{w})\b"
+                            if re.search(pattern, full_text_to_search, re.IGNORECASE):
                                 core_matched += 1
                                 query_words_set.add(w)
                         else:
-                            if w.isdigit():
-                                pattern = rf"\b(0*{w}|s0*{w}|e0*{w}|part\s*0*{w}|vol\s*0*{w}|pt\s*0*{w})\b"
-                                if re.search(pattern, full_text_to_search, re.IGNORECASE):
-                                    core_matched += 1
-                                    query_words_set.add(w)
-                            else:
-                                if f" {w} " in f" {full_text_to_search} ":
-                                    core_matched += 1
-                                    query_words_set.add(w)
+                            # 🔥 FIX: Ab ye "day" aur "days" dono ko match karega!
+                            root = w[:-1] if len(w) > 3 and w.endswith('s') else w
+                            pattern = rf"\b{re.escape(root)}(?:s|es)?\b"
+                            if re.search(pattern, full_text_to_search, re.IGNORECASE):
+                                core_matched += 1
+                                query_words_set.add(w)
                     
-                    score += (core_matched * 100000) # 1 Lakh Points per matched word
+                    score += (core_matched * 100000) 
 
                 # =========================================================
                 # 🏆 TIER 2: EXTRA WORD PENALTY (Kachra Safai)
@@ -709,29 +712,29 @@ class MediaDB:
                 # =========================================================
                 # 🏆 TIER 3: ABSOLUTE EXACT FULL MATCH
                 # =========================================================
-                if db_full == search_query_full:
+                if db_flex_clean == sq_flex_clean:
                     score += 200000  
-                elif db_full.startswith(search_query_full + " "):
+                elif db_flex_clean.startswith(sq_flex_clean + " "):
                     score += 150000  
-                elif f" {search_query_full} " in db_full_padded:
+                elif f" {sq_flex_clean} " in db_flex_padded_clean:
                     score += 30000   
 
                 # =========================================================
-                # 🏆 TIER 4: THE CORE TITLE PREFIX MATCH (THE JUSTICE FIX)
+                # 🏆 TIER 4: THE CORE TITLE PREFIX MATCH (THE 56 DAYS FIX)
                 # =========================================================
-                if core_title_flex: 
-                    if db_flex == core_title_flex:
+                if core_title_flex_clean: 
+                    if db_flex_clean == core_title_flex_clean:
                         score += 100000  
-                    elif db_flex.startswith(core_title_flex + " "):
+                    elif db_flex_clean.startswith(core_title_flex_clean + " "):
                         score += 80000   
-                    elif f" {core_title_flex} " in db_flex_padded:
+                    elif f" {core_title_flex_clean} " in db_flex_padded_clean:
                         score += 20000   
 
                 # =========================================================
                 # 🏆 TIER 5: MOVIE vs SERIES CHECKER
                 # =========================================================
-                if core_title_flex and db_flex.startswith(core_title_flex + " "):
-                    remainder = db_flex[len(core_title_flex):].strip()
+                if core_title_flex_clean and db_flex_clean.startswith(core_title_flex_clean + " "):
+                    remainder = db_flex_clean[len(core_title_flex_clean):].strip()
                     next_word = remainder.split()[0] if remainder else ""
                     
                     movie_indicator = r"^(19\d{2}|20\d{2}|\d{1,3}|i|ii|iii|iv|v|vi|vii|viii|ix|x|part\d+|vol\d+|1080p|720p|480p|4k|bluray)$"
@@ -743,14 +746,13 @@ class MediaDB:
                         score -= 5000 
 
                 # =========================================================
-                # 🏆 TIER 6: META WORDS SCORING (Jaise 720p)
+                # 🏆 TIER 6: META WORDS SCORING (Jaise 720p, Hindi)
                 # =========================================================
                 if meta_words:
                     meta_matched = 0
                     for w in meta_words:
                         if w in full_text_to_search: meta_matched += 1
                     
-                    # 🔥 FIX: Meta match ko 20,000 points diye hain!
                     score += (meta_matched * 20000) 
                     score -= ((len(meta_words) - meta_matched) * 5000)
 

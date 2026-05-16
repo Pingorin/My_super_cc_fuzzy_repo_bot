@@ -16,4 +16,4 @@ jobs:
       - name: Push to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push --force https://Sona55:$HF_TOKEN@huggingface.co/spaces/Sona55/auto_fter_cc_bot
+        run: git push --force https://Sona55:$HF_TOKEN@huggingface.co/spaces/Sona55/My_Fuzzy_c_bot

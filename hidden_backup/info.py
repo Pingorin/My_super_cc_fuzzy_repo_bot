@@ -7,11 +7,11 @@ id_pattern = re.compile(r'^-?\d+$')
 # --- MANDATORY VARIABLES ---
 API_ID = int(os.environ.get("API_ID", "20638104")) 
 API_HASH = os.environ.get("API_HASH", "6c884690ca85d39a4c5ad7c15b194e42")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8489353109:AAHvYjHhed4a_eHkmruzeJTmIa9oU5EsINc")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8504476517:AAHfyOVpPuWyWtgh-mY4Uh6zIoSK7J1CbkI")
 
 # 🔥 NAYA FEATURE: Redirect Search Results to Another Bot (Bot B)
 # Yahan Bot B (File Store Bot) ka username daalein bina '@' lagaye. E.g., "MyMovieFileBot"
-FILE_STORE_BOT = os.environ.get("FILE_STORE_BOT", "")
+FILE_STORE_BOT = os.environ.get("FILE_STORE_BOT", "File_Store_Mov_bot")
 
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "9e1353ccc623e71f80262309cda5cdfb") # Default Test Key
 
@@ -20,13 +20,13 @@ DATABASE_URI = os.environ.get("DATABASE_URI", "mongodb+srv://Angel5:Angel5@clust
 
 # 🔥 NEW: MULTI-DATABASE ARCHITECTURE SETTINGS 🔥
 # Jab DB 1 full ho jaye, toh host (Render/Heroku) ke variables me inki link daal dena
-DATABASE_URI_2 = os.environ.get("DATABASE_URI_2", "")
+DATABASE_URI_2 = os.environ.get("DATABASE_URI_2", "mongodb+srv://Fairy6:Fairy6@cluster0.wz1botc.mongodb.net/?retryWrites=true&w=majority&minPoolSize=1&maxPoolSize=20")
 DATABASE_URI_3 = os.environ.get("DATABASE_URI_3", "")
-INDEX_DB = int(os.environ.get("INDEX_DB", "1")) # Default DB 1 (Changeable via /setindex command)
+INDEX_DB = int(os.environ.get("INDEX_DB", "3")) # Default DB 1 (Changeable via /setindex command)
 
 DATABASE_NAME = os.environ.get("DATABASE_NAME", "Cluster0")
 COLLECTION_NAME = os.environ.get('COLLECTION_NAME', 'Telegram_files')
-USER_DB_URI = os.environ.get("USER_DB_URI", "mongodb+srv://Priya55:Priya55@cluster0.nmxnzme.mongodb.net/?retryWrites=true&w=majority&minPoolSize=1&maxPoolSize=20")
+USER_DB_URI = os.environ.get("USER_DB_URI", "mongodb+srv://fogg34:fogg34@cluster0.cw0957m.mongodb.net/?retryWrites=true&w=majority&minPoolSize=1&maxPoolSize=20")
 if not USER_DB_URI:
     USER_DB_URI = DATABASE_URI
   
@@ -35,19 +35,19 @@ if not USER_DB_URI:
 ADMINS_STR = os.environ.get("ADMINS", "7245547751") # Yahan "" ke andar default admin IDs dal sakte hain space se separate karke (e.g., "123456789 987654321")
 ADMINS = [int(i) for i in ADMINS_STR.split()] if ADMINS_STR else []
 
-LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1003903946843")) 
+LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1003474604893")) 
 PORT = int(os.environ.get("PORT", "8080"))
 CHANNELS = [int(ch) for ch in os.environ.get("CHANNELS", "0").split()] if os.environ.get("CHANNELS") else []
 
 # Yahan -1001234567890 ki jagah apna asli Channel ID daalein
-TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "0"))
+TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "-1003916242875"))
 
 # 👇 NAYA FEATURE: Streaming ke liye Bin Channel (Apne Database Channel ki ID daalein)
-BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", "0"))
+BIN_CHANNEL = int(os.environ.get("BIN_CHANNEL", "-1003754378434"))
 
 # 🌟 AUTO-POSTER SETTINGS 🌟
 # Channel jahan TMDB se movie posters auto-post honge
-updates_channel_env = os.environ.get("UPDATES_CHANNEL", "-1003911004326")
+updates_channel_env = os.environ.get("UPDATES_CHANNEL", "")
 UPDATES_CHANNEL = int(updates_channel_env) if updates_channel_env and id_pattern.search(updates_channel_env) else None
 
 # Agar Auto-poster dusre bot se chalwana hai, toh uska token yahan dalein. Main bot se chalwana ho toh khali chhod dein.
@@ -76,7 +76,7 @@ SHORTLINK_API_3 = os.environ.get("SHORTLINK_API_3", "")
 
 # --- FSUB CHANNELS ---
 # Slot 1 (Request FSub)
-auth_channel = os.environ.get('AUTH_CHANNEL', '') 
+auth_channel = os.environ.get('AUTH_CHANNEL', '-1002973707894') 
 AUTH_CHANNEL = int(auth_channel) if auth_channel and id_pattern.search(auth_channel) else None
 
 # Slot 2 (Request FSub)
@@ -84,11 +84,11 @@ auth_channel_2 = os.environ.get('AUTH_CHANNEL_2', '')
 AUTH_CHANNEL_2 = int(auth_channel_2) if auth_channel_2 and id_pattern.search(auth_channel_2) else None
 
 # Slot 3 (Normal FSub)
-auth_channel_3 = os.environ.get('AUTH_CHANNEL_3', '')
+auth_channel_3 = os.environ.get('AUTH_CHANNEL_3', '-1002240357174')
 AUTH_CHANNEL_3 = int(auth_channel_3) if auth_channel_3 and id_pattern.search(auth_channel_3) else None
 
 # Slot 4 (Post-Verify FSub)
-auth_channel_4 = os.environ.get('AUTH_CHANNEL_4', '')
+auth_channel_4 = os.environ.get('AUTH_CHANNEL_4', '-1003096749834')
 AUTH_CHANNEL_4 = int(auth_channel_4) if auth_channel_4 and id_pattern.search(auth_channel_4) else None
 AUTH_CHANNEL_4_TEXT = os.environ.get('AUTH_CHANNEL_4_TEXT', '✅ Join Final Channel')
 
@@ -98,6 +98,9 @@ MONGODB_TIMEOUT = 300 # 5 Minutes
 
 # --- SEARCH SETTINGS ---
 PM_SEARCH = os.environ.get("PM_SEARCH", "False").lower() in ["true", "yes", "1"]
+
+# 👇 NAYA VARIABLE: Group Search Control Ke Liye (Default True)
+GROUP_SEARCH = os.environ.get("GROUP_SEARCH", "True").lower() in ["true", "yes", "1"]
 
 # ==============================================================================
 # 💳 PAYMENT & CONTACT SETTINGS (NEW)

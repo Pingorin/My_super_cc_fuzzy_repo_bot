@@ -9,7 +9,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait, MessageNotModified
 from database.ia_filterdb import Media
 from database.users_chats_db import db
-from info import SITE_URL, PM_SEARCH
+from info import SITE_URL, PM_SEARCH, GROUP_SEARCH
 from cachetools import TTLCache 
 
 # ✅ Utils Imports 
@@ -83,6 +83,10 @@ async def auto_filter(client, message):
         if not PM_SEARCH and message.chat.type == enums.ChatType.PRIVATE:
             return
             
+        # 👇 NAYA FEATURE: GROUP SEARCH CHECK
+        if not GROUP_SEARCH and message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+            return
+              
         raw_query = message.text
         if message.forward_from or message.forward_from_chat or message.via_bot: return
         

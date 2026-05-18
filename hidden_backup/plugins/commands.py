@@ -93,15 +93,17 @@ async def auto_delete_batch(file_msgs_list, warning_msg):
 
 async def send_shortener_alert(client, chat_id, site_domain):
     try:
+        chat_id_int = int(str(chat_id))
+        chat_accessible = False
+        
         try:
-            chat_id_int = int(str(chat_id))
             chat = await client.get_chat(chat_id_int)
             group_name = chat.title
             group_id = chat.id
+            chat_accessible = True
         except:
             group_name = "Unknown Group"
-            group_id = chat_id
-            chat_id_int = int(chat_id)
+            group_id = chat_id_int
 
         msg = (
             f"⚠️ **Shortener Alert** ⚠️\n\n"
@@ -111,16 +113,27 @@ async def send_shortener_alert(client, chat_id, site_domain):
         )
         
         # 🔥 SMART ALERT ENGINE: Sirf Group ke Owner aur Admins ko msg jayega!
-        try:
-            async for member in client.get_chat_members(chat_id_int, filter=enums.ChatMembersFilter.ADMINISTRATORS):
-                if not member.user.is_bot:
-                    try: 
-                        await client.send_message(chat_id=member.user.id, text=msg)
-                    except: 
-                        pass
-        except Exception as e:
-            logger.error(f"Admin fetch error for shortener alert: {e}")
-            
+        if chat_accessible and chat_id_int < 0:
+            try:
+                async for member in client.get_chat_members(chat_id_int, filter=enums.ChatMembersFilter.ADMINISTRATORS):
+                    if not member.user.is_bot:
+                        try: 
+                            await client.send_message(chat_id=member.user.id, text=msg)
+                        except: 
+                            pass
+            except Exception as e:
+                # Ignore expected Pyrogram cache errors gracefully
+                if "CHANNEL_INVALID" not in str(e) and "PEER_ID_INVALID" not in str(e):
+                    logger.error(f"Admin fetch error for shortener alert: {e}")
+        else:
+            # Agar group accessible nahi hai (cache error ya kicked), toh Global Admins ko alert bhej do
+            from info import ADMINS
+            for admin in ADMINS:
+                try:
+                    await client.send_message(admin, msg)
+                except:
+                    pass
+                    
     except Exception as e: 
         pass
 

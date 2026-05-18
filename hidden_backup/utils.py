@@ -546,28 +546,38 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active
 
 # 🔄 SMART RETRY SYSTEM (Maximum 2 Attempts - Fast Mode)
 async def get_shortlink(site, api, link):
+    # API URL Create karna
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}
     
+    # 🔄 SMART RETRY SYSTEM (Maximum 2 Attempts - Fast Mode)
     for attempt in range(2):
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params, timeout=15) as response:
-                    if response.status == 200:
-                        try:
-                            data = await response.json(content_type=None)
-                        except:
-                            if attempt < 1: await asyncio.sleep(2) 
-                            continue 
-                            
-                        if data and "shortenedUrl" in data: 
+                    
+                    # Agar API plain text mein URL return kare
+                    try:
+                        data = await response.json(content_type=None)
+                    except:
+                        text_data = await response.text()
+                        if "http" in text_data: 
+                            return text_data.strip()
+                        if attempt < 1: await asyncio.sleep(2) 
+                        continue 
+                        
+                    # Har tarah ki API Dictionary ko detect karna (Advanced Checking)
+                    if data:
+                        if "shortenedUrl" in data: 
                             return data["shortenedUrl"]
-                        elif data and "status" in data and data["status"] == "success" and "shortenedUrl" in data: 
-                            return data["shortenedUrl"]
-                        else:
-                            return None 
-                    else:
-                        if attempt < 1: await asyncio.sleep(2)
+                        elif "shortened" in data:
+                            return data["shortened"]
+                        elif "short_url" in data:
+                            return data["short_url"]
+                        elif data.get("status") == "success" and "url" in data:
+                            return data["url"]
+
+                    if attempt < 1: await asyncio.sleep(2)
                         
         except asyncio.TimeoutError:
             if attempt < 1: await asyncio.sleep(2)

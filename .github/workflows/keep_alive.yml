@@ -8,13 +8,10 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Wake up Hugging Face Spaces (Ultimate Version)
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      - name: Wake up Hugging Face Spaces
         run: |
-          echo "Pinging Autofilter Bot 1..."
-          curl -i -L -H "Authorization: Bearer $HF_TOKEN" -H "User-Agent: Mozilla/5.0" https://huggingface.co/spaces/Sona55/My_fuzzy_c_bot
+          echo "Pinging Main Bot 1..."
+          curl -i -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}" https://sona55-my-fuzzy-c-bot.hf.space
           
-          echo "Pinging Autofilter Bot 2..."
-          # Niche wale URL me apne second bot ke space ka sahi naam daal lijiyega
-          curl -i -L -H "Authorization: Bearer $HF_TOKEN" -H "User-Agent: Mozilla/5.0" https://huggingface.co/spaces/Sona55/My_fuzzy_c_22_bot
+          echo "Pinging Main Bot 2..."
+          curl -i -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}" https://sona55-my-fuzzy-c-22-bot.hf.space

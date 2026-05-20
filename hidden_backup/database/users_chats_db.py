@@ -23,6 +23,9 @@ class UserChatDB:
         self.banned = self.db.banned 
         self.fsub_pending = self.db.fsub_pending
         self.warnings = self.db.warnings 
+        
+        # 👇 NAYI LINE ADD KI GAYI HAI (For Poster & Tutorial Settings)
+        self.global_settings = self.db.global_settings 
 
     async def add_user(self, id):
         user = await self.users.find_one({'id': int(id)})

@@ -30,8 +30,8 @@ async def set_tutorial_link(client, message):
     if not new_link.startswith("http"):
         return await message.reply("❌ Link `http://` ya `https://` se start hona chahiye.")
         
-    bot_settings_col = db.db["bot_settings"]
-    await bot_settings_col.update_one({"_id": "global_settings"}, {"$set": {"mu_tutorial": new_link}}, upsert=True)
+    # ✅ FIX: Ab ye UserChats DB ki global_settings collection me save hoga
+    await db.global_settings.update_one({"_id": "global_settings"}, {"$set": {"mu_tutorial": new_link}}, upsert=True)
     await message.reply(f"✅ **Tutorial link updated successfully!**\n\nNaya link: {new_link}")
 
 # ==============================================================================
@@ -61,9 +61,8 @@ async def mu_main_menu(client, query):
         f"**Footer Button:** {footer_txt}"
     )
 
-    # 🔥 FETCH TUTORIAL LINK FROM DB
-    bot_settings_col = db.db["bot_settings"]
-    global_data = await bot_settings_col.find_one({"_id": "global_settings"})
+    # 🔥 FIX: Fetch Tutorial Link from global_settings
+    global_data = await db.global_settings.find_one({"_id": "global_settings"})
     # Default link agar DB me set nahi hai
     tutorial_link = global_data.get("mu_tutorial", "https://t.me/how_to_download_watch_88") if global_data else "https://t.me/how_to_download_watch_88"
 

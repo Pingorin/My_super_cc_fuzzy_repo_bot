@@ -79,6 +79,11 @@ async def auto_filter(client, message):
         if message.chat.type == enums.ChatType.CHANNEL:
             return
 
+        # 🔥 FIX 1: ANTI-SPAM CONTROL FOR RAPID SEARCHES
+        user_id = message.from_user.id if message.from_user else message.chat.id
+        if is_spam(user_id):
+            return
+
         # ✅ PM SEARCH CHECK
         if not PM_SEARCH and message.chat.type == enums.ChatType.PRIVATE:
             return
@@ -144,8 +149,6 @@ async def auto_filter(client, message):
             try: await message.react(random.choice(REACTIONS))
             except Exception: pass 
 
-        # ✅ FIX: Agar user anonymous hai, toh group ka chat_id use laglenge
-        user_id = message.from_user.id if message.from_user else message.chat.id
         search_id = await Media.save_search_query(query, user_id, files)
         if not search_id: search_id = 0
 
@@ -179,6 +182,8 @@ async def auto_filter(client, message):
                 selected_data = random.choice(stickers_list)
                 fid = selected_data['fid'] if isinstance(selected_data, dict) else selected_data
                 sent_sticker = await message.reply_sticker(sticker=fid)
+                # 🔥 FIX 2: Pyrogram Random ID clash se bachne ke liye nano-delay
+                await asyncio.sleep(0.2)
             except Exception:
                 pass
 
@@ -672,8 +677,10 @@ async def handle_sort_menu(client, query):
     except MessageNotModified:
         pass
     except Exception as e:
-        logger.error(f"Sort Menu Error: {e}")
-        traceback.print_exc()
+        # Agar error MESSAGE_NOT_MODIFIED hai toh use ignore karega
+        if "MESSAGE_NOT_MODIFIED" not in str(e):
+            logger.error(f"Sort Menu Error: {e}")
+            traceback.print_exc()
 
 # ==============================================================================
 # 13. RESET & IGNORE & CARD NAV

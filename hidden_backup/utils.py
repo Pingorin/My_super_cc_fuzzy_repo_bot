@@ -544,46 +544,66 @@ def btn_parser(files, chat_id, search_id, offset=0, limit=10, query=None, active
     if pagination: buttons.append(pagination)
     return buttons
 
-# 🔄 SMART RETRY SYSTEM (Maximum 2 Attempts - Fast Mode)
+# 🔄 🔥 ADVANCED SHORTLINK RETRY SYSTEM (UNIVERSAL BYPASS & EXTRACTION)
 async def get_shortlink(site, api, link):
-    # API URL Create karna
+    # 1. URL Cleanup (Domain ke aage peeche ki galtiyon ko saaf karega)
+    site = site.replace("https://", "").replace("http://", "").rstrip("/")
     url = f'https://{site}/api'
     params = {'api': api, 'url': link}
     
-    # 🔄 SMART RETRY SYSTEM (Maximum 2 Attempts - Fast Mode)
     for attempt in range(2):
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params, timeout=15) as response:
+            # 2. 🔥 SSL Bypass & Timeout Optimization
+            connector = aiohttp.TCPConnector(ssl=False)
+            timeout = aiohttp.ClientTimeout(total=15)
+            
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                async with session.get(url, params=params) as response:
                     
-                    # Agar API plain text mein URL return kare
-                    try:
-                        data = await response.json(content_type=None)
-                    except:
-                        text_data = await response.text()
-                        if "http" in text_data: 
-                            return text_data.strip()
-                        if attempt < 1: await asyncio.sleep(2) 
-                        continue 
-                        
-                    # Har tarah ki API Dictionary ko detect karna (Advanced Checking)
-                    if data:
-                        if "shortenedUrl" in data: 
-                            return data["shortenedUrl"]
-                        elif "shortened" in data:
-                            return data["shortened"]
-                        elif "short_url" in data:
-                            return data["short_url"]
-                        elif data.get("status") == "success" and "url" in data:
-                            return data["url"]
+                    if response.status == 200:
+                        try:
+                            # content_type=None imp hai taaki weird headers bypass ho jayein
+                            data = await response.json(content_type=None)
+                        except Exception:
+                            # Fallback for APIs that return plain text instead of JSON
+                            text_data = await response.text()
+                            if "http" in text_data: 
+                                return text_data.strip()
+                            logger.error(f"Attempt {attempt+1} | {site}: JSON Parse Error (Got HTML instead of JSON)")
+                            if attempt < 1: await asyncio.sleep(2)
+                            continue 
+                            
+                        # 3. 🔥 Universal Data Extractor
+                        if isinstance(data, dict):
+                            # API Error Check (Agar API limit khatam ho jaye ya token galat ho)
+                            if data.get("status") == "error":
+                                logger.error(f"Shortener {site} API Error: {data.get('message', 'Unknown Error')}")
+                                return None
 
-                    if attempt < 1: await asyncio.sleep(2)
+                            # Sabhi possible JSON keys jo alag-alag shorteners use karte hain
+                            possible_keys = ["shortenedUrl", "shorturl", "short_url", "url", "short", "link", "shortened"]
+                            
+                            for key in possible_keys:
+                                if key in data and data[key]:
+                                    return data[key]
+                                    
+                        # Agar JSON aaya par format bilkul alag hai
+                        logger.warning(f"Format Mismatch for {site}. Data received: {data}")
+                        return None 
+                        
+                    else:
+                        logger.error(f"Attempt {attempt+1} | {site} is Down! HTTP Status: {response.status}")
+                        if attempt < 1: await asyncio.sleep(2)
                         
         except asyncio.TimeoutError:
-            if attempt < 1: await asyncio.sleep(2)
-        except Exception as e:
+            logger.error(f"Attempt {attempt+1} | {site} Connection Timeout (Website is too slow).")
             if attempt < 1: await asyncio.sleep(2)
             
+        except Exception as e:
+            logger.error(f"Attempt {attempt+1} | {site} Request Failed: {str(e)}")
+            if attempt < 1: await asyncio.sleep(2)
+            
+    # Agar dono attempts fail ho gaye
     return None
 
 async def _get_fsub_status(bot, user_id, channel_id):

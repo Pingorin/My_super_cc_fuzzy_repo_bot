@@ -260,8 +260,8 @@ class MediaDB:
         update_ops_search = {1: [], 2: [], 3: []}
         current_id = start_sequence
         
-        all_processing_items = [("new", m, msg, None) for m, msg in new_items] + [("update", m, msg, ex) for m, msg, ex in update_items]
-        
+        all_processing_items = [("new", media, message, None) for media, message in new_items] + [("update", media, message, ex) for media, message, ex in update_items]
+      
         for process_type, media, message, ex_info in all_processing_items:
             raw_fname = media.file_name or ""
             raw_cap = message.caption.html if message.caption else ""

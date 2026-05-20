@@ -84,8 +84,8 @@ async def add_poster_reactions(client, chat_id, message_id):
 # ==============================================================================
 
 async def post_trending_poster(client, custom_channel_id=None, group_chat_id=None):
-    bot_settings_col = db.db["bot_settings"]
-    posted_data = await bot_settings_col.find_one({"_id": "posted_movies"})
+    # ✅ FIX: Ab ye UserChats DB ki global_settings se access karega
+    posted_data = await db.global_settings.find_one({"_id": "posted_movies"})
     posted_ids = posted_data.get("ids", []) if posted_data else []
 
     media, is_mega_hit = await get_fresh_or_mega_trending(posted_ids)
@@ -345,11 +345,11 @@ async def start_auto_poster(client):
         return 
 
     print("🎬 [Auto-Poster] Poster Engine Activated on this Bot!")
-    bot_settings_col = db.db["bot_settings"]
 
     while True:
         try:
-            posted_data = await bot_settings_col.find_one({"_id": "posted_movies"})
+            # ✅ FIX: Fetching from UserChats DB
+            posted_data = await db.global_settings.find_one({"_id": "posted_movies"})
             posted_ids = posted_data.get("ids", []) if posted_data else []
 
             media, is_mega_hit = await get_fresh_or_mega_trending(posted_ids)
@@ -429,9 +429,11 @@ async def start_auto_poster(client):
 
                 if media_id not in posted_ids: posted_ids.append(media_id)
                 if len(posted_ids) > 50: posted_ids.pop(0)
-                await bot_settings_col.update_one({"_id": "posted_movies"}, {"$set": {"ids": posted_ids}}, upsert=True)
+                
+                # ✅ FIX: Updating UserChats DB
+                await db.global_settings.update_one({"_id": "posted_movies"}, {"$set": {"ids": posted_ids}}, upsert=True)
 
         except Exception as e:
             print(f"Poster Loop Error: {e}")
         
-        await asyncio.sleep(3600) 
+        await asyncio.sleep(3600)

@@ -1,7 +1,7 @@
 name: Keep Alive HF Space
 on:
   schedule:
-    - cron: "*/10 * * * *"  # Ye har 10 minute me jagayega
+    - cron: "*/5 * * * *"  # Bas '10' ki jagah '5' kar dein
   workflow_dispatch:
 
 jobs:

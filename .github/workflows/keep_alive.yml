@@ -12,9 +12,9 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          # The Corrected URL Format (Lowercase and Hyphens)
           echo "Pinging Autofilter Bot 1..."
-          curl -L -H "Authorization: Bearer $HF_TOKEN" -H "User-Agent: Mozilla/5.0" https://sona55-my-fuzzy-c-bot.hf.space/
+          curl -i -L -H "Authorization: Bearer $HF_TOKEN" -H "User-Agent: Mozilla/5.0" https://huggingface.co/spaces/Sona55/My_fuzzy_c_bot
           
           echo "Pinging Autofilter Bot 2..."
-          curl -L -H "Authorization: Bearer $HF_TOKEN" -H "User-Agent: Mozilla/5.0" https://sona55-my-fuzzy-c-22-bot.hf.space/
+          # Niche wale URL me apne second bot ke space ka sahi naam daal lijiyega
+          curl -i -L -H "Authorization: Bearer $HF_TOKEN" -H "User-Agent: Mozilla/5.0" https://huggingface.co/spaces/Sona55/My_fuzzy_c_22_bot

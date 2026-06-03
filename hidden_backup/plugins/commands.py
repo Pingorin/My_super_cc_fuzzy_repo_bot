@@ -66,7 +66,8 @@ async def auto_delete_single(file_msg, warning_msg, command_data):
     except Exception:
         pass
     try:
-        btn = [[InlineKeyboardButton("✅ ɢᴇᴛ ғɪʟᴇ ᴀɢᴀɪɴ ✅", url=f"https://t.me/{temp.U_NAME}?start={command_data}")]]
+        bot_to_use = info.FILE_STORE_BOT if info.FILE_STORE_BOT else temp.U_NAME
+        btn = [[InlineKeyboardButton("✅ ɢᴇᴛ ғɪʟᴇ ᴀɢᴀɪɴ ✅", url=f"https://t.me/{bot_to_use}?start={command_data}")]]
         await warning_msg.edit_text(
             "<b>✅ ʏᴏᴜʀ ᴍᴇssᴀɢᴇ ɪs sᴜᴄssғᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ ɪғ ʏᴏᴜ ᴡᴀɴᴛ ᴀɢᴀɪɴ ᴛʜᴇɴ ᴄʟɪᴄᴋ ᴏɴ ʙᴇʟᴏᴡ ʙᴜᴛᴛᴏɴ</b>",
             reply_markup=InlineKeyboardMarkup(btn)
@@ -297,9 +298,15 @@ async def check_verification(client, user_id, chat_id, link_id, message_obj):
 async def generate_single_link(client, chat_id, user_id, link_id, level, slot_data):
     site = slot_data['site']
     api = slot_data['api']
-    verify_url = f"https://t.me/{temp.U_NAME}?start=verify_{level}_{user_id}_{chat_id}_{link_id}"
+    bot_to_use = info.FILE_STORE_BOT if info.FILE_STORE_BOT else temp.U_NAME
+    verify_url = f"https://t.me/{bot_to_use}?start=verify_{level}_{user_id}_{chat_id}_{link_id}"
     short_url = await get_shortlink(site, api, verify_url)
+    
     if not short_url:
+        # 🔥 DEBUG LOG ADDED HERE
+        print(f"DEBUG ERROR: Shortlink generation failed in generate_single_link!")
+        print(f"DEBUG: Site = {site} | API Key = {api}")
+        
         await send_shortener_alert(client, chat_id, site)
         return None
     
@@ -311,7 +318,8 @@ async def generate_single_link(client, chat_id, user_id, link_id, level, slot_da
 async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, level, slot_data):
     site = slot_data['site']
     api = slot_data['api']
-    verify_url = f"https://t.me/{temp.U_NAME}?start=verify_{level}_{user_id}_{chat_id}_{link_id}"
+    bot_to_use = info.FILE_STORE_BOT if info.FILE_STORE_BOT else temp.U_NAME
+    verify_url = f"https://t.me/{bot_to_use}?start=verify_{level}_{user_id}_{chat_id}_{link_id}"
     wait_msg = await message_obj.reply_text(f"Generating Verification Link {level}... ⏳")
     short_url = await get_shortlink(site, api, verify_url)
     await wait_msg.delete()
@@ -334,8 +342,13 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
         return "SENT"
     else:
+        # 🔥 DEBUG LOG ADDED HERE
+        print(f"DEBUG ERROR: attempt_send_link failed for {site}")
+        print(f"DEBUG ERROR: Used API Key: {api}")
+        print(f"DEBUG ERROR: URL to shorten: {verify_url}")
+        
         await send_shortener_alert(client, chat_id, site)
-        await message_obj.reply_text(f"⚠️ **Alert:** Shortener {site} is down. Skipping Level {level}... ⏩")
+        await message_obj.reply_text(f"⚠️ **Alert:** Shortener {site} failed. Check your API key or logs.")
         return "SKIP"
 
 # ==============================================================================
@@ -402,7 +415,8 @@ async def check_fsub(client, user_id, message_obj):
 
     if final_markup:
         original_param = message_obj.command[1] if len(message_obj.command) > 1 else "start"
-        final_markup.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{temp.U_NAME}?start={original_param}")])
+        bot_to_use = info.FILE_STORE_BOT if info.FILE_STORE_BOT else temp.U_NAME
+        final_markup.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{bot_to_use}?start={original_param}")])
         
         await message_obj.reply_text(
             f"⚠️ **Access Denied!**\n\n"
@@ -470,7 +484,7 @@ async def start_handler(client, message):
             
         # --- FREE PREMIUM DEEP LINK LOGIC ---
         if len(message.command) > 1 and message.command[1] == "free_premium_info":
-            bot_username = temp.U_NAME
+            bot_username = info.FILE_STORE_BOT if info.FILE_STORE_BOT else temp.U_NAME
             ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
             
             share_text = "Join this awesome bot for movies and series!"
@@ -562,12 +576,13 @@ async def start_handler(client, message):
                 pass
 
             if await check_verification(client, message.from_user.id, verify_chatid, raw_link_id, message):
+                bot_to_use = info.FILE_STORE_BOT if info.FILE_STORE_BOT else temp.U_NAME
                 if str(raw_link_id).startswith("SA-"):
                     real_search_id = raw_link_id.replace("SA-", "")
-                    btn = [[InlineKeyboardButton("📂 Send All Files Now", url=f"https://t.me/{temp.U_NAME}?start=sendall_{real_search_id}_{verify_chatid}")]]
+                    btn = [[InlineKeyboardButton("📂 Send All Files Now", url=f"https://t.me/{bot_to_use}?start=sendall_{real_search_id}_{verify_chatid}")]]
                     await message.reply(f"✅ **Verification Successful!**\n\nClick below to get all your files.", reply_markup=InlineKeyboardMarkup(btn))
                 else:
-                    btn = [[InlineKeyboardButton("📂 Get Your File Now", url=f"https://t.me/{temp.U_NAME}?start=get_{raw_link_id}_{verify_chatid}")]]
+                    btn = [[InlineKeyboardButton("📂 Get Your File Now", url=f"https://t.me/{bot_to_use}?start=get_{raw_link_id}_{verify_chatid}")]]
                     await message.reply(f"✅ **Verification Successful!**\n\nAb niche button par click karke file lein.", reply_markup=InlineKeyboardMarkup(btn))
             return
         except Exception as e: return await message.reply(f"❌ Error: {e}")
@@ -636,7 +651,8 @@ async def start_handler(client, message):
                 if len(post_verify_buttons) == 2: wrapper.append(post_verify_buttons)
                 else: wrapper.append([post_verify_buttons[0]])
                 
-                wrapper.append([InlineKeyboardButton("✅ I Have Joined - Send Files", url=f"https://t.me/{temp.U_NAME}?start={message.command[1]}")])
+                bot_to_use = info.FILE_STORE_BOT if info.FILE_STORE_BOT else temp.U_NAME
+                wrapper.append([InlineKeyboardButton("✅ I Have Joined - Send Files", url=f"https://t.me/{bot_to_use}?start={message.command[1]}")])
                 
                 await message.reply_text(
                     text="🛑 **Almost There!**\n\nPlease join the Final Channels below to get your files.",
@@ -668,12 +684,14 @@ async def start_handler(client, message):
                     file_details = await Media.get_file_details(link_id)
                     if not file_details: continue
 
-                    caption = file['caption'] or file['file_name']
-                    caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", "", str(caption), flags=re.IGNORECASE)
-                    caption = re.sub(r"https?://[^\s]+", "", caption, flags=re.IGNORECASE)
-                    caption = re.sub(r"\s+", " ", caption).strip()
+                    # 🔥 FIX: Strictly Use File Name Only
+                    file_name = file.get('file_name', 'Unknown File')
+                    raw_caption = file.get('caption', '')
                     
-                    if not caption: caption = f"{file['file_name']}"
+                    if raw_caption and "[Tags:" in raw_caption:
+                        caption = raw_caption
+                    else:
+                        caption = file_name
 
                     if cap_url: final_caption = f"<b><a href='{cap_url}'>{caption}</a></b>"
                     else: final_caption = f"<b>{caption}</b>"
@@ -703,9 +721,10 @@ async def start_handler(client, message):
                         ])
                     
                     # ADD 2 BUTTONS HERE ALSO FOR BATCH
+                    bot_to_use = info.FILE_STORE_BOT if info.FILE_STORE_BOT else temp.U_NAME
                     btn_rows.append([
-                        InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-                        InlineKeyboardButton("💸 Buy Premium", url=f"https://t.me/{temp.U_NAME}?start=buy_premium_info")
+                        InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{bot_to_use}?start=free_premium_info"),
+                        InlineKeyboardButton("💸 Buy Premium", url=f"https://t.me/{bot_to_use}?start=buy_premium_info")
                     ])
 
                     reply_markup = InlineKeyboardMarkup(btn_rows) if btn_rows else None
@@ -862,7 +881,8 @@ async def start_handler(client, message):
                 if len(post_verify_buttons) == 2: wrapper.append(post_verify_buttons)
                 else: wrapper.append([post_verify_buttons[0]])
                 
-                wrapper.append([InlineKeyboardButton("✅ I Have Joined - Get File", url=f"https://t.me/{temp.U_NAME}?start={message.command[1]}")])
+                bot_to_use = info.FILE_STORE_BOT if info.FILE_STORE_BOT else temp.U_NAME
+                wrapper.append([InlineKeyboardButton("✅ I Have Joined - Get File", url=f"https://t.me/{bot_to_use}?start={message.command[1]}")])
                 
                 await message.reply_text(
                     text="🛑 **Almost There!**\n\nPlease join the Final Channels below to get your file.",
@@ -876,21 +896,13 @@ async def start_handler(client, message):
             if not file_data: return await message.reply("❌ **File Not Found.**")
             
             file_name = search_data.get('file_name', 'Unknown File')
-            raw_caption = search_data.get('caption')
+            raw_caption = search_data.get('caption', '')
 
-            if not raw_caption:
-                caption = f"{file_name}"
+            # 🔥 FIX: Strictly Use File Name Only
+            if raw_caption and "[Tags:" in raw_caption:
+                caption = raw_caption
             else:
-                caption = str(raw_caption)
-                caption = re.sub(r"(https?://)?(t|telegram)[\.\s]?(me|dog)/[^\s]+", caption, flags=re.IGNORECASE)
-                caption = re.sub(r"https?://[^\s]+", "", caption, flags=re.IGNORECASE)
-                remove_patterns = [r"Join\s?(Now|Channel|Us|Here)", r"Aa\s?Jao", r"🤞", r"➜", r"\)⁠➜", r"👉", r"\[@\w+\]", r"@\w+"]
-                for pattern in remove_patterns:
-                    caption = re.sub(pattern, "", caption, flags=re.IGNORECASE)
-                caption = re.sub(r"\s+", " ", caption).strip()
-                
-                if not caption:
-                    caption = f"{file_name}"
+                caption = file_name
 
             if not group_settings:
                 group_settings = await db.get_group_settings(src_chat_id)
@@ -916,9 +928,10 @@ async def start_handler(client, message):
                 btn_rows.append([InlineKeyboardButton("Back to Group 🔙", url=grp_link)])
 
             # 🔥 SMART 2-BUTTON MENU FOR FILE CAPTIONS
+            bot_to_use = info.FILE_STORE_BOT if info.FILE_STORE_BOT else temp.U_NAME
             btn_rows.append([
-                InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{temp.U_NAME}?start=free_premium_info"),
-                InlineKeyboardButton("💸 Buy Premium", url=f"https://t.me/{temp.U_NAME}?start=buy_premium_info")
+                InlineKeyboardButton("💎 Free Premium", url=f"https://t.me/{bot_to_use}?start=free_premium_info"),
+                InlineKeyboardButton("💸 Buy Premium", url=f"https://t.me/{bot_to_use}?start=buy_premium_info")
             ])
 
             # 1️⃣ BIN CHANNEL STREAMING LINK (With Fallback)

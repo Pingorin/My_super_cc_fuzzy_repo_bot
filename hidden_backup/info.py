@@ -21,7 +21,7 @@ DATABASE_URI = os.environ.get("DATABASE_URI", "mongodb+srv://Angel5:Angel5@clust
 # 🔥 NEW: MULTI-DATABASE ARCHITECTURE SETTINGS 🔥
 # Jab DB 1 full ho jaye, toh host (Render/Heroku) ke variables me inki link daal dena
 DATABASE_URI_2 = os.environ.get("DATABASE_URI_2", "mongodb+srv://Fairy6:Fairy6@cluster0.wz1botc.mongodb.net/?retryWrites=true&w=majority&minPoolSize=1&maxPoolSize=20")
-DATABASE_URI_3 = os.environ.get("DATABASE_URI_3", "")
+DATABASE_URI_3 = os.environ.get("DATABASE_URI_3", "mongodb+srv://Rupensel7:Rupensel7@cluster0.m8llntj.mongodb.net/?retryWrites=true&w=majority&minPoolSize=1&maxPoolSize=20")
 INDEX_DB = int(os.environ.get("INDEX_DB", "3")) # Default DB 1 (Changeable via /setindex command)
 
 DATABASE_NAME = os.environ.get("DATABASE_NAME", "Cluster0")

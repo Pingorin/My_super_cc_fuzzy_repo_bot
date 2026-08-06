@@ -250,13 +250,21 @@ async def auto_filter(client, message):
 
             sent_msg = await message.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
 
-        if sent_msg and auto_del_time > 0:
+        # 🔥 UPDATED INDEPENDENT AUTO-DELETE LOGIC 🔥
+        if sent_msg:
+            # 1. User message hamesha turant delete hoga (agar setting ON hai)
             if user_del: 
-                try: await message.delete()
-                except Exception: pass
-            asyncio.create_task(auto_delete_task(sent_msg, message, auto_del_time, del_thanks, query))
+                try: 
+                    await message.delete()
+                except Exception as e: 
+                    print(f"❌ Msg Delete Error in Group {message.chat.id}: {e}")
+            
+            # 2. Bot message timer ke baad delete hoga (agar timer > 0 hai)
+            if auto_del_time > 0:
+                asyncio.create_task(auto_delete_task(sent_msg, message, auto_del_time, del_thanks, query))
 
-            if sent_sticker:
+            # 3. Sticker delete logic
+            if sent_sticker and auto_del_time > 0:
                 async def del_stick():
                     await asyncio.sleep(auto_del_time)
                     try: await sent_sticker.delete()

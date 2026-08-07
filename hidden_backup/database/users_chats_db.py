@@ -2,9 +2,10 @@ import motor.motor_asyncio
 import time
 import datetime
 from info import USER_DB_URI, DATABASE_NAME
+from cachetools import TTLCache # 🔥 RAM Cache Fix
 
-# ✅ Simple Cache Dictionary for RAM Caching
-SETTINGS_CACHE = {}
+# ✅ 24 Hours (86400 seconds) RAM Cache
+SETTINGS_CACHE = TTLCache(maxsize=10000, ttl=86400)
 
 class UserChatDB:
     def __init__(self, uri, database_name):
@@ -24,7 +25,7 @@ class UserChatDB:
         self.fsub_pending = self.db.fsub_pending
         self.warnings = self.db.warnings 
         
-        # 👇 NAYI LINE ADD KI GAYI HAI (For Poster & Tutorial Settings)
+        # 👇 For Poster & Tutorial Settings
         self.global_settings = self.db.global_settings 
 
     async def add_user(self, id):
@@ -175,7 +176,6 @@ class UserChatDB:
             'time_together_3': 86400,      
             'time_gap1': 300,
             'time_gap2': 300,
-            # 🔥 NAYA: MOVIE UPDATE SETTINGS DEFAULTS 🔥
             'movie_update': {
                 'is_active': True,
                 'slots': {'1': None, '2': None, '3': None},
@@ -211,12 +211,15 @@ class UserChatDB:
     async def update_group_settings(self, id, settings):
         chat_id = int(id)
         
+        # 🔥 FIX 1: Prevent MongoDB crash if full document is passed
+        if '_id' in settings:
+            del settings['_id']
+            
         await self.groups.update_one({'id': chat_id}, {'$set': settings})
         
+        # 🔥 FIX 2: Hamesha cache delete karein taaki fresh data turant load ho
         if chat_id in SETTINGS_CACHE:
-            SETTINGS_CACHE[chat_id].update(settings)
-        else:
-            SETTINGS_CACHE[chat_id] = await self.groups.find_one({'id': chat_id})
+            del SETTINGS_CACHE[chat_id]
 
     # --- 📊 DAILY STATS HELPERS ---
 
@@ -546,7 +549,6 @@ class UserChatDB:
             'referral_enabled': True,       
             'referral_target': 5,           
             'referral_reward_time': 2592000,
-            # 🔥 NAYA: MOVIE UPDATE DEFAULTS 🔥
             'movie_update': {
                 'is_active': True,
                 'slots': {'1': None, '2': None, '3': None},

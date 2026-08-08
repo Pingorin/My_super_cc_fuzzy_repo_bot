@@ -10,16 +10,33 @@ from info import ADMINS
 
 # --- HELPER: CHECK SHORTENER ---
 async def check_shortener_link(domain, api):
+    # 1. Domain clean up (Agar galti se https:// lag gaya ho)
+    domain = domain.replace("https://", "").replace("http://", "").rstrip("/")
     test_url = "https://google.com"
     api_url = f"https://{domain}/api?api={api}&url={test_url}"
+    
     try:
-        async with aiohttp.ClientSession() as session:
+        # 2. SSL Bypass for test connection
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.get(api_url, timeout=10) as response:
                 if response.status == 200:
-                    data = await response.json()
-                    if data.get("status") == "success" or data.get("shortenedUrl"):
-                        return True
-    except: pass
+                    try:
+                        data = await response.json(content_type=None)
+                    except:
+                        return False
+                    
+                    # 3. Universal Check for testing
+                    if isinstance(data, dict):
+                        if data.get("status") == "error": 
+                            return False
+                            
+                        # Agar kisi bhi format me link wapas aayi, toh Test Passed!
+                        for key in ["shortenedUrl", "shorturl", "short_url", "url", "short", "link"]:
+                            if key in data and data[key]:
+                                return True
+    except: 
+        pass
     return False
 
 # --- HELPER: TIME FORMATTER ---

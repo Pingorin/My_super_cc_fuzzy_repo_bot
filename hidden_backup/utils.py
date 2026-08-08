@@ -585,7 +585,9 @@ async def get_shortlink(site, api, link):
                             
                             for key in possible_keys:
                                 if key in data and data[key]:
-                                    return data[key]
+                                    # 🔥 Slashes fix for Telegram Button Invalid URL Error
+                                    clean_url = str(data[key]).replace('\\/', '/')
+                                    return clean_url
                                     
                         # Agar JSON aaya par format bilkul alag hai
                         logger.warning(f"Format Mismatch for {site}. Data received: {data}")

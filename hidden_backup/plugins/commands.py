@@ -95,48 +95,41 @@ async def auto_delete_batch(file_msgs_list, warning_msg):
 async def send_shortener_alert(client, chat_id, site_domain):
     try:
         chat_id_int = int(str(chat_id))
-        chat_accessible = False
-        
-        try:
-            chat = await client.get_chat(chat_id_int)
-            group_name = chat.title
-            group_id = chat.id
-            chat_accessible = True
-        except:
-            group_name = "Unknown Group"
-            group_id = chat_id_int
+
+        # 1. Database se group ka exact naam aur admins ki list nikalna
+        group_data = await db.get_group_settings(chat_id_int)
+        group_name = group_data.get('title', 'Unknown Group') if group_data else 'Unknown Group'
+        group_admins = group_data.get('admins', []) if group_data else []
 
         msg = (
             f"⚠️ **Shortener Alert** ⚠️\n\n"
-            f"Group: **{group_name}** (`{group_id}`).\n"
+            f"Group: **{group_name}** (`{chat_id_int}`).\n"
             f"Shortener: **{site_domain}** failed or is down.\n"
             f"**Action:** Please Check your API Key or Website Status."
         )
-        
-        # 🔥 SMART ALERT ENGINE: Sirf Group ke Owner aur Admins ko msg jayega!
-        if chat_accessible and chat_id_int < 0:
-            try:
-                async for member in client.get_chat_members(chat_id_int, filter=enums.ChatMembersFilter.ADMINISTRATORS):
-                    if not member.user.is_bot:
-                        try: 
-                            await client.send_message(chat_id=member.user.id, text=msg)
-                        except: 
-                            pass
-            except Exception as e:
-                # Ignore expected Pyrogram cache errors gracefully
-                if "CHANNEL_INVALID" not in str(e) and "PEER_ID_INVALID" not in str(e):
-                    logger.error(f"Admin fetch error for shortener alert: {e}")
-        else:
-            # Agar group accessible nahi hai (cache error ya kicked), toh Global Admins ko alert bhej do
-            from info import ADMINS
-            for admin in ADMINS:
+
+        admin_alert_sent = False
+
+        # 2. Group Admins ko alert bhejne ki koshish
+        if group_admins:
+            for admin_id in group_admins:
                 try:
-                    await client.send_message(admin, msg)
-                except:
+                    await client.send_message(chat_id=int(admin_id), text=msg)
+                    admin_alert_sent = True
+                except Exception:
                     pass
-                    
-    except Exception as e: 
-        pass
+
+        # 3. Agar kisi bhi Group Admin ko msg nahi gaya
+        if not admin_alert_sent:
+            from info import ADMINS
+            for owner_id in ADMINS:
+                try:
+                    await client.send_message(chat_id=int(owner_id), text=msg)
+                except Exception:
+                    pass
+
+    except Exception as e:
+        logger.error(f"Shortener Alert Error: {e}")
 
 async def get_active_shorteners(chat_id):
     group_settings = await db.get_group_settings(chat_id)
@@ -300,15 +293,23 @@ async def generate_single_link(client, chat_id, user_id, link_id, level, slot_da
     api = slot_data['api']
     bot_to_use = info.FILE_STORE_BOT if info.FILE_STORE_BOT else temp.U_NAME
     verify_url = f"https://t.me/{bot_to_use}?start=verify_{level}_{user_id}_{chat_id}_{link_id}"
+    
+    # ❌ Removed Double Encoding. aiohttp automatically encodes it in utils.py
     short_url = await get_shortlink(site, api, verify_url)
     
+    # ✅ Strict URL Validation to prevent Pyrogram crash
     if not short_url:
-        # 🔥 DEBUG LOG ADDED HERE
-        print(f"DEBUG ERROR: Shortlink generation failed in generate_single_link!")
-        print(f"DEBUG: Site = {site} | API Key = {api}")
-        
         await send_shortener_alert(client, chat_id, site)
         return None
+        
+    short_url = str(short_url).strip()
+    
+    if len(short_url) < 8 or " " in short_url:
+        await send_shortener_alert(client, chat_id, site)
+        return None
+        
+    if not short_url.startswith(("http://", "https://")):
+        short_url = "https://" + short_url
     
     try: await db.update_daily_stats(chat_id, 'gen', count=1, domain=site)
     except: pass
@@ -321,10 +322,24 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
     bot_to_use = info.FILE_STORE_BOT if info.FILE_STORE_BOT else temp.U_NAME
     verify_url = f"https://t.me/{bot_to_use}?start=verify_{level}_{user_id}_{chat_id}_{link_id}"
     wait_msg = await message_obj.reply_text(f"Generating Verification Link {level}... ⏳")
+    
+    # ❌ Removed Double Encoding
     short_url = await get_shortlink(site, api, verify_url)
     await wait_msg.delete()
     
-    if short_url:
+    # ✅ Strict URL Validation before creating Button
+    is_valid_url = True
+    if not short_url:
+        is_valid_url = False
+    else:
+        short_url = str(short_url).strip()
+        if len(short_url) < 8 or " " in short_url:
+            is_valid_url = False
+        else:
+            if not short_url.startswith(("http://", "https://")):
+                short_url = "https://" + short_url
+                
+    if is_valid_url:
         try: await db.update_daily_stats(chat_id, 'gen', count=1, domain=site)
         except: pass
 
@@ -342,13 +357,8 @@ async def attempt_send_link(client, user_id, chat_id, link_id, message_obj, leve
         await message_obj.reply_text(text, reply_markup=InlineKeyboardMarkup(btn))
         return "SENT"
     else:
-        # 🔥 DEBUG LOG ADDED HERE
-        print(f"DEBUG ERROR: attempt_send_link failed for {site}")
-        print(f"DEBUG ERROR: Used API Key: {api}")
-        print(f"DEBUG ERROR: URL to shorten: {verify_url}")
-        
         await send_shortener_alert(client, chat_id, site)
-        await message_obj.reply_text(f"⚠️ **Alert:** Shortener {site} failed. Check your API key or logs.")
+        await message_obj.reply_text(f"⚠️ **Alert:** Shortener {site} failed or returned invalid link. Check API.")
         return "SKIP"
 
 # ==============================================================================

@@ -11,7 +11,7 @@ jobs:
       - name: Wake up Hugging Face Spaces
         run: |
           echo "Pinging Main Bot 1..."
-          curl -i -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}" https://Sona55/My-sup-c-22_Bot.hf.space
+          curl -i -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}" https://Sona55-My-sup-c-Bot.hf.space
           
           echo "Pinging Main Bot 2..."
           curl -i -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}" https://sona55-my-fuzzy-c-22-bot.hf.space
